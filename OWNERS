@@ -5,6 +5,7 @@ approvers:
   - noyitz
   - yossiovadia
   - szedan-rh
+  - jland-redhat
 reviewers:
   - nirrozenbaum
   - nerdalert
@@ -12,3 +13,4 @@ reviewers:
   - noyitz
   - yossiovadia
   - szedan-rh
+  - jland-redhat
