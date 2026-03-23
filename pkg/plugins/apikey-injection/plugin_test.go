@@ -197,7 +197,7 @@ func TestDefaultInjectors(t *testing.T) {
 	assert.Equal(t, "Authorization", injectors[provider.Vertex].headerName)
 	assert.Equal(t, "Bearer ", injectors[provider.Vertex].headerValuePrefix)
 
-	assert.Len(t, injectors, 4)
+	assert.Len(t, injectors, 5)
 }
 
 func TestAPIKeyInjector(t *testing.T) {

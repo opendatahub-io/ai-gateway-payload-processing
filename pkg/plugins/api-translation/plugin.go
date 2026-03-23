@@ -26,6 +26,7 @@ import (
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/anthropic"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/awsbedrock"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/azureopenai"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/vertex"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
@@ -53,9 +54,10 @@ func NewAPITranslationPlugin() *APITranslationPlugin {
 			Name: APITranslationPluginType,
 		},
 		providers: map[string]translator.Translator{
-			provider.Anthropic:   anthropic.NewAnthropicTranslator(),
-			provider.AzureOpenAI: azureopenai.NewAzureOpenAITranslator(),
-			provider.Vertex:      vertex.NewVertexTranslator(),
+			provider.Anthropic:        anthropic.NewAnthropicTranslator(),
+			provider.AzureOpenAI:      azureopenai.NewAzureOpenAITranslator(),
+			provider.Vertex:           vertex.NewVertexTranslator(),
+			provider.AWSBedrockOpenAI: awsbedrock.NewBedrockTranslator(),
 		},
 	}
 }
