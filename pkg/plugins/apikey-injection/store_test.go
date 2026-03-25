@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// testSecret builds a corev1.Secret for test seeding.
+// testSecret builds a labeled corev1.Secret for use in reconciler and store tests.
 func testSecret(namespace, name, apiKey string) *corev1.Secret {
 	if namespace == "" {
 		namespace = "default"
@@ -36,6 +36,7 @@ func testSecret(namespace, name, apiKey string) *corev1.Secret {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
+			Labels:    map[string]string{managedLabel: "true"},
 		},
 		Data: map[string][]byte{
 			secretDataKey: []byte(apiKey),

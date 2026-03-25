@@ -70,6 +70,7 @@ func TestReconcile(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "no-data",
 					Namespace: "default",
+					Labels:    map[string]string{managedLabel: "true"},
 				},
 				Data: map[string][]byte{},
 			},
@@ -85,6 +86,7 @@ func TestReconcile(t *testing.T) {
 					Namespace:         "default",
 					DeletionTimestamp: &metav1.Time{Time: time.Now()},
 					Finalizers:        []string{"test-finalizer"},
+					Labels:            map[string]string{managedLabel: "true"},
 				},
 				Data: map[string][]byte{
 					secretDataKey: []byte("sk-key"),
@@ -92,6 +94,21 @@ func TestReconcile(t *testing.T) {
 			},
 			preSeed:   []*corev1.Secret{testSecret("default", "deleting", "sk-key")},
 			wantKey:   "default/deleting",
+			wantFound: false,
+		},
+		{
+			name: "Secret with managed label removed — removes from store",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unlabeled",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					secretDataKey: []byte("sk-key"),
+				},
+			},
+			preSeed:   []*corev1.Secret{testSecret("default", "unlabeled", "sk-key")},
+			wantKey:   "default/unlabeled",
 			wantFound: false,
 		},
 	}
