@@ -26,8 +26,9 @@ import (
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/anthropic"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/awsbedrock"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/azureopenai"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/azure"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/bedrock"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/openai"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/vertex"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
@@ -54,10 +55,11 @@ func NewAPITranslationPlugin() *APITranslationPlugin {
 			Name: APITranslationPluginType,
 		},
 		providers: map[string]translator.Translator{
-			provider.Anthropic:        anthropic.NewAnthropicTranslator(),
-			provider.AzureOpenAI:      azureopenai.NewAzureOpenAITranslator(),
-			provider.Vertex:           vertex.NewVertexTranslator(),
-			provider.AWSBedrockOpenAI: awsbedrock.NewBedrockTranslator(),
+			provider.OpenAI:        openai.NewOpenAITranslator(),
+			provider.Anthropic:     anthropic.NewAnthropicTranslator(),
+			provider.AzureOpenAI:   azure.NewAzureOpenAITranslator(),
+			provider.Vertex:        vertex.NewVertexTranslator(),
+			provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(),
 		},
 	}
 }
@@ -88,7 +90,7 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *f
 	}
 
 	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
-	if err != nil || providerName == "" || providerName == "openai" {                       // empty provider means no translation needed
+	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
 		return nil
 	}
 

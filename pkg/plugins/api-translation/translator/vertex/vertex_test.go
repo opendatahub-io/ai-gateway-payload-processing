@@ -1489,9 +1489,9 @@ func TestTranslateResponse_UnknownFieldsIgnored(t *testing.T) {
 	body := map[string]any{
 		"candidates": []any{
 			map[string]any{
-				"content":      map[string]any{"parts": []any{map[string]any{"text": "hi"}}, "role": "model"},
-				"finishReason": "STOP",
-				"safetyRatings": []any{map[string]any{"category": "HARM_CATEGORY_HARASSMENT", "probability": "NEGLIGIBLE"}},
+				"content":          map[string]any{"parts": []any{map[string]any{"text": "hi"}}, "role": "model"},
+				"finishReason":     "STOP",
+				"safetyRatings":    []any{map[string]any{"category": "HARM_CATEGORY_HARASSMENT", "probability": "NEGLIGIBLE"}},
 				"citationMetadata": map[string]any{},
 			},
 		},

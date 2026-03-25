@@ -34,6 +34,7 @@ const (
 // compile-time interface check
 var _ translator.Translator = &AnthropicTranslator{}
 
+// NewAnthropicTranslator initializes a new AnthropicTranslator and returns its pointer.
 func NewAnthropicTranslator() *AnthropicTranslator {
 	return &AnthropicTranslator{}
 }

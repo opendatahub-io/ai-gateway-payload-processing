@@ -518,7 +518,7 @@ func translateToolChoice(body map[string]any) map[string]any {
 			if name, ok := fn["name"].(string); ok && name != "" {
 				return map[string]any{
 					"functionCallingConfig": map[string]any{
-						"mode":                  "ANY",
+						"mode":                 "ANY",
 						"allowedFunctionNames": []string{name},
 					},
 				}

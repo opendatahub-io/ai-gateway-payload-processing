@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package azureopenai
+package azure
 
 import (
 	"fmt"
@@ -37,6 +37,7 @@ const (
 // compile-time interface check
 var _ translator.Translator = &AzureOpenAITranslator{}
 
+// NewAzureOpenAITranslator initializes a new AzureOpenAITranslator and returns its pointer.
 func NewAzureOpenAITranslator() *AzureOpenAITranslator {
 	return &AzureOpenAITranslator{
 		apiVersion:          defaultAPIVersion,

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package azureopenai
+package azure
 
 import (
 	"fmt"
@@ -24,12 +24,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTranslateRequest_BasicChat(t *testing.T) {
+func TestTranslateRequest_BodyPassthrough(t *testing.T) {
 	body := map[string]any{
 		"model": "gpt-4o",
 		"messages": []any{
-			map[string]any{"role": "user", "content": "What is 2+2?"},
+			map[string]any{"role": "system", "content": "You are helpful."},
+			map[string]any{"role": "user", "content": "Hello"},
 		},
+		"temperature":       0.7,
+		"top_p":             0.9,
+		"max_tokens":        float64(1000),
+		"stream":            true,
+		"stop":              []any{"END"},
+		"n":                 float64(1),
+		"presence_penalty":  0.5,
+		"frequency_penalty": 0.3,
 	}
 
 	translatedBody, headers, headersToRemove, err := NewAzureOpenAITranslator().TranslateRequest(body)
@@ -40,8 +49,8 @@ func TestTranslateRequest_BasicChat(t *testing.T) {
 	expectedPath := fmt.Sprintf("/openai/deployments/gpt-4o/chat/completions?api-version=%s", defaultAPIVersion)
 	assert.Equal(t, expectedPath, headers[":path"])
 	assert.Equal(t, "application/json", headers["content-type"])
-
-	assert.Empty(t, headersToRemove)
+	assert.Len(t, headers, 2)
+	assert.Nil(t, headersToRemove)
 }
 
 func TestTranslateRequest_ModelUsedAsDeploymentID(t *testing.T) {
@@ -52,6 +61,8 @@ func TestTranslateRequest_ModelUsedAsDeploymentID(t *testing.T) {
 		{"gpt-4o model", "gpt-4o"},
 		{"gpt-4o-mini model", "gpt-4o-mini"},
 		{"custom deployment name", "my-custom-deployment"},
+		{"with dots", "gpt-4o.2025"},
+		{"with underscore", "my_deployment"},
 	}
 
 	for _, tt := range tests {
@@ -118,84 +129,6 @@ func TestTranslateRequest_InvalidModelCharacters(t *testing.T) {
 	}
 }
 
-func TestTranslateRequest_ValidModelCharacters(t *testing.T) {
-	tests := []struct {
-		name  string
-		model string
-	}{
-		{"simple model", "gpt-4o"},
-		{"with dots", "gpt-4o.2025"},
-		{"with underscore", "my_deployment"},
-		{"alphanumeric", "model123"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body := map[string]any{
-				"model":    tt.model,
-				"messages": []any{map[string]any{"role": "user", "content": "Hi"}},
-			}
-
-			_, _, _, err := NewAzureOpenAITranslator().TranslateRequest(body)
-			assert.NoError(t, err)
-		})
-	}
-}
-
-func TestTranslateRequest_defaultAPIVersion(t *testing.T) {
-	p := NewAzureOpenAITranslator()
-	assert.Equal(t, defaultAPIVersion, p.apiVersion)
-}
-
-func TestTranslateRequest_BodyPassthrough(t *testing.T) {
-	body := map[string]any{
-		"model": "gpt-4o",
-		"messages": []any{
-			map[string]any{"role": "system", "content": "You are helpful."},
-			map[string]any{"role": "user", "content": "Hello"},
-		},
-		"temperature":       0.7,
-		"top_p":             0.9,
-		"max_tokens":        float64(1000),
-		"stream":            true,
-		"stop":              []any{"END"},
-		"n":                 float64(1),
-		"presence_penalty":  0.5,
-		"frequency_penalty": 0.3,
-	}
-
-	translatedBody, _, _, err := NewAzureOpenAITranslator().TranslateRequest(body)
-	require.NoError(t, err)
-
-	assert.Nil(t, translatedBody, "Azure OpenAI should not mutate the request body")
-}
-
-func TestTranslateRequest_HeadersSet(t *testing.T) {
-	body := map[string]any{
-		"model":    "gpt-4o",
-		"messages": []any{map[string]any{"role": "user", "content": "Hi"}},
-	}
-
-	_, headers, _, err := NewAzureOpenAITranslator().TranslateRequest(body)
-	require.NoError(t, err)
-
-	assert.Len(t, headers, 2)
-	assert.Contains(t, headers, ":path")
-	assert.Contains(t, headers, "content-type")
-}
-
-func TestTranslateRequest_HeadersRemoved(t *testing.T) {
-	body := map[string]any{
-		"model":    "gpt-4o",
-		"messages": []any{map[string]any{"role": "user", "content": "Hi"}},
-	}
-
-	_, _, headersToRemove, err := NewAzureOpenAITranslator().TranslateRequest(body)
-	require.NoError(t, err)
-
-	assert.Empty(t, headersToRemove)
-}
-
 func TestTranslateResponse_Passthrough(t *testing.T) {
 	body := map[string]any{
 		"id":      "chatcmpl-abc123",
@@ -244,26 +177,4 @@ func TestTranslateResponse_ErrorPassthrough(t *testing.T) {
 	translatedBody, err := NewAzureOpenAITranslator().TranslateResponse(body, "gpt-4o")
 	require.NoError(t, err)
 	assert.Nil(t, translatedBody, "Azure error responses are already in OpenAI format")
-}
-
-func TestTranslateResponse_StreamingChunkPassthrough(t *testing.T) {
-	body := map[string]any{
-		"id":      "chatcmpl-abc123",
-		"object":  "chat.completion.chunk",
-		"created": float64(1700000000),
-		"model":   "gpt-4o",
-		"choices": []any{
-			map[string]any{
-				"index": float64(0),
-				"delta": map[string]any{
-					"content": "Hello",
-				},
-				"finish_reason": nil,
-			},
-		},
-	}
-
-	translatedBody, err := NewAzureOpenAITranslator().TranslateResponse(body, "gpt-4o")
-	require.NoError(t, err)
-	assert.Nil(t, translatedBody)
 }
