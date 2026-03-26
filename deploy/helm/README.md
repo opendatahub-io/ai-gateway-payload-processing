@@ -3,6 +3,7 @@ This is a *WIP* work to make payload processing deployment through helm chart.
 ### Install Payload Processing (use IGW upstream image from main)
 
 // TODO - we should pin it to a released version in the next release
+// TODO we should pin to odh payload processing released tag
 
 ```bash
 helm install payload-processing -f ./values.yaml \ 
