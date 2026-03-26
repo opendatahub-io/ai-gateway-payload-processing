@@ -13,5 +13,5 @@ oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extens
 ### Uninstall Payload Processing Chart
 
 ```bash
-helm uninstall payload-processing oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/body-based-routing
+helm uninstall payload-processing
 ```
