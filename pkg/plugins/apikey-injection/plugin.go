@@ -26,8 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
+	apikey_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/apikey-generation"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -44,33 +46,7 @@ const (
 // compile-time interface check
 var _ framework.RequestProcessor = &ApiKeyInjectionPlugin{}
 
-// apiKeyGenerator generates a single auth header from an API key.
-// headerName is the HTTP header (e.g. "Authorization", "x-api-key").
-// headerValuePrefix is prepended to the key (e.g. "Bearer "); use "" for raw keys.
-type apiKeyGenerator struct {
-	headerName        string
-	headerValuePrefix string
-}
-
-// generateHeader returns the header name and formatted value for the given API key.
-func (inj *apiKeyGenerator) generateHeader(apiKey string) (string, string) {
-	return inj.headerName, inj.headerValuePrefix + apiKey
-}
-
-// defaultApiKeyGenerators returns the built-in provider-to-generator registry.
-func defaultApiKeyGenerators() map[string]*apiKeyGenerator {
-	return map[string]*apiKeyGenerator{
-		provider.OpenAI:        {headerName: "Authorization", headerValuePrefix: "Bearer "},
-		provider.Anthropic:     {headerName: "x-api-key"},
-		provider.AzureOpenAI:   {headerName: "api-key"},
-		provider.Vertex:        {headerName: "Authorization", headerValuePrefix: "Bearer "},
-		provider.BedrockOpenAI: {headerName: "Authorization"}, // TODO THIS IS NOT WORKING
-	}
-}
-
-// APIKeyInjectionFactory creates a new apiKeyInjectionPlugin from CLI parameters and
-// registers its Secret reconciler via the Handle.
-// It matches the framework.FactoryFunc signature.
+// APIKeyInjectionFactory defines the factory function for ApiKeyInjectionPlugin.
 func APIKeyInjectionFactory(name string, _ json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
 	plugin, err := NewAPIKeyInjectionPlugin(handle.ReconcilerBuilder, handle.ClientReader())
 	if err != nil {
@@ -80,6 +56,7 @@ func APIKeyInjectionFactory(name string, _ json.RawMessage, handle framework.Han
 	return plugin.WithName(name), nil
 }
 
+// NewAPIKeyInjectionPlugin creates a new apiKeyInjectionPlugin and returns its pointer
 func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ApiKeyInjectionPlugin, error) {
 	store := newSecretStore()
 	reconciler := &secretReconciler{
@@ -96,18 +73,23 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Type: APIKeyInjectionPluginType,
 			Name: APIKeyInjectionPluginType,
 		},
-		apikeyGenerators: defaultApiKeyGenerators(),
-		store:            store,
+		apikeyGenerators: map[string]apikey_generation.ApiKeyGenerator{
+			provider.OpenAI:        &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.Anthropic:     &apikey_generation.SimpleApiKeyGenerator{HeaderName: "x-api-key"},
+			provider.AzureOpenAI:   &apikey_generation.SimpleApiKeyGenerator{HeaderName: "api-key"},
+			provider.Vertex:        &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.BedrockOpenAI: &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization"}, // TODO THIS IS NOT WORKING
+		},
+		store: store,
 	}), nil
 }
 
-// ApiKeyInjectionPlugin injects an API key from a Kubernetes Secret
-// into the request headers. The Secret is identified by its namespaced
-// name from CycleState. The provider (openai, anthropic) determines
-// which header name and value format are used.
+// ApiKeyInjectionPlugin injects an API key from a Kubernetes Secret into the request headers.
+// The Secret is identified by its namespaced name from CycleState. The provider (e.g., openai, anthropic)
+// determines which header name and value format are used.
 type ApiKeyInjectionPlugin struct {
 	typedName        plugin.TypedName
-	apikeyGenerators map[string]*apiKeyGenerator
+	apikeyGenerators map[string]apikey_generation.ApiKeyGenerator
 	store            *secretStore
 }
 
@@ -122,15 +104,14 @@ func (p *ApiKeyInjectionPlugin) WithName(name string) *ApiKeyInjectionPlugin {
 	return p
 }
 
-// ProcessRequest reads the credential Secret reference and provider from
-// CycleState (written by provider-resolver), looks up the API key in the
-// store, and injects provider-specific auth headers into the request.
+// ProcessRequest reads the credential Secret reference and provider from CycleState (written by model-provider-resolver),
+// looks up the API key in the store, and injects provider-specific auth headers into the request.
 func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
 	if request == nil || request.Headers == nil {
-		return fmt.Errorf("request or headers is nil")
+		return errcommon.Error{Code: errcommon.BadRequest, Msg: "request or headers is nil"}
 	}
 
-	// Check if this is an external model (provider set by provider-resolver).
+	// Check if this is an external model (provider set by model-provider-resolver).
 	// Internal models have no provider in CycleState and don't need API key injection.
 	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey)
 	if err != nil || providerName == "" {
@@ -139,25 +120,25 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 
 	credsName, err := framework.ReadCycleStateKey[string](cycleState, state.CredsRefName)
 	if err != nil || credsName == "" {
-		return fmt.Errorf("external model with provider '%s' is missing credentialRef", providerName)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' is missing credentialRef", providerName)}
 	}
 	credsNamespace, err := framework.ReadCycleStateKey[string](cycleState, state.CredsRefNamespace)
 	if err != nil || credsNamespace == "" {
-		return fmt.Errorf("external model with provider '%s' is missing credentialRef namespace", providerName)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' is missing credentialRef namespace", providerName)}
 	}
 
 	secretKey := fmt.Sprintf("%s/%s", credsNamespace, credsName)
 	apiKey, found := p.store.get(secretKey)
 	if !found {
-		return fmt.Errorf("no secret found for ref '%s'", secretKey)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' api key was not found", providerName)}
 	}
 
 	generator, ok := p.apikeyGenerators[providerName]
 	if !ok {
-		generator = p.apikeyGenerators[provider.OpenAI]
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("unsupported provider - '%s'", providerName)}
 	}
 
-	headerName, headerValue := generator.generateHeader(apiKey)
+	headerName, headerValue := generator.GenerateHeader(apiKey)
 	request.SetHeader(headerName, headerValue) // inject the generated header
 
 	log.FromContext(ctx).Info("API key injected", "secretRef", secretKey, "provider", providerName)

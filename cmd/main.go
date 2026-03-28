@@ -39,6 +39,7 @@ func main() {
 	registerPlugins()
 
 	if err := runner.NewRunner().
+		WithExecutableName("ai-gateway-payload-processing").
 		// WithCustomCollectors(...). // THIS should be used for custom metrics exposed by our plugins
 		Run(ctrl.SetupSignalHandler()); err != nil {
 		os.Exit(1)
@@ -46,7 +47,6 @@ func main() {
 }
 
 func registerPlugins() {
-	// framework.Register(plugins.ExamplePluginType, plugins.ExamplePluginFactory) // example plugin, can be removed later
 	framework.Register(provider_resolver.ModelProviderResolverPluginType, provider_resolver.ModelProviderResolverFactory)
 	framework.Register(api_translation.APITranslationPluginType, api_translation.APITranslationFactory)
 	framework.Register(apikey_injection.APIKeyInjectionPluginType, apikey_injection.APIKeyInjectionFactory)

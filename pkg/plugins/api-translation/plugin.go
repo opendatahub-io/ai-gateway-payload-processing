@@ -132,7 +132,7 @@ func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *
 	}
 
 	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
-	if err != nil || providerName == "" || providerName == "openai" {                       // empty provider means no translation needed
+	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
 		return nil
 	}
 

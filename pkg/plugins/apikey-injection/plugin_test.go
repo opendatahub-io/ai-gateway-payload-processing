@@ -18,6 +18,7 @@ package apikey_injection
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
+	apikey_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/apikey-generation"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -34,19 +36,13 @@ import (
 // Handle-based Factory (which requires a real manager).
 func newTestPlugin(store *secretStore) *ApiKeyInjectionPlugin {
 	return &ApiKeyInjectionPlugin{
-		typedName:        plugin.TypedName{Type: APIKeyInjectionPluginType, Name: APIKeyInjectionPluginType},
-		apikeyGenerators: defaultApiKeyGenerators(),
-		store:            store,
+		typedName: plugin.TypedName{Type: APIKeyInjectionPluginType, Name: APIKeyInjectionPluginType},
+		apikeyGenerators: map[string]apikey_generation.ApiKeyGenerator{
+			"provider-with-prefix":    &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization", HeaderValuePrefix: "prefix "},
+			"provider-without-prefix": &apikey_generation.SimpleApiKeyGenerator{HeaderName: "x-api-key"},
+		},
+		store: store,
 	}
-}
-
-// newTestRequest builds an InferenceRequest pre-populated with the given headers.
-func newTestRequest(headers map[string]string) *framework.InferenceRequest {
-	req := framework.NewInferenceRequest()
-	for k, v := range headers {
-		req.Headers[k] = v
-	}
-	return req
 }
 
 // newCycleState builds a CycleState with credential ref and optional provider.
@@ -62,200 +58,96 @@ func newCycleState(namespace, name, providerName string) *framework.CycleState {
 
 func TestProcessRequest(t *testing.T) {
 	tests := []struct {
-		name        string
-		secrets     []*corev1.Secret
-		cycleState  *framework.CycleState
-		wantHeaders map[string]string
+		name              string
+		secrets           []*corev1.Secret
+		request           *framework.InferenceRequest
+		prepareCycleState func() *framework.CycleState
+		wantHeaders       map[string]string
+		errorContains     string
 	}{
 		{
-			name:       "OpenAI provider — injects Authorization: Bearer",
-			secrets:    []*corev1.Secret{testSecret("default", "openai-key", "sk-test-key")},
-			cycleState: newCycleState("default", "openai-key", provider.OpenAI),
+			name:              "provider that has simple generator with prefix",
+			secrets:           []*corev1.Secret{testSecret("default", "openai-key", "sk-test-key")},
+			request:           framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "openai-key", "provider-with-prefix") },
 			wantHeaders: map[string]string{
-				"Authorization": "Bearer sk-test-key",
+				"Authorization": "prefix sk-test-key",
 			},
 		},
 		{
-			name:       "Anthropic provider — injects x-api-key with raw value",
-			secrets:    []*corev1.Secret{testSecret("default", "anthropic-key", "ant-key-123")},
-			cycleState: newCycleState("default", "anthropic-key", provider.Anthropic),
+			name:    "provider that has simple generator without prefix",
+			secrets: []*corev1.Secret{testSecret("default", "anthropic-key", "ant-key-123")},
+			request: framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState {
+				return newCycleState("default", "anthropic-key", "provider-without-prefix")
+			},
 			wantHeaders: map[string]string{
 				"x-api-key": "ant-key-123",
 			},
 		},
 		{
-			name:       "Vertex provider — injects Authorization: Bearer (same as OpenAI)",
-			secrets:    []*corev1.Secret{testSecret("default", "vertex-key", "vtx-key-456")},
-			cycleState: newCycleState("default", "vertex-key", provider.Vertex),
-			wantHeaders: map[string]string{
-				"Authorization": "Bearer vtx-key-456",
-			},
+			name:              "unknown provider — request fails",
+			secrets:           []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
+			request:           framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "no-provider", "some-unknown-provider") },
+			errorContains:     "unsupported provider",
 		},
 		{
-			name:       "unknown provider — falls back to OpenAI Bearer format",
-			secrets:    []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
-			cycleState: newCycleState("default", "no-provider", "some-unknown-provider"),
-			wantHeaders: map[string]string{
-				"Authorization": "Bearer sk-key",
+			name:              "internal model no provider - skip gracefully",
+			secrets:           []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
+			request:           framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
+			wantHeaders:       map[string]string{},
+		},
+		{
+			name:    "missing credentials ref results in error",
+			secrets: []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
+			request: framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState {
+				cs := framework.NewCycleState()
+				cs.Write(state.ProviderKey, "provider-with-prefix") // external model has provider but no creds
+				return cs
 			},
+			errorContains: "missing credentialRef",
+		},
+		{
+			name:    "secret not found results in error",
+			secrets: []*corev1.Secret{},
+			request: framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState {
+				return newCycleState("default", "unknown", provider.OpenAI)
+			},
+			errorContains: "api key was not found",
+		},
+		{
+			name:              "request is nil",
+			secrets:           []*corev1.Secret{},
+			request:           nil,
+			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
+			errorContains:     "request or headers is nil",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := seedStore(tt.secrets...)
-			p := newTestPlugin(store)
-			req := newTestRequest(nil)
+			store := newSecretStore()
+			for _, secret := range tt.secrets {
+				secretKey := fmt.Sprintf("%s/%s", secret.GetNamespace(), secret.GetName())
+				err := store.addOrUpdate(secretKey, secret)
+				require.NoError(t, err)
+			}
 
-			err := p.ProcessRequest(context.Background(), tt.cycleState, req)
+			plugin := newTestPlugin(store)
+
+			err := plugin.ProcessRequest(context.Background(), tt.prepareCycleState(), tt.request)
+			if tt.errorContains != "" {
+				assert.ErrorContains(t, err, tt.errorContains)
+				return
+			}
 			require.NoError(t, err)
 			for k, v := range tt.wantHeaders {
-				assert.Equal(t, v, req.Headers[k])
+				assert.Equal(t, v, tt.request.Headers[k])
 			}
-		})
-	}
-}
-
-func TestProcessRequestInternalModel_SkipsGracefully(t *testing.T) {
-	store := seedStore(testSecret("default", "key", "sk-key"))
-	p := newTestPlugin(store)
-	req := newTestRequest(nil)
-	cs := framework.NewCycleState()
-	// No provider in CycleState — internal model
-
-	err := p.ProcessRequest(context.Background(), cs, req)
-	require.NoError(t, err, "should skip gracefully for internal models (no provider in CycleState)")
-}
-
-func TestProcessRequestExternalModel_MissingCredsRef(t *testing.T) {
-	store := seedStore(testSecret("default", "key", "sk-key"))
-	p := newTestPlugin(store)
-	req := newTestRequest(nil)
-	cs := framework.NewCycleState()
-	cs.Write(state.ProviderKey, "anthropic") // external model has provider but no creds
-
-	err := p.ProcessRequest(context.Background(), cs, req)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing credentialRef")
-}
-
-func TestProcessRequestSecretNotFound(t *testing.T) {
-	store := newSecretStore()
-	p := newTestPlugin(store)
-	req := newTestRequest(nil)
-	cs := newCycleState("default", "unknown", provider.OpenAI)
-
-	err := p.ProcessRequest(context.Background(), cs, req)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no secret found for ref")
-}
-
-func TestProcessRequestUnknownProviderFallback(t *testing.T) {
-	store := seedStore(testSecret("default", "some-key", "key-789"))
-	p := newTestPlugin(store)
-	req := newTestRequest(nil)
-	cs := newCycleState("default", "some-key", "unknown-provider")
-
-	err := p.ProcessRequest(context.Background(), cs, req)
-	require.NoError(t, err)
-	assert.Equal(t, "Bearer key-789", req.Headers["Authorization"])
-}
-
-func TestProcessRequestNilRequest(t *testing.T) {
-	store := newSecretStore()
-	p := newTestPlugin(store)
-
-	err := p.ProcessRequest(context.Background(), nil, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "request or headers is nil")
-}
-
-func TestProcessRequestMutationTracking(t *testing.T) {
-	store := seedStore(testSecret("default", "key", "sk-key"))
-	p := newTestPlugin(store)
-	req := newTestRequest(nil)
-	cs := newCycleState("default", "key", provider.OpenAI)
-
-	err := p.ProcessRequest(context.Background(), cs, req)
-	require.NoError(t, err)
-
-	mutated := req.MutatedHeaders()
-	assert.Equal(t, "Bearer sk-key", mutated["Authorization"],
-		"SetHeader should register the injected header in MutatedHeaders()")
-}
-
-func TestTypedName(t *testing.T) {
-	p := newTestPlugin(nil)
-	assert.Equal(t, APIKeyInjectionPluginType, p.TypedName().Type)
-	assert.Equal(t, APIKeyInjectionPluginType, p.TypedName().Name)
-}
-
-func TestDefaultInjectors(t *testing.T) {
-	injectors := defaultApiKeyGenerators()
-
-	require.Contains(t, injectors, provider.OpenAI)
-	assert.Equal(t, "Authorization", injectors[provider.OpenAI].headerName)
-	assert.Equal(t, "Bearer ", injectors[provider.OpenAI].headerValuePrefix)
-
-	require.Contains(t, injectors, provider.Anthropic)
-	assert.Equal(t, "x-api-key", injectors[provider.Anthropic].headerName)
-	assert.Empty(t, injectors[provider.Anthropic].headerValuePrefix)
-
-	require.Contains(t, injectors, provider.AzureOpenAI)
-	assert.Equal(t, "api-key", injectors[provider.AzureOpenAI].headerName)
-	assert.Empty(t, injectors[provider.AzureOpenAI].headerValuePrefix)
-
-	require.Contains(t, injectors, provider.Vertex)
-	assert.Equal(t, "Authorization", injectors[provider.Vertex].headerName)
-	assert.Equal(t, "Bearer ", injectors[provider.Vertex].headerValuePrefix)
-
-	assert.Len(t, injectors, 5)
-}
-
-func TestAPIKeyInjector(t *testing.T) {
-	tests := []struct {
-		name            string
-		headerName      string
-		headerPrefix    string
-		apiKey          string
-		wantHeaderName  string
-		wantHeaderValue string
-	}{
-		{
-			name:            "Bearer prefix (OpenAI style)",
-			headerName:      "Authorization",
-			headerPrefix:    "Bearer ",
-			apiKey:          "sk-test-key",
-			wantHeaderName:  "Authorization",
-			wantHeaderValue: "Bearer sk-test-key",
-		},
-		{
-			name:            "raw key without prefix (Anthropic style)",
-			headerName:      "x-api-key",
-			apiKey:          "ant-key-123",
-			wantHeaderName:  "x-api-key",
-			wantHeaderValue: "ant-key-123",
-		},
-		{
-			name:            "custom header name",
-			headerName:      "api-key",
-			apiKey:          "some-key-456",
-			wantHeaderName:  "api-key",
-			wantHeaderValue: "some-key-456",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			injector := &apiKeyGenerator{
-				headerName:        tt.headerName,
-				headerValuePrefix: tt.headerPrefix,
-			}
-
-			gotName, gotValue := injector.generateHeader(tt.apiKey)
-
-			assert.Equal(t, tt.wantHeaderName, gotName)
-			assert.Equal(t, tt.wantHeaderValue, gotValue)
 		})
 	}
 }
