@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	apikey_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/apikey-generation"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -115,7 +114,7 @@ func TestProcessRequest(t *testing.T) {
 			secrets: []*corev1.Secret{},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
-				return newCycleState("default", "unknown", provider.OpenAI)
+				return newCycleState("default", "unknown", "provider-with-prefix")
 			},
 			errorContains: "api key was not found",
 		},
