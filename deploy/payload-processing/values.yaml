@@ -1,6 +1,6 @@
 upstreamBbr:
   bbr:
-    name: ai-gateway-payload-processing
+    name: payload-processing
     replicas: 1
     image:
       hub: quay.io/opendatahub
