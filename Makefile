@@ -87,13 +87,11 @@ verify: tidy vet fmt lint  ## Verify the codebase (tidy, vet, fmt, lint).
 test-unit: envtest ## Run unit tests. Optional: COVERAGE=true (or 1) for go tool cover summary.
 	@set -e; \
 	kubebuilder_assets_path="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
+	CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$kubebuilder_assets_path" go test ./pkg/... -race -count=1 -coverprofile=cover.out; \
 	if [ "$(COVERAGE)" = "true" ] || [ "$(COVERAGE)" = "1" ]; then \
-		CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$kubebuilder_assets_path" go test ./pkg/... -race -count=1 -coverprofile=cover.out; \
 		go tool cover -func=cover.out; \
-		rm -f cover.out; \
-	else \
-		CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$kubebuilder_assets_path" go test ./pkg/... -race -count=1; \
-	fi
+	fi; \
+	rm -f cover.out
 
 .PHONY: test
 test: test-unit ## Run unit tests (alias for test-unit).

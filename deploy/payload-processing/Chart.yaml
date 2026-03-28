@@ -1,0 +1,16 @@
+apiVersion: v2
+name: payload-processing
+description: A Helm chart for the payload processing
+
+type: application
+
+version: 0.1.0
+
+appVersion: "0.2.0"
+
+dependencies:
+  - name: body-based-routing
+    repository: "oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts"
+    version: v0
+    # Upstream chart; overrides go under upstreamBbr in this chart’s values.yaml.
+    alias: upstreamBbr

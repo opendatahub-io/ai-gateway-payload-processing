@@ -1,0 +1,37 @@
+upstreamBbr:
+  bbr:
+    name: ai-gateway-payload-processing
+    replicas: 1
+    image:
+      hub: quay.io/opendatahub
+      name: odh-ai-gateway-payload-processing
+      tag: odh-stable
+      pullPolicy: IfNotPresent
+    port: 9004
+    healthCheckPort: 9005
+    multiNamespace: true
+
+    flags:
+      # Log verbosity
+      v: 3
+
+    # BBR plugins configuration.
+    # Format: type (registered plugin type), name (instance name), json (optional config object)
+    plugins:
+      - type: body-field-to-header
+        name: model-extractor
+        json:
+          field_name: model
+          header_name: X-Gateway-Model-Name
+      - type: model-provider-resolver
+        name: model-provider-resolver
+      - type: api-translation
+        name: api-translation
+      - type: apikey-injection
+        name: apikey-injection
+
+  provider:
+    name: istio
+
+  inferenceGateway:
+    name: inference-gateway

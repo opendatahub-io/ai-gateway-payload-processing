@@ -1,0 +1,1 @@
+Payload Processing {{ .Release.Name }} deployed.

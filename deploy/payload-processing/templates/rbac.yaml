@@ -1,0 +1,60 @@
+{{- $bbr := .Values.upstreamBbr.bbr }}
+{{- if $bbr.multiNamespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: externalmodels-reader
+rules:
+  # apikey-injection plugin: watches labeled Secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # model-provider-resolver plugin: watches ExternalModel CRDs
+  - apiGroups: ["maas.opendatahub.io"]
+    resources: ["externalmodels"]
+    verbs: ["get", "list", "watch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: externalmodels-reader
+subjects:
+- kind: ServiceAccount
+  name: {{ $bbr.name }}-{{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: externalmodels-reader
+{{- else }} ## if bbr is set in a single namespace
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $bbr.name }}-{{ .Release.Name }}-externalmodels-reader
+  namespace: {{ .Release.Namespace }}
+rules:
+  # apikey-injection plugin: watches labeled Secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # model-provider-resolver plugin: watches ExternalModel CRDs
+  - apiGroups: ["maas.opendatahub.io"]
+    resources: ["externalmodels"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $bbr.name }}-{{ .Release.Name }}-externalmodels-reader
+  namespace: {{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $bbr.name }}-{{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $bbr.name }}-{{ .Release.Name }}-externalmodels-reader
+{{- end }}
