@@ -4,7 +4,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: externalmodels-reader
+  name: {{ .Release.Name }}-externalmodels-reader
 rules:
   # apikey-injection plugin: watches labeled Secrets
   - apiGroups: [""]
@@ -15,10 +15,10 @@ rules:
     resources: ["externalmodels"]
     verbs: ["get", "list", "watch"]
 ---
-kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
 metadata:
-  name: externalmodels-reader
+  name: {{ .Release.Name }}-externalmodels-reader
 subjects:
 - kind: ServiceAccount
   name: {{ $bbr.name }}-{{ .Release.Name }}
@@ -26,13 +26,13 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: externalmodels-reader
+  name: {{ .Release.Name }}-externalmodels-reader
 {{- else }} ## if bbr is set in a single namespace
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ $bbr.name }}-{{ .Release.Name }}-externalmodels-reader
+  name: {{ .Release.Name }}-externalmodels-reader
   namespace: {{ .Release.Namespace }}
 rules:
   # apikey-injection plugin: watches labeled Secrets
@@ -47,7 +47,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $bbr.name }}-{{ .Release.Name }}-externalmodels-reader
+  name: {{ .Release.Name }}-externalmodels-reader
   namespace: {{ .Release.Namespace }}
 subjects:
 - kind: ServiceAccount
@@ -56,5 +56,5 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ $bbr.name }}-{{ .Release.Name }}-externalmodels-reader
+  name: {{ .Release.Name }}-externalmodels-reader
 {{- end }}
