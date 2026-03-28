@@ -18,6 +18,7 @@ package apikey_injection
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,14 +33,14 @@ import (
 
 func TestReconcile(t *testing.T) {
 	tests := []struct {
-		name       string
-		secret     *corev1.Secret
-		preSeed    []*corev1.Secret
-		wantKey    string
-		wantAPIKey string
-		wantFound  bool
-		wantErr    bool
-		secretName string
+		name        string
+		secret      *corev1.Secret
+		initSecrets []*corev1.Secret
+		wantKey     string
+		wantAPIKey  string
+		wantFound   bool
+		wantErr     bool
+		secretName  string
 	}{
 		{
 			name:       "stores API key from Secret",
@@ -49,20 +50,20 @@ func TestReconcile(t *testing.T) {
 			wantFound:  true,
 		},
 		{
-			name:       "updates existing entry on Secret change",
-			secret:     testSecret("default", "openai-key", "sk-new-key"),
-			preSeed:    []*corev1.Secret{testSecret("default", "openai-key", "sk-old-key")},
-			wantKey:    "default/openai-key",
-			wantAPIKey: "sk-new-key",
-			wantFound:  true,
+			name:        "updates existing entry on Secret change",
+			secret:      testSecret("default", "openai-key", "sk-new-key"),
+			initSecrets: []*corev1.Secret{testSecret("default", "openai-key", "sk-old-key")},
+			wantKey:     "default/openai-key",
+			wantAPIKey:  "sk-new-key",
+			wantFound:   true,
 		},
 		{
-			name:       "Secret not found — cleans store",
-			secret:     nil,
-			secretName: "gone",
-			preSeed:    []*corev1.Secret{testSecret("default", "gone", "sk-key")},
-			wantKey:    "default/gone",
-			wantFound:  false,
+			name:        "Secret not found — cleans store",
+			secret:      nil,
+			secretName:  "gone",
+			initSecrets: []*corev1.Secret{testSecret("default", "gone", "sk-key")},
+			wantKey:     "default/gone",
+			wantFound:   false,
 		},
 		{
 			name: "Secret missing api-key data — returns error",
@@ -92,9 +93,9 @@ func TestReconcile(t *testing.T) {
 					secretDataKey: []byte("sk-key"),
 				},
 			},
-			preSeed:   []*corev1.Secret{testSecret("default", "deleting", "sk-key")},
-			wantKey:   "default/deleting",
-			wantFound: false,
+			initSecrets: []*corev1.Secret{testSecret("default", "deleting", "sk-key")},
+			wantKey:     "default/deleting",
+			wantFound:   false,
 		},
 		{
 			name: "Secret with managed label removed — removes from store",
@@ -107,15 +108,18 @@ func TestReconcile(t *testing.T) {
 					secretDataKey: []byte("sk-key"),
 				},
 			},
-			preSeed:   []*corev1.Secret{testSecret("default", "unlabeled", "sk-key")},
-			wantKey:   "default/unlabeled",
-			wantFound: false,
+			initSecrets: []*corev1.Secret{testSecret("default", "unlabeled", "sk-key")},
+			wantKey:     "default/unlabeled",
+			wantFound:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := seedStore(tt.preSeed...)
+			store := newSecretStore()
+			for _, sec := range tt.initSecrets {
+				_ = store.addOrUpdate(fmt.Sprintf("%s/%s", sec.Namespace, sec.Name), sec)
+			}
 
 			builder := fake.NewClientBuilder()
 			if tt.secret != nil {

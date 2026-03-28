@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -137,15 +139,14 @@ func TestProcessRequest(t *testing.T) {
 			}
 
 			plugin := newTestPlugin(store)
-
 			err := plugin.ProcessRequest(context.Background(), tt.prepareCycleState(), tt.request)
 			if tt.errorContains != "" {
 				assert.ErrorContains(t, err, tt.errorContains)
 				return
 			}
 			require.NoError(t, err)
-			for k, v := range tt.wantHeaders {
-				assert.Equal(t, v, tt.request.Headers[k])
+			if diff := cmp.Diff(tt.wantHeaders, tt.request.Headers, cmpopts.SortMaps(func(a, b string) bool { return a < b }), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("headers mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

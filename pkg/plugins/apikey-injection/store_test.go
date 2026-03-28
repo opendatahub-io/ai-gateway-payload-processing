@@ -44,15 +44,6 @@ func testSecret(namespace, name, apiKey string) *corev1.Secret {
 	}
 }
 
-// seedStore is a convenience for tests that need a pre-populated secretStore.
-func seedStore(secrets ...*corev1.Secret) *secretStore {
-	s := newSecretStore()
-	for _, sec := range secrets {
-		_ = s.addOrUpdate(fmt.Sprintf("%s/%s", sec.Namespace, sec.Name), sec)
-	}
-	return s
-}
-
 func TestSecretStore(t *testing.T) {
 	tests := []struct {
 		name          string
