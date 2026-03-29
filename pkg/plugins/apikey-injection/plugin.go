@@ -125,9 +125,9 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 	}
 
 	secretKey := fmt.Sprintf("%s/%s", credsNamespace, credsName)
-	apiKey, found := p.store.get(secretKey)
+	credentials, found := p.store.get(secretKey)
 	if !found {
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' api key was not found", providerName)}
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' credentials not found", providerName)}
 	}
 
 	generator, ok := p.authHeadersGenerators[providerName]
@@ -135,9 +135,13 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("unsupported provider - '%s'", providerName)}
 	}
 
-	authHeaders := generator.GenerateAuthHeaders(apiKey)
+	authHeaders, err := generator.GenerateAuthHeaders(credentials)
+	if err != nil {
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to generate auth headers for provider '%s': %v", providerName, err)}
+	}
+
 	for headerKey, headerValue := range authHeaders {
-		request.SetHeader(headerKey, headerValue) // inject the generated header
+		request.SetHeader(headerKey, headerValue)
 	}
 
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("auth headers injected", "provider", providerName)

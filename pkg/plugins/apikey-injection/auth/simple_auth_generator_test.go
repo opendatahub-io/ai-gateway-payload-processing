@@ -28,32 +28,58 @@ func TestSimpleAuthHeadersGenerator(t *testing.T) {
 		name         string
 		headerName   string
 		headerPrefix string
-		apiKey       string
+		credentials  map[string]string
 		wantHeaders  map[string]string
+		wantErr      bool
 	}{
 		{
 			name:         "Bearer prefix (OpenAI style)",
 			headerName:   "Authorization",
 			headerPrefix: "Bearer ",
-			apiKey:       "sk-test-key",
+			credentials:  map[string]string{"api-key": "sk-test-key"},
 			wantHeaders: map[string]string{
 				"Authorization": "Bearer sk-test-key",
 			},
 		},
 		{
-			name:       "raw key without prefix (Anthropic style)",
-			headerName: "x-api-key",
-			apiKey:     "ant-key-123",
+			name:        "raw key without prefix (Anthropic style)",
+			headerName:  "x-api-key",
+			credentials: map[string]string{"api-key": "ant-key-123"},
 			wantHeaders: map[string]string{
 				"x-api-key": "ant-key-123",
 			},
+		},
+		{
+			name:        "missing api-key field returns error",
+			headerName:  "Authorization",
+			credentials: map[string]string{"wrong-field": "some-value"},
+			wantErr:     true,
+		},
+		{
+			name:        "empty credentials returns error",
+			headerName:  "Authorization",
+			credentials: map[string]string{},
+			wantErr:     true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			generator := &SimpleAuthGenerator{HeaderName: test.headerName, HeaderValuePrefix: test.headerPrefix}
-			authHeaders := generator.GenerateAuthHeaders(test.apiKey)
+			authHeaders, err := generator.GenerateAuthHeaders(test.credentials)
+
+			if test.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
 			if diff := cmp.Diff(test.wantHeaders, authHeaders, cmpopts.SortMaps(func(a, b string) bool { return a < b })); diff != "" {
 				t.Errorf("headers mismatch (-want +got):\n%s", diff)
 			}

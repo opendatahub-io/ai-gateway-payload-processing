@@ -23,36 +23,42 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// secretDataKey is the key within Secret.Data that holds the API key value.
-const secretDataKey = "api-key"
-
 // secretStore is a thread-safe in-memory store that maps a Secret's
-// namespaced name ("namespace/name") to its API key value.
+// namespaced name ("namespace/name") to its credential data.
 // The secretReconciler writes to it; the apiKeyInjectionPlugin reads from it.
 type secretStore struct {
 	mu   sync.RWMutex
-	data map[string]string
+	data map[string]map[string]string
 }
 
 // newSecretStore creates an empty secretStore.
 func newSecretStore() *secretStore {
 	return &secretStore{
-		data: make(map[string]string),
+		data: make(map[string]map[string]string),
 	}
 }
 
-// addOrUpdate extracts the API key from the Secret's data field and stores
-// it under the given key.
-// Returns an error if the Secret is missing the required api-key data field.
+// addOrUpdate extracts all non-empty fields from the Secret's data and stores
+// them under the given key. Returns an error if the Secret has no data fields.
 func (s *secretStore) addOrUpdate(key string, secret *corev1.Secret) error {
-	apiKeyBytes, ok := secret.Data[secretDataKey]
-	if !ok || len(apiKeyBytes) == 0 {
-		return fmt.Errorf("secret %q missing %q data field", key, secretDataKey)
+	if len(secret.Data) == 0 {
+		return fmt.Errorf("secret %s has no data fields", key)
+	}
+
+	credentials := make(map[string]string)
+	for field, value := range secret.Data {
+		if len(value) > 0 {
+			credentials[field] = string(value)
+		}
+	}
+
+	if len(credentials) == 0 {
+		return fmt.Errorf("secret %s has no non-empty data fields", key)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data[key] = string(apiKeyBytes)
+	s.data[key] = credentials
 	return nil
 }
 
@@ -63,10 +69,10 @@ func (s *secretStore) delete(secretKey string) {
 	delete(s.data, secretKey)
 }
 
-// get returns the API key for the given namespaced name and whether it was found.
-func (s *secretStore) get(secretKey string) (string, bool) {
+// get returns the credentials for the given namespaced name and whether it was found.
+func (s *secretStore) get(secretKey string) (map[string]string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	apiKey, ok := s.data[secretKey]
-	return apiKey, ok
+	credentials, ok := s.data[secretKey]
+	return credentials, ok
 }

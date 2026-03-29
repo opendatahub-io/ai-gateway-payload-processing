@@ -19,9 +19,11 @@ package apikey_injection
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -34,39 +36,37 @@ import (
 func TestReconcile(t *testing.T) {
 	tests := []struct {
 		name        string
-		secret      *corev1.Secret
 		initSecrets []*corev1.Secret
+		secret      *corev1.Secret
 		wantKey     string
-		wantAPIKey  string
+		wantCreds   map[string]string
 		wantFound   bool
 		wantErr     bool
-		secretName  string
 	}{
 		{
-			name:       "stores API key from Secret",
-			secret:     testSecret("default", "openai-key", "sk-live-xxx"),
-			wantKey:    "default/openai-key",
-			wantAPIKey: "sk-live-xxx",
-			wantFound:  true,
+			name:      "stores credentials from Secret",
+			secret:    testSecret("default", "openai-key", map[string]string{"api-key": "sk-live-xxx"}),
+			wantKey:   "default/openai-key",
+			wantCreds: map[string]string{"api-key": "sk-live-xxx"},
+			wantFound: true,
 		},
 		{
 			name:        "updates existing entry on Secret change",
-			secret:      testSecret("default", "openai-key", "sk-new-key"),
-			initSecrets: []*corev1.Secret{testSecret("default", "openai-key", "sk-old-key")},
+			initSecrets: []*corev1.Secret{testSecret("default", "openai-key", map[string]string{"api-key": "sk-old-key"})},
+			secret:      testSecret("default", "openai-key", map[string]string{"api-key": "sk-new-key"}),
 			wantKey:     "default/openai-key",
-			wantAPIKey:  "sk-new-key",
+			wantCreds:   map[string]string{"api-key": "sk-new-key"},
 			wantFound:   true,
 		},
 		{
 			name:        "Secret not found — cleans store",
+			initSecrets: []*corev1.Secret{testSecret("default", "gone", map[string]string{"api-key": "sk-key"})},
 			secret:      nil,
-			secretName:  "gone",
-			initSecrets: []*corev1.Secret{testSecret("default", "gone", "sk-key")},
 			wantKey:     "default/gone",
 			wantFound:   false,
 		},
 		{
-			name: "Secret missing api-key data — returns error",
+			name: "Secret with no data — returns error",
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "no-data",
@@ -80,7 +80,8 @@ func TestReconcile(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name: "Secret marked for deletion — removes from store",
+			name:        "Secret marked for deletion — removes from store",
+			initSecrets: []*corev1.Secret{testSecret("default", "deleting", map[string]string{"api-key": "sk-key"})},
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:              "deleting",
@@ -90,27 +91,33 @@ func TestReconcile(t *testing.T) {
 					Labels:            map[string]string{managedLabel: "true"},
 				},
 				Data: map[string][]byte{
-					secretDataKey: []byte("sk-key"),
+					"api-key": []byte("sk-key"),
 				},
 			},
-			initSecrets: []*corev1.Secret{testSecret("default", "deleting", "sk-key")},
-			wantKey:     "default/deleting",
-			wantFound:   false,
+			wantKey:   "default/deleting",
+			wantFound: false,
 		},
 		{
-			name: "Secret with managed label removed — removes from store",
+			name:        "Secret with managed label removed — removes from store",
+			initSecrets: []*corev1.Secret{testSecret("default", "unlabeled", map[string]string{"api-key": "sk-key"})},
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "unlabeled",
 					Namespace: "default",
 				},
 				Data: map[string][]byte{
-					secretDataKey: []byte("sk-key"),
+					"api-key": []byte("sk-key"),
 				},
 			},
-			initSecrets: []*corev1.Secret{testSecret("default", "unlabeled", "sk-key")},
-			wantKey:     "default/unlabeled",
-			wantFound:   false,
+			wantKey:   "default/unlabeled",
+			wantFound: false,
+		},
+		{
+			name:      "stores multiple credential fields",
+			secret:    testSecret("default", "bedrock-creds", map[string]string{"aws-access-key-id": "AKIA...", "aws-secret-access-key": "secret"}),
+			wantKey:   "default/bedrock-creds",
+			wantCreds: map[string]string{"aws-access-key-id": "AKIA...", "aws-secret-access-key": "secret"},
+			wantFound: true,
 		},
 	}
 
@@ -132,23 +139,11 @@ func TestReconcile(t *testing.T) {
 				store:  store,
 			}
 
-			name := tt.secretName
-			if name == "" && tt.secret != nil {
-				name = tt.secret.Name
-			}
-			if name == "" {
-				name = "test-secret"
-			}
-
-			ns := "default"
-			if tt.secret != nil {
-				ns = tt.secret.Namespace
-			}
-
+			parts := strings.Split(tt.wantKey, "/")
 			_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      name,
-					Namespace: ns,
+					Namespace: parts[0],
+					Name:      parts[1],
 				},
 			})
 
@@ -160,10 +155,12 @@ func TestReconcile(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.wantKey != "" {
-				apiKey, found := store.get(tt.wantKey)
+				creds, found := store.get(tt.wantKey)
 				assert.Equal(t, tt.wantFound, found)
 				if tt.wantFound {
-					assert.Equal(t, tt.wantAPIKey, apiKey)
+					if diff := cmp.Diff(tt.wantCreds, creds); diff != "" {
+						t.Errorf("credentials mismatch (-want +got):\n%s", diff)
+					}
 				}
 			}
 		})

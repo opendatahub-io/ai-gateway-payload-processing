@@ -16,7 +16,8 @@ limitations under the License.
 
 package auth
 
-// AuthHeadersGenerator generates auth headers from an API key.
+// AuthHeadersGenerator generates auth headers from credential fields.
+// Each implementation defines which fields it requires from the credentials map.
 type AuthHeadersGenerator interface {
-	GenerateAuthHeaders(apiKey string) map[string]string
+	GenerateAuthHeaders(credentialsData map[string]string) (map[string]string, error)
 }

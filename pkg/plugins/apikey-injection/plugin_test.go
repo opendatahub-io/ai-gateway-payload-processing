@@ -67,7 +67,7 @@ func TestProcessRequest(t *testing.T) {
 	}{
 		{
 			name:              "provider that has simple generator with prefix",
-			secrets:           []*corev1.Secret{testSecret("default", "openai-key", "sk-test-key")},
+			secrets:           []*corev1.Secret{testSecret("default", "openai-key", map[string]string{"api-key": "sk-test-key"})},
 			request:           framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "openai-key", "provider-with-prefix") },
 			wantHeaders: map[string]string{
@@ -76,7 +76,7 @@ func TestProcessRequest(t *testing.T) {
 		},
 		{
 			name:    "provider that has simple generator without prefix",
-			secrets: []*corev1.Secret{testSecret("default", "anthropic-key", "ant-key-123")},
+			secrets: []*corev1.Secret{testSecret("default", "anthropic-key", map[string]string{"api-key": "ant-key-123"})},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				return newCycleState("default", "anthropic-key", "provider-without-prefix")
@@ -87,21 +87,21 @@ func TestProcessRequest(t *testing.T) {
 		},
 		{
 			name:              "unknown provider — request fails",
-			secrets:           []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
+			secrets:           []*corev1.Secret{testSecret("default", "no-provider", map[string]string{"api-key": "sk-key"})},
 			request:           framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "no-provider", "some-unknown-provider") },
 			errorContains:     "unsupported provider",
 		},
 		{
 			name:              "internal model no provider - skip gracefully",
-			secrets:           []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
+			secrets:           []*corev1.Secret{testSecret("default", "no-provider", map[string]string{"api-key": "sk-key"})},
 			request:           framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
 			wantHeaders:       map[string]string{},
 		},
 		{
 			name:    "missing credentials ref results in error",
-			secrets: []*corev1.Secret{testSecret("default", "no-provider", "sk-key")},
+			secrets: []*corev1.Secret{testSecret("default", "no-provider", map[string]string{"api-key": "sk-key"})},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				cs := framework.NewCycleState()
@@ -111,13 +111,13 @@ func TestProcessRequest(t *testing.T) {
 			errorContains: "missing credentialRef",
 		},
 		{
-			name:    "secret not found results in error",
+			name:    "credentials not found results in error",
 			secrets: []*corev1.Secret{},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				return newCycleState("default", "unknown", "provider-with-prefix")
 			},
-			errorContains: "api key was not found",
+			errorContains: "credentials not found",
 		},
 		{
 			name:              "request is nil",
@@ -125,6 +125,15 @@ func TestProcessRequest(t *testing.T) {
 			request:           nil,
 			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
 			errorContains:     "request or headers is nil",
+		},
+		{
+			name:    "missing api-key field in credentials results in error",
+			secrets: []*corev1.Secret{testSecret("default", "wrong-fields", map[string]string{"wrong-field": "value"})},
+			request: framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState {
+				return newCycleState("default", "wrong-fields", "provider-with-prefix")
+			},
+			errorContains: "failed to generate auth headers",
 		},
 	}
 
