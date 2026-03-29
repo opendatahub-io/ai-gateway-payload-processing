@@ -58,7 +58,7 @@ func NewAPITranslationPlugin() *APITranslationPlugin {
 			provider.Anthropic:   anthropic.NewAnthropicTranslator(),
 			provider.AzureOpenAI: azure.NewAzureOpenAITranslator(),
 			provider.Vertex:      vertex.NewVertexTranslator(),
-			// provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(), TODO comment out until apikey injection is implmeneted
+			// provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(), TODO comment out until apikey injection is implemented
 		},
 	}
 }
