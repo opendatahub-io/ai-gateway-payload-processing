@@ -27,8 +27,8 @@ upstreamBbr:
         name: model-provider-resolver
       - type: api-translation
         name: api-translation
-      - type: apikey-injection
-        name: apikey-injection
+      - type: api-key-injection
+        name: api-key-injection
 
   provider:
     name: istio
