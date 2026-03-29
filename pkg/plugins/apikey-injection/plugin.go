@@ -38,7 +38,7 @@ import (
 
 const (
 	// APIKeyInjectionPluginType is the registered name for this plugin in the BBR registry.
-	APIKeyInjectionPluginType = "api-key-injection"
+	APIKeyInjectionPluginType = "apikey-injection"
 )
 
 // compile-time interface check
