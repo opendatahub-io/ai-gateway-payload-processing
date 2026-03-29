@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package auth_generation
+package auth
 
 // AuthHeadersGenerator generates auth headers from an API key.
 type AuthHeadersGenerator interface {

@@ -30,8 +30,8 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	auth_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation/simple"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth/simple"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -71,7 +71,7 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Type: APIKeyInjectionPluginType,
 			Name: APIKeyInjectionPluginType,
 		},
-		authHeadersGenerators: map[string]auth_generation.AuthHeadersGenerator{
+		authHeadersGenerators: map[string]auth.AuthHeadersGenerator{
 			provider.OpenAI:      &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
 			provider.Anthropic:   &simple.SimpleAuthGenerator{HeaderName: "x-api-key"},
 			provider.AzureOpenAI: &simple.SimpleAuthGenerator{HeaderName: "api-key"},
@@ -87,7 +87,7 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 // determines which header name and value format are used.
 type ApiKeyInjectionPlugin struct {
 	typedName             plugin.TypedName
-	authHeadersGenerators map[string]auth_generation.AuthHeadersGenerator
+	authHeadersGenerators map[string]auth.AuthHeadersGenerator
 	store                 *secretStore
 }
 

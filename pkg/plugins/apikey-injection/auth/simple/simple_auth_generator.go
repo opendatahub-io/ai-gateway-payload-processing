@@ -19,13 +19,13 @@ package simple
 import (
 	"fmt"
 
-	auth_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth"
 )
 
 // compile-time interface check
-var _ auth_generation.AuthHeadersGenerator = &SimpleAuthGenerator{}
+var _ auth.AuthHeadersGenerator = &SimpleAuthGenerator{}
 
-// SimpleApiKeyGenerator generates a single auth header from an API key.
+// SimpleAuthGenerator generates a single auth header from an API key.
 // HeaderName is the HTTP header (e.g. "Authorization", "x-api-key").
 // HeaderValuePrefix is prepended to the key (e.g. "Bearer "); use "" for raw keys.
 type SimpleAuthGenerator struct {
@@ -33,7 +33,7 @@ type SimpleAuthGenerator struct {
 	HeaderValuePrefix string
 }
 
-// GenerateHeader returns the header name and formatted value for the given API key.
+// GenerateAuthHeaders returns the header name and formatted value for the given API key.
 func (g *SimpleAuthGenerator) GenerateAuthHeaders(apiKey string) map[string]string {
 	return map[string]string{
 		g.HeaderName: fmt.Sprintf("%s%s", g.HeaderValuePrefix, apiKey),
