@@ -29,6 +29,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
+const (
+	// managedLabel selects Secrets managed by the apikey-injection plugin.
+	// Only Secrets carrying this label are watched by the reconciler.
+	managedLabel = "inference.networking.k8s.io/bbr-managed"
+)
+
 func hasManagedLabel(object client.Object) bool {
 	return object.GetLabels()[managedLabel] == "true"
 }

@@ -27,20 +27,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	apikey_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/apikey-generation"
+	auth_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation/simple"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 const (
 	// APIKeyInjectionPluginType is the registered name for this plugin in the BBR registry.
-	APIKeyInjectionPluginType = "apikey-injection"
-
-	// managedLabel selects Secrets managed by the apikey-injection plugin.
-	// Only Secrets carrying this label are watched by the reconciler.
-	managedLabel = "inference.networking.k8s.io/bbr-managed"
+	APIKeyInjectionPluginType = "api-key-injection"
 )
 
 // compile-time interface check
@@ -73,12 +71,12 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Type: APIKeyInjectionPluginType,
 			Name: APIKeyInjectionPluginType,
 		},
-		apikeyGenerators: map[string]apikey_generation.ApiKeyGenerator{
-			provider.OpenAI:        &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.Anthropic:     &apikey_generation.SimpleApiKeyGenerator{HeaderName: "x-api-key"},
-			provider.AzureOpenAI:   &apikey_generation.SimpleApiKeyGenerator{HeaderName: "api-key"},
-			provider.Vertex:        &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.BedrockOpenAI: &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization"}, // TODO THIS IS NOT WORKING
+		authHeadersGenerators: map[string]auth_generation.AuthHeadersGenerator{
+			provider.OpenAI:      &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.Anthropic:   &simple.SimpleAuthGenerator{HeaderName: "x-api-key"},
+			provider.AzureOpenAI: &simple.SimpleAuthGenerator{HeaderName: "api-key"},
+			provider.Vertex:      &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			// provider.BedrockOpenAI: &apikey_generation.SimpleAuthGenerator{HeaderName: "Authorization"}, // TODO THIS IS NOT WORKING
 		},
 		store: store,
 	}), nil
@@ -88,9 +86,9 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 // The Secret is identified by its namespaced name from CycleState. The provider (e.g., openai, anthropic)
 // determines which header name and value format are used.
 type ApiKeyInjectionPlugin struct {
-	typedName        plugin.TypedName
-	apikeyGenerators map[string]apikey_generation.ApiKeyGenerator
-	store            *secretStore
+	typedName             plugin.TypedName
+	authHeadersGenerators map[string]auth_generation.AuthHeadersGenerator
+	store                 *secretStore
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
@@ -133,14 +131,16 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' api key was not found", providerName)}
 	}
 
-	generator, ok := p.apikeyGenerators[providerName]
+	generator, ok := p.authHeadersGenerators[providerName]
 	if !ok {
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("unsupported provider - '%s'", providerName)}
 	}
 
-	headerName, headerValue := generator.GenerateHeader(apiKey)
-	request.SetHeader(headerName, headerValue) // inject the generated header
+	authHeaders := generator.GenerateAuthHeaders(apiKey)
+	for headerKey, headerValue := range authHeaders {
+		request.SetHeader(headerKey, headerValue) // inject the generated header
+	}
 
-	log.FromContext(ctx).Info("API key injected", "secretRef", secretKey, "provider", providerName)
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("auth headers injected", "provider", providerName)
 	return nil
 }

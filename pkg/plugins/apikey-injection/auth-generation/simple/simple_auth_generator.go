@@ -14,27 +14,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package apikey_generation
+package simple
 
-import "fmt"
+import (
+	"fmt"
 
-// ApiKeyGenerator generates a single auth header from an API key.
-type ApiKeyGenerator interface {
-	GenerateHeader(apiKey string) (string, string)
-}
+	auth_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation"
+)
 
 // compile-time interface check
-var _ ApiKeyGenerator = &SimpleApiKeyGenerator{}
+var _ auth_generation.AuthHeadersGenerator = &SimpleAuthGenerator{}
 
-// apiKeyGenerator generates a single auth header from an API key.
-// headerName is the HTTP header (e.g. "Authorization", "x-api-key").
-// headerValuePrefix is prepended to the key (e.g. "Bearer "); use "" for raw keys.
-type SimpleApiKeyGenerator struct {
+// SimpleApiKeyGenerator generates a single auth header from an API key.
+// HeaderName is the HTTP header (e.g. "Authorization", "x-api-key").
+// HeaderValuePrefix is prepended to the key (e.g. "Bearer "); use "" for raw keys.
+type SimpleAuthGenerator struct {
 	HeaderName        string
 	HeaderValuePrefix string
 }
 
 // GenerateHeader returns the header name and formatted value for the given API key.
-func (g *SimpleApiKeyGenerator) GenerateHeader(apiKey string) (string, string) {
-	return g.HeaderName, fmt.Sprintf("%s%s", g.HeaderValuePrefix, apiKey)
+func (g *SimpleAuthGenerator) GenerateAuthHeaders(apiKey string) map[string]string {
+	return map[string]string{
+		g.HeaderName: fmt.Sprintf("%s%s", g.HeaderValuePrefix, apiKey),
+	}
 }

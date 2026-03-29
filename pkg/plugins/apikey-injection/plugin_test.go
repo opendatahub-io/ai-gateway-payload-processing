@@ -23,13 +23,13 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	apikey_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/apikey-generation"
+	auth_generation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generation/simple"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -38,19 +38,19 @@ import (
 func newTestPlugin(store *secretStore) *ApiKeyInjectionPlugin {
 	return &ApiKeyInjectionPlugin{
 		typedName: plugin.TypedName{Type: APIKeyInjectionPluginType, Name: APIKeyInjectionPluginType},
-		apikeyGenerators: map[string]apikey_generation.ApiKeyGenerator{
-			"provider-with-prefix":    &apikey_generation.SimpleApiKeyGenerator{HeaderName: "Authorization", HeaderValuePrefix: "prefix "},
-			"provider-without-prefix": &apikey_generation.SimpleApiKeyGenerator{HeaderName: "x-api-key"},
+		authHeadersGenerators: map[string]auth_generation.AuthHeadersGenerator{
+			"provider-with-prefix":    &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "prefix "},
+			"provider-without-prefix": &simple.SimpleAuthGenerator{HeaderName: "x-api-key"},
 		},
 		store: store,
 	}
 }
 
 // newCycleState builds a CycleState with credential ref and optional provider.
-func newCycleState(namespace, name, providerName string) *framework.CycleState {
+func newCycleState(credsNamespace, credsName, providerName string) *framework.CycleState {
 	cs := framework.NewCycleState()
-	cs.Write(state.CredsRefName, name)
-	cs.Write(state.CredsRefNamespace, namespace)
+	cs.Write(state.CredsRefName, credsName)
+	cs.Write(state.CredsRefNamespace, credsNamespace)
 	if providerName != "" {
 		cs.Write(state.ProviderKey, providerName)
 	}
@@ -129,23 +129,22 @@ func TestProcessRequest(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			store := newSecretStore()
-			for _, secret := range tt.secrets {
+			for _, secret := range test.secrets {
 				secretKey := fmt.Sprintf("%s/%s", secret.GetNamespace(), secret.GetName())
-				err := store.addOrUpdate(secretKey, secret)
-				require.NoError(t, err)
+				require.NoError(t, store.addOrUpdate(secretKey, secret))
 			}
 
 			plugin := newTestPlugin(store)
-			err := plugin.ProcessRequest(context.Background(), tt.prepareCycleState(), tt.request)
-			if tt.errorContains != "" {
-				assert.ErrorContains(t, err, tt.errorContains)
+			err := plugin.ProcessRequest(context.Background(), test.prepareCycleState(), test.request)
+			if test.errorContains != "" {
+				require.ErrorContains(t, err, test.errorContains)
 				return
 			}
 			require.NoError(t, err)
-			if diff := cmp.Diff(tt.wantHeaders, tt.request.Headers, cmpopts.SortMaps(func(a, b string) bool { return a < b }), cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(test.wantHeaders, test.request.Headers, cmpopts.SortMaps(func(a, b string) bool { return a < b }), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("headers mismatch (-want +got):\n%s", diff)
 			}
 		})
