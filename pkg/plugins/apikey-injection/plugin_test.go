@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth/simple"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -39,8 +38,8 @@ func newTestPlugin(store *secretStore) *ApiKeyInjectionPlugin {
 	return &ApiKeyInjectionPlugin{
 		typedName: plugin.TypedName{Type: APIKeyInjectionPluginType, Name: APIKeyInjectionPluginType},
 		authHeadersGenerators: map[string]auth.AuthHeadersGenerator{
-			"provider-with-prefix":    &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "prefix "},
-			"provider-without-prefix": &simple.SimpleAuthGenerator{HeaderName: "x-api-key"},
+			"provider-with-prefix":    &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "prefix "},
+			"provider-without-prefix": &auth.SimpleAuthGenerator{HeaderName: "x-api-key"},
 		},
 		store: store,
 	}

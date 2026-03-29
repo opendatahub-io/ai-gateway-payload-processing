@@ -14,16 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package simple
+package auth
 
 import (
 	"fmt"
-
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth"
 )
 
 // compile-time interface check
-var _ auth.AuthHeadersGenerator = &SimpleAuthGenerator{}
+var _ AuthHeadersGenerator = &SimpleAuthGenerator{}
 
 // SimpleAuthGenerator generates a single auth header from an API key.
 // HeaderName is the HTTP header (e.g. "Authorization", "x-api-key").

@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth/simple"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -72,10 +71,10 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Name: APIKeyInjectionPluginType,
 		},
 		authHeadersGenerators: map[string]auth.AuthHeadersGenerator{
-			provider.OpenAI:      &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.Anthropic:   &simple.SimpleAuthGenerator{HeaderName: "x-api-key"},
-			provider.AzureOpenAI: &simple.SimpleAuthGenerator{HeaderName: "api-key"},
-			provider.Vertex:      &simple.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.OpenAI:      &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.Anthropic:   &auth.SimpleAuthGenerator{HeaderName: "x-api-key"},
+			provider.AzureOpenAI: &auth.SimpleAuthGenerator{HeaderName: "api-key"},
+			provider.Vertex:      &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
 			// provider.BedrockOpenAI: &apikey_generation.SimpleAuthGenerator{HeaderName: "Authorization"}, // TODO THIS IS NOT WORKING
 		},
 		store: store,
