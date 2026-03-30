@@ -32,6 +32,10 @@ upstreamBbr:
 
   provider:
     name: istio
+    istio:
+      envoyFilter:
+        operation: INSERT_AFTER
+        anchorSubFilter: envoy.filters.http.ext_authz
 
   inferenceGateway:
     name: inference-gateway
