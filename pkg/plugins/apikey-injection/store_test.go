@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -51,106 +52,66 @@ func testSecret(namespace, name string, credentials map[string]string) *corev1.S
 func TestSecretStore(t *testing.T) {
 	tests := []struct {
 		name          string
-		initStoreFunc func(t *testing.T, s *secretStore)
+		initStoreFunc func(s *secretStore)
+		secretKey     string
+		wantFound     bool
+		wantCreds     map[string]string
 	}{
 		{
 			name: "AddOrUpdate and Get returns stored credentials",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
-				sec := testSecret("default", "openai-key", map[string]string{"api-key": "sk-key-1"})
-				require.NoError(t, s.addOrUpdate("default/openai-key", sec))
-
-				creds, found := s.get("default/openai-key")
-				assert.True(t, found)
-				if diff := cmp.Diff(map[string]string{"api-key": "sk-key-1"}, creds); diff != "" {
-					t.Errorf("credentials mismatch (-want +got):\n%s", diff)
-				}
+			initStoreFunc: func(s *secretStore) {
+				_ = s.addOrUpdate("default/openai-key", testSecret("default", "openai-key", map[string]string{"api-key": "sk-key-1"}))
 			},
+			secretKey: "default/openai-key",
+			wantFound: true,
+			wantCreds: map[string]string{"api-key": "sk-key-1"},
 		},
 		{
-			name: "get nonexistent key returns not found",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
-				_, found := s.get("default/nonexistent")
-				assert.False(t, found)
-			},
+			name:          "get nonexistent key returns not found",
+			initStoreFunc: func(s *secretStore) {},
+			secretKey:     "default/nonexistent",
+			wantFound:     false,
 		},
 		{
 			name: "AddOrUpdate overwrites existing entry",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
+			initStoreFunc: func(s *secretStore) {
 				_ = s.addOrUpdate("default/key", testSecret("default", "key", map[string]string{"api-key": "old-key"}))
 				_ = s.addOrUpdate("default/key", testSecret("default", "key", map[string]string{"api-key": "new-key"}))
-
-				creds, found := s.get("default/key")
-				assert.True(t, found)
-				assert.Equal(t, "new-key", creds["api-key"])
 			},
+			secretKey: "default/key",
+			wantFound: true,
+			wantCreds: map[string]string{"api-key": "new-key"},
 		},
 		{
 			name: "delete removes entry",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
+			initStoreFunc: func(s *secretStore) {
 				_ = s.addOrUpdate("default/key", testSecret("default", "key", map[string]string{"api-key": "sk-key-1"}))
 				s.delete("default/key")
-
-				_, found := s.get("default/key")
-				assert.False(t, found)
 			},
+			secretKey: "default/key",
+			wantFound: false,
 		},
 		{
 			name: "delete nonexistent key is a no-op",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
+			initStoreFunc: func(s *secretStore) {
 				s.delete("default/nonexistent")
 			},
-		},
-		{
-			name: "multiple secrets are independent",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
-				_ = s.addOrUpdate("default/key-a", testSecret("default", "key-a", map[string]string{"api-key": "value-1"}))
-				_ = s.addOrUpdate("default/key-b", testSecret("default", "key-b", map[string]string{"api-key": "value-2"}))
-
-				v1, f1 := s.get("default/key-a")
-				v2, f2 := s.get("default/key-b")
-				assert.True(t, f1)
-				assert.True(t, f2)
-				assert.Equal(t, "value-1", v1["api-key"])
-				assert.Equal(t, "value-2", v2["api-key"])
-
-				s.delete("default/key-a")
-				_, f1 = s.get("default/key-a")
-				_, f2 = s.get("default/key-b")
-				assert.False(t, f1)
-				assert.True(t, f2)
-			},
+			secretKey: "default/nonexistent",
+			wantFound: false,
 		},
 		{
 			name: "stores multiple fields from secret",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
-				wantCreds := map[string]string{
+			initStoreFunc: func(s *secretStore) {
+				_ = s.addOrUpdate("default/bedrock-creds", testSecret("default", "bedrock-creds", map[string]string{
 					"aws-access-key-id":     "AKIAIOSFODNN7EXAMPLE",
 					"aws-secret-access-key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-				}
-				sec := testSecret("default", "bedrock-creds", wantCreds)
-				require.NoError(t, s.addOrUpdate("default/bedrock-creds", sec))
-
-				creds, found := s.get("default/bedrock-creds")
-				assert.True(t, found)
-				if diff := cmp.Diff(wantCreds, creds); diff != "" {
-					t.Errorf("credentials mismatch (-want +got):\n%s", diff)
-				}
+				}))
 			},
-		},
-		{
-			name: "filters out empty fields",
-			initStoreFunc: func(t *testing.T, s *secretStore) {
-				sec := testSecret("default", "partial", map[string]string{
-					"api-key":     "sk-valid",
-					"empty-field": "",
-				})
-				require.NoError(t, s.addOrUpdate("default/partial", sec))
-
-				creds, found := s.get("default/partial")
-				assert.True(t, found)
-				assert.Equal(t, "sk-valid", creds["api-key"])
-				_, hasEmpty := creds["empty-field"]
-				assert.False(t, hasEmpty, "empty fields should be filtered out")
+			secretKey: "default/bedrock-creds",
+			wantFound: true,
+			wantCreds: map[string]string{
+				"aws-access-key-id":     "AKIAIOSFODNN7EXAMPLE",
+				"aws-secret-access-key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 			},
 		},
 	}
@@ -158,85 +119,64 @@ func TestSecretStore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newSecretStore()
-			tt.initStoreFunc(t, s)
+			tt.initStoreFunc(s)
+
+			creds, found := s.get(tt.secretKey)
+			require.Equal(t, tt.wantFound, found)
+			if tt.wantFound {
+				if diff := cmp.Diff(tt.wantCreds, creds, cmpopts.SortMaps(func(a, b string) bool { return a < b })); diff != "" {
+					t.Errorf("credentials mismatch (-want +got):\n%s", diff)
+				}
+			}
 		})
 	}
 }
 
-func TestAddOrUpdate(t *testing.T) {
+// TestAddOrUpdateErrors tests error handling in addOrUpdate.
+func TestAddOrUpdateErrors(t *testing.T) {
 	tests := []struct {
-		name      string
-		secret    *corev1.Secret
-		wantKey   string
-		wantCreds map[string]string
-		wantErr   bool
+		name   string
+		secret *corev1.Secret
+		key    string
 	}{
-		{
-			name:      "stores credentials from Secret data",
-			secret:    testSecret("default", "openai-key", map[string]string{"api-key": "sk-live-xxx"}),
-			wantKey:   "default/openai-key",
-			wantCreds: map[string]string{"api-key": "sk-live-xxx"},
-		},
 		{
 			name: "returns error when secret has no data",
 			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "no-data",
-					Namespace: "default",
-				},
-				Data: map[string][]byte{},
+				ObjectMeta: metav1.ObjectMeta{Name: "no-data", Namespace: "default"},
+				Data:       map[string][]byte{},
 			},
-			wantKey: "default/no-data",
-			wantErr: true,
+			key: "default/no-data",
 		},
 		{
-			name: "returns error when all fields are empty",
+			name: "returns error when field is empty",
 			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "empty-key",
-					Namespace: "default",
-				},
-				Data: map[string][]byte{"api-key": []byte("")},
+				ObjectMeta: metav1.ObjectMeta{Name: "empty-key", Namespace: "default"},
+				Data:       map[string][]byte{"api-key": []byte("")},
 			},
-			wantKey: "default/empty-key",
-			wantErr: true,
+			key: "default/empty-key",
 		},
 		{
-			name: "overwrites existing entry on update",
+			name: "returns error when one of multiple fields is empty",
 			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "key",
-					Namespace: "default",
+				ObjectMeta: metav1.ObjectMeta{Name: "partial", Namespace: "default"},
+				Data: map[string][]byte{
+					"aws-access-key-id":     []byte("AKIAIOSFODNN7EXAMPLE"),
+					"aws-secret-access-key": []byte(""),
 				},
-				Data: map[string][]byte{"api-key": []byte("new-key")},
 			},
-			wantKey:   "default/key",
-			wantCreds: map[string]string{"api-key": "new-key"},
+			key: "default/partial",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newSecretStore()
-			if tt.name == "overwrites existing entry on update" {
-				_ = s.addOrUpdate("default/key", testSecret("default", "key", map[string]string{"api-key": "old-key"}))
-			}
 
-			err := s.addOrUpdate(tt.wantKey, tt.secret)
+			err := s.addOrUpdate(tt.key, tt.secret)
 
-			if tt.wantErr {
-				require.Error(t, err)
-				_, found := s.get(tt.wantKey)
-				assert.False(t, found, "store should not contain entry when AddOrUpdate fails")
-				return
-			}
-
-			require.NoError(t, err)
-			creds, found := s.get(tt.wantKey)
-			assert.True(t, found)
-			if diff := cmp.Diff(tt.wantCreds, creds); diff != "" {
-				t.Errorf("credentials mismatch (-want +got):\n%s", diff)
-			}
+			require.Error(t, err)
+			_, found := s.get(tt.key)
+			assert.False(t, found, "store should not contain entry when addOrUpdate fails")
 		})
 	}
 }

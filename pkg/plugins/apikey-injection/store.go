@@ -38,22 +38,22 @@ func newSecretStore() *secretStore {
 	}
 }
 
-// addOrUpdate extracts all non-empty fields from the Secret's data and stores
-// them under the given key. Returns an error if the Secret has no data fields.
+// addOrUpdate extracts all fields from the Secret's data and stores them under
+// the given key. Returns an error if the Secret has no data fields or if any
+// field is empty.
 func (s *secretStore) addOrUpdate(key string, secret *corev1.Secret) error {
 	if len(secret.Data) == 0 {
-		return fmt.Errorf("secret %s has no data fields", key)
+		s.delete(key)
+		return fmt.Errorf("secret '%s' has no data fields", key)
 	}
 
 	credentials := make(map[string]string)
 	for field, value := range secret.Data {
-		if len(value) > 0 {
-			credentials[field] = string(value)
+		if len(value) == 0 {
+			s.delete(key)
+			return fmt.Errorf("secret '%s' has empty field '%s'", key, field)
 		}
-	}
-
-	if len(credentials) == 0 {
-		return fmt.Errorf("secret %s has no non-empty data fields", key)
+		credentials[field] = string(value)
 	}
 
 	s.mu.Lock()
