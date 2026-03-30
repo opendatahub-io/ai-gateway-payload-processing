@@ -31,12 +31,6 @@ spec:
     value: Dockerfile
   - name: path-context
     value: .
-  - name: build-platforms
-    value:
-    - linux/x86_64
-    - linux/aarch64
-    - linux/ppc64le
-    - linux/s390x
   - name: pipeline-type
     value: push
   pipelineRef:
