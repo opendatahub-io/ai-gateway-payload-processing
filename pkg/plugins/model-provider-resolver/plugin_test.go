@@ -82,9 +82,16 @@ func TestProcessRequest_ModelNotFound(t *testing.T) {
 func TestProcessRequest_NoModel(t *testing.T) {
 	store := newModelInfoStore()
 	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	cs := framework.NewCycleState()
 
-	err := p.ProcessRequest(context.Background(), framework.NewCycleState(), framework.NewInferenceRequest())
-	assert.Error(t, err)
+	err := p.ProcessRequest(context.Background(), cs, framework.NewInferenceRequest())
+	assert.NoError(t, err)
+
+	// CycleState should remain empty — request passes through unmodified
+	_, provErr := framework.ReadCycleStateKey[string](cs, state.ProviderKey)
+	assert.Error(t, provErr)
+	_, modelErr := framework.ReadCycleStateKey[string](cs, state.ModelKey)
+	assert.Error(t, modelErr)
 }
 
 func TestProcessRequest_NilRequest(t *testing.T) {

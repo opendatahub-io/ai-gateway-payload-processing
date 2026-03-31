@@ -19,7 +19,6 @@ package model_provider_resolver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -106,7 +105,7 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	model, ok := request.Body["model"].(string)
 	if !ok || model == "" {
-		return errors.New("failed to read 'model' from request body")
+		return nil // not an inference request (e.g. API key management, model listing)
 	}
 
 	info, found := p.modelInfoStore.getModelInfo(model)
