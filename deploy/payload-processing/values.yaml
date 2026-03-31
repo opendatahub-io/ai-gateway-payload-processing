@@ -35,7 +35,13 @@ upstreamBbr:
     istio:
       envoyFilter:
         operation: INSERT_AFTER
-        anchorSubFilter: ""
 
   inferenceGateway:
-    name: inference-gateway
+    name: maas-default-gateway
+
+payloadProcessing:
+  skipRoutes:
+    enabled: false
+    routeNames:
+      - maas-v1-models
+      - maas-api

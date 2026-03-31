@@ -1,0 +1,30 @@
+{{- if and .Values.payloadProcessing.skipRoutes.enabled (eq .Values.upstreamBbr.provider.name "istio") }}
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ printf "%s-extproc-skip-routes" .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.upstreamBbr.inferenceGateway.name }}
+  configPatches:
+  {{- range $routeName := .Values.payloadProcessing.skipRoutes.routeNames }}
+    - applyTo: HTTP_ROUTE
+      match:
+        context: GATEWAY
+        routeConfiguration:
+          vhost:
+            route:
+              name: {{ $routeName }}
+      patch:
+        operation: MERGE
+        value:
+          typed_per_filter_config:
+            "envoy.filters.http.ext_proc.bbr":
+              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+              disabled: true
+  {{- end }}
+{{- end }}
