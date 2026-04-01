@@ -27,6 +27,7 @@ import (
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/anthropic"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/azure"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/bedrock"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/openai"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/vertex"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
@@ -54,11 +55,11 @@ func NewAPITranslationPlugin() *APITranslationPlugin {
 			Name: APITranslationPluginType,
 		},
 		providers: map[string]translator.Translator{
-			provider.OpenAI:      openai.NewOpenAITranslator(),
-			provider.Anthropic:   anthropic.NewAnthropicTranslator(),
-			provider.AzureOpenAI: azure.NewAzureOpenAITranslator(),
-			provider.Vertex:      vertex.NewVertexTranslator(),
-			// provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(), TODO comment out until apikey injection is implemented
+			provider.OpenAI:        openai.NewOpenAITranslator(),
+			provider.Anthropic:     anthropic.NewAnthropicTranslator(),
+			provider.AzureOpenAI:   azure.NewAzureOpenAITranslator(),
+			provider.Vertex:        vertex.NewVertexTranslator(),
+			provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(),
 		},
 	}
 }

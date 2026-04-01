@@ -24,7 +24,7 @@ import (
 
 const (
 	// Bedrock OpenAI-compatible endpoint path
-	bedrockOpenAIPath = "/v1/chat/completions"
+	bedrockOpenAIPath = "/openai/v1/chat/completions"
 )
 
 // compile-time interface check

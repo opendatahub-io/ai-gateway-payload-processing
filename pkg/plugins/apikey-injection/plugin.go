@@ -71,11 +71,11 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Name: APIKeyInjectionPluginType,
 		},
 		authHeadersGenerators: map[string]auth.AuthHeadersGenerator{
-			provider.OpenAI:      &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.Anthropic:   &auth.SimpleAuthGenerator{HeaderName: "x-api-key"},
-			provider.AzureOpenAI: &auth.SimpleAuthGenerator{HeaderName: "api-key"},
-			provider.Vertex:      &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			// provider.BedrockOpenAI: &apikey_generation.SimpleAuthGenerator{HeaderName: "Authorization"}, // TODO THIS IS NOT WORKING
+			provider.OpenAI:        &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.Anthropic:     &auth.SimpleAuthGenerator{HeaderName: "x-api-key"},
+			provider.AzureOpenAI:   &auth.SimpleAuthGenerator{HeaderName: "api-key"},
+			provider.Vertex:        &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.BedrockOpenAI: &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
 		},
 		store: store,
 	}), nil
