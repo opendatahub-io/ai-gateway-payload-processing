@@ -3,8 +3,8 @@ upstreamBbr:
     name: payload-processing
     replicas: 1
     image:
-      hub: quay.io/opendatahub
-      name: odh-ai-gateway-payload-processing
+      registry: quay.io/opendatahub
+      repository: odh-ai-gateway-payload-processing
       tag: odh-stable
       pullPolicy: IfNotPresent
     port: 9004
@@ -35,7 +35,6 @@ upstreamBbr:
     istio:
       envoyFilter:
         operation: INSERT_AFTER
-        anchorSubFilter: ""
 
   inferenceGateway:
-    name: inference-gateway
+    name: maas-default-gateway
