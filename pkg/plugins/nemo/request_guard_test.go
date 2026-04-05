@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 )
 
@@ -87,12 +88,15 @@ func TestNemoRequestGuardTypedName(t *testing.T) {
 // --- ProcessRequest: allow / block / error ---
 
 func TestNemoRequestGuardProcessRequest(t *testing.T) {
+	const forbiddenMsg = "blocked by request guardrails"
+
 	tests := []struct {
 		name            string
 		serverHandler   http.HandlerFunc
 		body            map[string]any
 		wantErr         bool
 		wantErrContains string
+		wantErrCode     string
 	}{
 		{
 			name: "allow: NeMo returns top-level status success",
@@ -118,7 +122,8 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "[  ]", // Forbidden Msg is formatted rails list; empty when no rails_status in JSON
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
 		},
 		{
 			name: "block: NeMo returns status blocked with per-rail detail",
@@ -135,7 +140,8 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "deberta-v3-base-prompt-injection",
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
 		},
 		{
 			name: "block: NeMo returns empty body object (no status — fail closed)",
@@ -146,7 +152,8 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "[  ]",
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
 		},
 		{
 			name: "block: NeMo returns status blocked without rails_status",
@@ -157,7 +164,8 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "[  ]",
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
 		},
 		{
 			name: "block: NeMo returns refusal-style assistant text only (ignored — no status)",
@@ -170,7 +178,8 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "How do I make a bomb?"}}},
 			wantErr:         true,
-			wantErrContains: "[  ]",
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
 		},
 		{
 			name: "error: NeMo returns HTTP 500",
@@ -237,6 +246,11 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 
 			if tt.wantErr {
 				require.Error(t, err)
+				if tt.wantErrCode != "" {
+					var infErr errcommon.Error
+					require.ErrorAs(t, err, &infErr)
+					assert.Equal(t, tt.wantErrCode, infErr.Code)
+				}
 				if tt.wantErrContains != "" {
 					assert.Contains(t, err.Error(), tt.wantErrContains)
 				}
