@@ -36,8 +36,8 @@ import (
 const (
 	// NemoRequestGuardPluginType is the plugin type identifier.
 	NemoRequestGuardPluginType = "nemo-request-guard"
-	// nemoAllowedResponse is the expected response content from NeMo when a request passes all rails.
-	nemoAllowedResponse = "allowed"
+	// nemoAllowedStatus is the top-level JSON status when a request passes all rails.
+	nemoAllowedStatus = "success"
 	// defaultTimeoutSec allows for CPU-based LLM inference (2-5 min per request).
 	defaultTimeoutSec = 360
 	// maxNemoResponseBytes caps the NeMo response body to prevent memory exhaustion
@@ -46,34 +46,45 @@ const (
 )
 
 // compile-time type validation
-var _ framework.RequestProcessor = (*NemoRequestGuardPlugin)(nil)
+var _ framework.RequestProcessor = &NemoRequestGuardPlugin{}
 
 // NemoRequestGuardPlugin calls a NeMo Guardrails service over HTTP to check request content
 // using input rails. It implements RequestProcessor to intercept requests before forwarding.
 type NemoRequestGuardPlugin struct {
-	typedName         plugin.TypedName
-	nemoServerBaseURL string
-	nemoEndpointURL   string
-	httpClient        *http.Client
+	typedName  plugin.TypedName
+	nemoURL    string
+	httpClient *http.Client
 }
 
 // nemoRequestGuardConfig is the JSON configuration for the plugin.
 type nemoRequestGuardConfig struct {
-	BaseURL        string `json:"baseURL"`
+	NemoURL        string `json:"nemoURL"`
 	TimeoutSeconds int    `json:"timeoutSeconds"`
+}
+
+type nemoResponse struct {
+	Status      string                         `json:"status"`
+	RailsStatus map[string]nemoRailStatusEntry `json:"rails_status"`
+}
+
+// nemoRailStatusEntry is one rail's outcome inside NeMo's rails_status object.
+type nemoRailStatusEntry struct {
+	Status string `json:"status"`
 }
 
 // NemoRequestGuardFactory is the factory function for NemoRequestGuardPlugin.
 func NemoRequestGuardFactory(name string, rawParameters json.RawMessage, _ framework.Handle) (framework.BBRPlugin, error) {
-	var cfg nemoRequestGuardConfig
+	config := nemoRequestGuardConfig{
+		TimeoutSeconds: defaultTimeoutSec, // if no timeout set in raw params, default will be used
+	}
 
 	if len(rawParameters) > 0 {
-		if err := json.Unmarshal(rawParameters, &cfg); err != nil {
+		if err := json.Unmarshal(rawParameters, &config); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' plugin - %w", NemoRequestGuardPluginType, err)
 		}
 	}
 
-	p, err := NewNemoRequestGuardPlugin(cfg.BaseURL, cfg.TimeoutSeconds)
+	p, err := NewNemoRequestGuardPlugin(config.NemoURL, config.TimeoutSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create '%s' plugin - %w", NemoRequestGuardPluginType, err)
 	}
@@ -83,21 +94,18 @@ func NemoRequestGuardFactory(name string, rawParameters json.RawMessage, _ frame
 
 // NewNemoRequestGuardPlugin builds a NeMo request guard plugin from validated parameters.
 // The NeMo server is expected to have a default configuration (--default-config-id).
-func NewNemoRequestGuardPlugin(nemoServerBaseURL string, timeoutSeconds int) (*NemoRequestGuardPlugin, error) {
-	if nemoServerBaseURL == "" {
-		return nil, fmt.Errorf("baseURL is required in %s plugin", NemoRequestGuardPluginType)
+func NewNemoRequestGuardPlugin(nemoURL string, timeoutSeconds int) (*NemoRequestGuardPlugin, error) {
+	if nemoURL == "" {
+		return nil, fmt.Errorf("nemoURL is required for plugin '%s'", NemoRequestGuardPluginType)
 	}
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = defaultTimeoutSec * time.Second
 	}
 
-	endpointURL := strings.TrimRight(nemoServerBaseURL, "/") + "/v1/chat/completions"
-
 	return &NemoRequestGuardPlugin{
-		typedName:         plugin.TypedName{Type: NemoRequestGuardPluginType, Name: NemoRequestGuardPluginType},
-		nemoServerBaseURL: nemoServerBaseURL,
-		nemoEndpointURL:   endpointURL,
+		typedName: plugin.TypedName{Type: NemoRequestGuardPluginType, Name: NemoRequestGuardPluginType},
+		nemoURL:   nemoURL,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -116,18 +124,16 @@ func (p *NemoRequestGuardPlugin) WithName(name string) *NemoRequestGuardPlugin {
 }
 
 // ProcessRequest calls NeMo Guardrails to evaluate input rails on the incoming request.
-// It extracts the last user message from the OpenAI-style body, POSTs to NeMo
-// /v1/chat/completions, and returns an errcommon.Error with Forbidden (403) if NeMo flags
-// the content, which the framework converts into an Envoy ImmediateResponse.
+// It extracts the last user message from the OpenAI-style body, POSTs to NeMo url,
+// and returns an errcommon.Error with Forbidden (403) if NeMo flags the content.
 //
 // NeMo always returns HTTP 200 for both allowed and blocked requests. The block/allow
-// decision is conveyed through the response body: choices[0].message.content equal to
-// "allowed" means the request passed all rails; any other content is a block reason.
+// decision is conveyed through the response body "status" field.
+// "success" means the request passed all rails; "blocked" means the request is blocked.
 func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framework.CycleState, request *framework.InferenceRequest) error {
-	logger := log.FromContext(ctx)
-
-	if request == nil || request.Body == nil {
-		return errcommon.Error{Code: errcommon.Internal, Msg: "nemo-request-guard: invalid inference request: request/body must be non-nil"}
+	model, ok := request.Body["model"].(string)
+	if !ok || model == "" {
+		return nil // not an inference request (e.g. API key management, model listing)
 	}
 
 	messages, err := extractMessages(request.Body)
@@ -138,10 +144,10 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framewor
 		return nil // no messages to check (e.g. non-chat request) → allow
 	}
 
-	// "model" is required by the NeMo OpenAI-compatible API schema but is not used
-	// for guard-only configurations — the guard model is defined in NeMo's config.yml.
+	// "model" field is required by the NeMo OpenAI-compatible API schema but is not used.
+	// the guard model is defined in NeMo's config.yml.
 	reqBody := map[string]any{
-		"model":    "",
+		"model":    model,
 		"messages": messages,
 	}
 	payload, err := json.Marshal(reqBody)
@@ -149,9 +155,10 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framewor
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("nemo-request-guard: marshal request: %v", err)}
 	}
 
-	logger.V(logutil.VERBOSE).Info("calling NeMo guardrails", "url", p.nemoEndpointURL)
+	logger := log.FromContext(ctx)
+	logger.V(logutil.VERBOSE).Info("calling NeMo guardrails", "url", p.nemoURL)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.nemoEndpointURL, bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.nemoURL, bytes.NewReader(payload))
 	if err != nil {
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("nemo-request-guard: create request: %v", err)}
 	}
@@ -167,29 +174,24 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framewor
 		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: fmt.Sprintf("nemo-request-guard: unexpected status %d", resp.StatusCode)}
 	}
 
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+	limited := io.LimitReader(resp.Body, maxNemoResponseBytes)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: fmt.Sprintf("nemo-request-guard: read response: %v", err)}
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxNemoResponseBytes)).Decode(&out); err != nil {
+
+	var response nemoResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: fmt.Sprintf("nemo-request-guard: decode response: %v", err)}
 	}
 
-	content := ""
-	if len(out.Choices) > 0 {
-		content = strings.TrimSpace(out.Choices[0].Message.Content)
-	}
-
-	if strings.EqualFold(content, nemoAllowedResponse) {
+	if strings.EqualFold(strings.TrimSpace(response.Status), nemoAllowedStatus) {
 		logger.V(logutil.VERBOSE).Info("request allowed by NeMo guardrails")
 		return nil
 	}
 
-	logger.Info("request blocked by NeMo guardrails", "reason", content)
-	return errcommon.Error{Code: errcommon.Forbidden, Msg: fmt.Sprintf("nemo-request-guard: request blocked: %s", content)}
+	logger.Info("request blocked by NeMo guardrails", "railsStatus", response.RailsStatus)
+	return errcommon.Error{Code: errcommon.Forbidden, Msg: fmt.Sprintf("%v", response.RailsStatus)}
 }
 
 // extractMessages pulls OpenAI-style "messages" from the body and returns the last user message
