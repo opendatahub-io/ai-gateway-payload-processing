@@ -99,10 +99,6 @@ func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolv
 // from the modelInfoStore (populated by ExternalModel reconciler), and writes model, provider
 // and credential reference info to CycleState.
 func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
-	if request == nil || request.Headers == nil || request.Body == nil {
-		return fmt.Errorf("invalid inference request: request/headers/body must be non-nil")
-	}
-
 	model, ok := request.Body["model"].(string)
 	if !ok || model == "" {
 		return nil // not an inference request (e.g. API key management, model listing)

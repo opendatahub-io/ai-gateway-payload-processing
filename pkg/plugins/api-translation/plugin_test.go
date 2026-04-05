@@ -236,22 +236,6 @@ func TestProcessRequest_UnknownProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown")
 }
 
-func TestProcessRequest_NilRequest(t *testing.T) {
-	p := NewAPITranslationPlugin()
-
-	err := p.ProcessRequest(context.Background(), framework.NewCycleState(), nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "non-nil")
-}
-
-func TestProcessResponse_NilResponse(t *testing.T) {
-	p := NewAPITranslationPlugin()
-
-	err := p.ProcessResponse(context.Background(), framework.NewCycleState(), nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "non-nil")
-}
-
 func TestProcessResponse_Anthropic(t *testing.T) {
 	p := NewAPITranslationPlugin()
 

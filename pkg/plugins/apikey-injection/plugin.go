@@ -104,10 +104,6 @@ func (p *ApiKeyInjectionPlugin) WithName(name string) *ApiKeyInjectionPlugin {
 // ProcessRequest reads the credential Secret reference and provider from CycleState (written by model-provider-resolver),
 // looks up the API key in the store, and injects provider-specific auth headers into the request.
 func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
-	if request == nil || request.Headers == nil {
-		return errcommon.Error{Code: errcommon.BadRequest, Msg: "request or headers is nil"}
-	}
-
 	// Check if this is an external model (provider set by model-provider-resolver).
 	// Internal models have no provider in CycleState and don't need API key injection.
 	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey)

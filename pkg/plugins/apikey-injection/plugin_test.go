@@ -120,13 +120,6 @@ func TestProcessRequest(t *testing.T) {
 			errorContains: "credentials not found",
 		},
 		{
-			name:              "request is nil",
-			secrets:           []*corev1.Secret{},
-			request:           nil,
-			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
-			errorContains:     "request or headers is nil",
-		},
-		{
 			name:    "missing api-key field in credentials results in error",
 			secrets: []*corev1.Secret{testSecret("default", "wrong-fields", map[string]string{"wrong-field": "value"})},
 			request: framework.NewInferenceRequest(),

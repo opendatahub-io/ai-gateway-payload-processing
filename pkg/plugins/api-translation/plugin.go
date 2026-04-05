@@ -127,10 +127,6 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *f
 // ProcessResponse reads the provider from CycleState and translates the response
 // back to OpenAI Chat Completions format if needed.
 func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *framework.CycleState, response *framework.InferenceResponse) error {
-	if response == nil || response.Headers == nil || response.Body == nil {
-		return fmt.Errorf("invalid inference response: response/headers/body must be non-nil")
-	}
-
 	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
 	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
 		return nil

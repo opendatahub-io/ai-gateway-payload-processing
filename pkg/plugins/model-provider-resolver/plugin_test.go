@@ -94,14 +94,6 @@ func TestProcessRequest_NoModel(t *testing.T) {
 	assert.Error(t, modelErr)
 }
 
-func TestProcessRequest_NilRequest(t *testing.T) {
-	store := newModelInfoStore()
-	p := &ModelProviderResolverPlugin{modelInfoStore: store}
-
-	err := p.ProcessRequest(context.Background(), framework.NewCycleState(), nil)
-	assert.Error(t, err)
-}
-
 func TestProcessRequest_NoCredentialRef(t *testing.T) {
 	store := newModelInfoStore()
 	store.setModelInfo("gpt-4o", ModelInfo{
