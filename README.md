@@ -27,6 +27,12 @@ if you're running this repo as a standalone, you need to deploy the CRD before r
     export GATEWAY_NAMESPACE=openshift-ingress
     ```
 
+1.  Clean local copy of upstream chart to avoid using stale version:
+
+    ```bash
+    rm ./deploy/payload-processing/charts/body-based-routing-v0.tgz
+    ```
+
 1.  Install `payload-processing` helm chart:
 
     ```bash
