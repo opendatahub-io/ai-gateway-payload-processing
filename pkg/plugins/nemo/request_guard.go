@@ -198,7 +198,7 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framewor
 	railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
 
 	logger.Info("request blocked by NeMo guardrails", "railsStatus", railsStatus)
-	return errcommon.Error{Code: errcommon.Forbidden, Msg: "blocked by request guardrails"}
+	return errcommon.Error{Code: errcommon.Forbidden, Msg: "request blocked by NeMo guardrails"}
 }
 
 // extractMessages pulls OpenAI-style "messages" from the body and returns the last user message

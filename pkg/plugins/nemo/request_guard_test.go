@@ -88,7 +88,7 @@ func TestNemoRequestGuardTypedName(t *testing.T) {
 // --- ProcessRequest: allow / block / error ---
 
 func TestNemoRequestGuardProcessRequest(t *testing.T) {
-	const forbiddenMsg = "blocked by request guardrails"
+	const forbiddenMsg = "request blocked by NeMo guardrails"
 
 	tests := []struct {
 		name            string
