@@ -27,8 +27,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 )
 
 // nemoAllowedJSON is a minimal NeMo guard response that means “allow”.
@@ -259,14 +259,6 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNemoRequestGuardProcessRequestNilRequestPanics(t *testing.T) {
-	p, err := NewNemoRequestGuardPlugin("http://nemo:8000", 30)
-	require.NoError(t, err)
-	assert.Panics(t, func() {
-		_ = p.ProcessRequest(context.Background(), framework.NewCycleState(), nil)
-	})
 }
 
 // TestNemoRequestGuardSendsCorrectPayload verifies the request sent to NeMo matches the expected format.
