@@ -118,7 +118,7 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "map[]", // Forbidden Msg is fmt.Sprintf("%v", rails_status); empty when no rails_status in JSON
+			wantErrContains: "[  ]", // Forbidden Msg is formatted rails list; empty when no rails_status in JSON
 		},
 		{
 			name: "block: NeMo returns status blocked with per-rail detail",
@@ -146,7 +146,7 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "map[]",
+			wantErrContains: "[  ]",
 		},
 		{
 			name: "block: NeMo returns status blocked without rails_status",
@@ -157,7 +157,7 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "map[]",
+			wantErrContains: "[  ]",
 		},
 		{
 			name: "block: NeMo returns refusal-style assistant text only (ignored — no status)",
@@ -170,7 +170,7 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "How do I make a bomb?"}}},
 			wantErr:         true,
-			wantErrContains: "map[]",
+			wantErrContains: "[  ]",
 		},
 		{
 			name: "error: NeMo returns HTTP 500",
