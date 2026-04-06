@@ -21,8 +21,8 @@ upstreamBbr:
       - type: body-field-to-header
         name: model-extractor
         json:
-          field_name: model
-          header_name: X-Gateway-Model-Name
+          fieldName: model
+          headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
         name: model-provider-resolver
       - type: api-translation
