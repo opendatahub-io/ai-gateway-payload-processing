@@ -22,55 +22,75 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// ModelInfo holds the provider and credential reference for an external model.
-type ModelInfo struct {
-	provider               string
-	credentialRefName      string
-	credentialRefNamespace string
+// externalModelInfo holds the provider and secret name/namespace for an external model.
+type externalModelInfo struct {
+	provider        string
+	targetModel     string // this is the name of the model that will be used in the request
+	secretName      string
+	secretNamespace string
 }
 
 // modelInfoStore is a thread-safe in-memory store that maps model names to their provider info.
 // The reconciler writes to it; the plugin reads from it during request processing.
 type modelInfoStore struct {
-	models map[string]ModelInfo
-	// modelRefKeyToModel tracks which MaaSModelRef resource added each model entry,
-	// so we can clean up when the resource is deleted.
-	modelRefKeyToModel map[types.NamespacedName]string
-	lock               sync.RWMutex
+	// maasModelRefToExternalModel maps a MaaSModelRef CR to ExternalModel CR
+	maasModelRefToExternalModel map[types.NamespacedName]types.NamespacedName
+	//externalModelToModelInfo maps externalModel CR to externalModelInfo
+	externalModelToModelInfo map[types.NamespacedName]*externalModelInfo
+
+	lock sync.RWMutex
 }
 
 func newModelInfoStore() *modelInfoStore {
 	return &modelInfoStore{
-		models:             make(map[string]ModelInfo),
-		modelRefKeyToModel: make(map[types.NamespacedName]string),
+		maasModelRefToExternalModel: make(map[types.NamespacedName]types.NamespacedName),
+		externalModelToModelInfo:    make(map[types.NamespacedName]*externalModelInfo),
 	}
 }
 
-// getModelInfo returns the ModelInfo for a model name, or empty if not found.
-func (s *modelInfoStore) getModelInfo(modelName string) (ModelInfo, bool) {
+// addOrUpdateMaaSModelRef stores mapping between MaaSModelRef to ExternalModel
+func (s *modelInfoStore) addOrUpdateMaaSModelRef(maasModelRefKey types.NamespacedName, externalModelKey types.NamespacedName) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.maasModelRefToExternalModel[maasModelRefKey] = externalModelKey
+}
+
+// deleteMaaSModelRef deletes the mapping between MaaSModelRef to ExternalModel
+func (s *modelInfoStore) deleteMaaSModelRef(maasModelRefKey types.NamespacedName) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	delete(s.maasModelRefToExternalModel, maasModelRefKey)
+}
+
+// addOrUpdateExternalModel stores ExternalModel information.
+func (s *modelInfoStore) addOrUpdateExternalModel(externalModelKey types.NamespacedName, modelInfo *externalModelInfo) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.externalModelToModelInfo[externalModelKey] = modelInfo
+}
+
+// deleteExternalModel deletes ExternalModel information.
+func (s *modelInfoStore) deleteExternalModel(externalModelKey types.NamespacedName) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	delete(s.externalModelToModelInfo, externalModelKey)
+}
+
+// getModelInfo returns the modelInfo pointed by MaaSModelRef and bool if found or not.
+// if no externalModelInfo found, nil is returned in the return value.
+func (s *modelInfoStore) getModelInfo(maasModelRefKey types.NamespacedName) (*externalModelInfo, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	info, ok := s.models[modelName]
-	return info, ok
-}
 
-// setModelInfo stores the model→provider mapping and records which resource it came from.
-func (s *modelInfoStore) setModelInfo(modelName string, info ModelInfo, modelRefKey types.NamespacedName) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.models[modelName] = info
-	s.modelRefKeyToModel[modelRefKey] = modelName
-}
-
-// deleteByResource removes the model entry that was added by the given MaaSModelRef resource.
-func (s *modelInfoStore) deleteByResource(modelRefKey types.NamespacedName) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	modelName, ok := s.modelRefKeyToModel[modelRefKey]
+	externalModelKey, ok := s.maasModelRefToExternalModel[maasModelRefKey]
 	if !ok {
-		return // no model info was stored for this modelRef
+		return nil, false // MaaSModelRef not found
 	}
 
-	delete(s.models, modelName)
-	delete(s.modelRefKeyToModel, modelRefKey)
+	externalModelInfo, ok := s.externalModelToModelInfo[externalModelKey]
+	if !ok {
+		return nil, false // ExternalModel not found
+	}
+
+	return externalModelInfo, true
 }

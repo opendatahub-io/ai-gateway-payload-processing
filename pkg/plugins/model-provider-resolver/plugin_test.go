@@ -29,28 +29,74 @@ import (
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
+func TestParseModelRefFromPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		path     string
+		wantNS   string
+		wantName string
+		wantOk   bool
+	}{
+		{path: "/llm/my-ref/v1/chat/completions", wantNS: "llm", wantName: "my-ref", wantOk: true},
+		{path: "llm/my-ref/v1/chat/completions", wantNS: "llm", wantName: "my-ref", wantOk: true},
+		{path: "/ns-a/model-b?stream=true", wantNS: "ns-a", wantName: "model-b", wantOk: true},
+		{path: "//production//echo//v1/completions", wantOk: false}, // empty segment between slashes
+		{path: "", wantOk: false},
+		{path: "/only-one", wantOk: false},
+		{path: "/v1/chat/completions", wantNS: "v1", wantName: "chat", wantOk: true},
+	}
+	for _, tt := range tests {
+		tt := tt // capture range variable for t.Parallel subtests
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			got := parseMaaSModelRefKeyFromPath(tt.path)
+			if !tt.wantOk {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.wantNS, got.Namespace)
+			assert.Equal(t, tt.wantName, got.Name)
+		})
+	}
+}
+
 func TestProcessRequest_ModelResolved(t *testing.T) {
 	store := newModelInfoStore()
-	model := "claude-sonnet"
-	credentialRefName := "anthropic-key"
-	credentialRefNamespace := "llm"
-	store.setModelInfo(model, ModelInfo{
-		provider:               provider.Anthropic,
-		credentialRefName:      credentialRefName,
-		credentialRefNamespace: credentialRefNamespace,
-	}, types.NamespacedName{Name: "claude-sonnet", Namespace: "llm"})
+	const (
+		maasRefNS     = "llm"
+		maasRefName   = "my-external-ref"
+		extModel      = "claude-sonnet"
+		credName      = "anthropic-key"
+		credNamespace = "llm"
+	)
+	store.addOrUpdateMaaSModelRef(
+		types.NamespacedName{Namespace: maasRefNS, Name: maasRefName},
+		types.NamespacedName{Namespace: maasRefNS, Name: extModel},
+	)
+	store.addOrUpdateExternalModel(
+		types.NamespacedName{Namespace: maasRefNS, Name: extModel},
+		&externalModelInfo{
+			provider:        provider.Anthropic,
+			targetModel:     extModel,
+			secretName:      credName,
+			secretNamespace: credNamespace,
+		},
+	)
 
 	plugin := &ModelProviderResolverPlugin{modelInfoStore: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
-	req.Body["model"] = model
+	req.Headers[":path"] = "/" + maasRefNS + "/" + maasRefName + "/v1/chat/completions"
+	// Body "model" must match targetModel on the ExternalModel (ProcessRequest validates this).
+	req.Body["model"] = extModel
 
 	err := plugin.ProcessRequest(context.Background(), cs, req)
 	require.NoError(t, err)
 
 	actualModel, err := framework.ReadCycleStateKey[string](cs, state.ModelKey)
 	assert.NoError(t, err)
-	assert.Equal(t, model, actualModel)
+	assert.Equal(t, extModel, actualModel)
 
 	actualProvider, err := framework.ReadCycleStateKey[string](cs, state.ProviderKey)
 	assert.NoError(t, err)
@@ -58,11 +104,11 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 
 	actualCredsName, err := framework.ReadCycleStateKey[string](cs, state.CredsRefName)
 	assert.NoError(t, err)
-	assert.Equal(t, credentialRefName, actualCredsName)
+	assert.Equal(t, credName, actualCredsName)
 
 	actualCredsNamespace, err := framework.ReadCycleStateKey[string](cs, state.CredsRefNamespace)
 	assert.NoError(t, err)
-	assert.Equal(t, credentialRefNamespace, actualCredsNamespace)
+	assert.Equal(t, credNamespace, actualCredsNamespace)
 }
 
 func TestProcessRequest_ModelNotFound(t *testing.T) {
@@ -70,6 +116,7 @@ func TestProcessRequest_ModelNotFound(t *testing.T) {
 	p := &ModelProviderResolverPlugin{modelInfoStore: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/unknown-ref/v1/chat/completions"
 	req.Body["model"] = "unknown-model"
 
 	err := p.ProcessRequest(context.Background(), cs, req)
@@ -94,16 +141,48 @@ func TestProcessRequest_NoModel(t *testing.T) {
 	assert.Error(t, modelErr)
 }
 
+func TestProcessRequest_BadPath(t *testing.T) {
+	store := newModelInfoStore()
+	store.addOrUpdateMaaSModelRef(
+		types.NamespacedName{Namespace: "llm", Name: "ref"},
+		types.NamespacedName{Namespace: "llm", Name: "ext"},
+	)
+	store.addOrUpdateExternalModel(
+		types.NamespacedName{Namespace: "llm", Name: "ext"},
+		&externalModelInfo{provider: provider.OpenAI, secretName: "k", secretNamespace: "llm"},
+	)
+	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	cs := framework.NewCycleState()
+	req := framework.NewInferenceRequest()
+	req.Headers[":path"] = "/incomplete"
+	req.Body["model"] = "gpt-4o"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	assert.NoError(t, err)
+
+	_, provErr := framework.ReadCycleStateKey[string](cs, state.ProviderKey)
+	assert.Error(t, provErr)
+}
+
 func TestProcessRequest_NoCredentialRef(t *testing.T) {
 	store := newModelInfoStore()
-	store.setModelInfo("gpt-4o", ModelInfo{
-		provider: provider.OpenAI,
-		// no credential ref
-	}, types.NamespacedName{Name: "gpt-4o", Namespace: "llm"})
+	store.addOrUpdateMaaSModelRef(
+		types.NamespacedName{Namespace: "llm", Name: "gpt-ref"},
+		types.NamespacedName{Namespace: "llm", Name: "gpt-4o"},
+	)
+	store.addOrUpdateExternalModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt-4o"},
+		&externalModelInfo{
+			provider:    provider.OpenAI,
+			targetModel: "gpt-4o", // reconciler sets this from ExternalModel metadata.name
+			// no secret
+		},
+	)
 
 	p := &ModelProviderResolverPlugin{modelInfoStore: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt-ref/v1/chat/completions"
 	req.Body["model"] = "gpt-4o"
 
 	err := p.ProcessRequest(context.Background(), cs, req)
@@ -113,5 +192,7 @@ func TestProcessRequest_NoCredentialRef(t *testing.T) {
 	assert.Equal(t, provider.OpenAI, actualProvider)
 
 	_, credErr := framework.ReadCycleStateKey[string](cs, state.CredsRefName)
-	assert.Error(t, credErr)
+	assert.NoError(t, credErr)
+	credsVal, _ := framework.ReadCycleStateKey[string](cs, state.CredsRefName)
+	assert.Equal(t, "", credsVal)
 }

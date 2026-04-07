@@ -20,12 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
@@ -34,13 +36,6 @@ import (
 const (
 	ModelProviderResolverPluginType = "model-provider-resolver"
 )
-
-// externalModelGVK is the GroupVersionKind for ExternalModel CRD.
-var externalModelGVK = schema.GroupVersionKind{
-	Group:   "maas.opendatahub.io",
-	Version: "v1alpha1",
-	Kind:    "ExternalModel",
-}
 
 // compile-time type validation
 var _ framework.RequestProcessor = &ModelProviderResolverPlugin{}
@@ -57,17 +52,30 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 
 func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ModelProviderResolverPlugin, error) {
 	modelInfoStore := newModelInfoStore()
-	reconciler := &externalModelReconciler{
+	externalModelReconciler := &externalModelReconciler{
 		Reader: clientReader,
 		store:  modelInfoStore,
 	}
 
-	// Watch ExternalModel CRDs directly (no MaaSModelRef dependency)
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
+	// Watch ExternalModel CRDs directly (no MaaS dependency)
+	externalModelObj := &unstructured.Unstructured{}
+	externalModelObj.SetGroupVersionKind(externalModelGVK)
 
-	if err := reconcilerBuilder().For(obj).Complete(reconciler); err != nil {
+	if err := reconcilerBuilder().For(externalModelObj).Complete(externalModelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
+	maasModelRefReconciler := &maasModelRefReconciler{
+		Reader: clientReader,
+		store:  modelInfoStore,
+	}
+
+	// Watch MaaSModelRef CRDs directly (no MaaS dependency)
+	maasModelRefObj := &unstructured.Unstructured{}
+	maasModelRefObj.SetGroupVersionKind(maasModelRefGVK)
+
+	if err := reconcilerBuilder().For(maasModelRefObj).Complete(maasModelRefReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register MaaSModelRef reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{
@@ -104,20 +112,49 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 		return nil // not an inference request (e.g. API key management, model listing)
 	}
 
-	info, found := p.modelInfoStore.getModelInfo(model)
+	maasModelRefKey := parseMaaSModelRefKeyFromPath(request.Headers[":path"])
+	if maasModelRefKey == nil {
+		return nil // wasn't able to parse namespaced name
+	}
+
+	externalModelInfo, found := p.modelInfoStore.getModelInfo(*maasModelRefKey)
 	if !found { // info is stored only for external models
 		return nil // this is not considered an error, we just need to skip if it's internal model
 	}
 
-	// info of external model written to cycle state for next plugins
-	cycleState.Write(state.ModelKey, model)
-	cycleState.Write(state.ProviderKey, info.provider)
-	if info.credentialRefName != "" {
-		cycleState.Write(state.CredsRefName, info.credentialRefName)
-	}
-	if info.credentialRefNamespace != "" {
-		cycleState.Write(state.CredsRefNamespace, info.credentialRefNamespace)
+	// if there's a mismatch it's an error, we don't want to proceed
+	if externalModelInfo.targetModel != model {
+		return errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("model in request body '%s' doesn't match MaaSModelRef", model)}
 	}
 
+	// info of external model written to cycle state for next plugins
+	cycleState.Write(state.ProviderKey, externalModelInfo.provider)
+	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
+	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
+	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
+
 	return nil
+}
+
+// parseMaaSModelRefKeyFromPath extracts the MaaSModelRef namespace and name from :path.
+// Layout: /<namespace>/<maasModelRefName>/... (e.g. /llm/my-ref/v1/chat/completions).
+// A query string on :path is stripped first. Leading/trailing slashes are trimmed so
+// strings.Split after that yields namespace and name as the first two segments.
+func parseMaaSModelRefKeyFromPath(relativeUrlPath string) *types.NamespacedName {
+	relativeUrlPath = strings.TrimSpace(relativeUrlPath)
+	if relativeUrlPath == "" {
+		return nil
+	}
+	if index := strings.IndexByte(relativeUrlPath, '?'); index >= 0 {
+		relativeUrlPath = relativeUrlPath[:index] // remove query params
+	}
+	relativeUrlPath = strings.Trim(relativeUrlPath, "/")
+	if relativeUrlPath == "" {
+		return nil
+	}
+	segments := strings.Split(relativeUrlPath, "/")
+	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
+		return nil
+	}
+	return &types.NamespacedName{Namespace: segments[0], Name: segments[1]}
 }

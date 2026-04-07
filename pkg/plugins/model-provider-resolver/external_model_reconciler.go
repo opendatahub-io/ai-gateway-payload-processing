@@ -22,10 +22,18 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// externalModelGVK is the GroupVersionKind for ExternalModel CRD.
+var externalModelGVK = schema.GroupVersionKind{
+	Group:   "maas.opendatahub.io",
+	Version: "v1alpha1",
+	Kind:    "ExternalModel",
+}
 
 // externalModelReconciler watches ExternalModel CRDs (via unstructured client)
 // and updates the model store with provider and credential information.
@@ -45,45 +53,29 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	obj.SetGroupVersionKind(externalModelGVK)
 
 	err := r.Get(ctx, req.NamespacedName, obj)
-	if errors.IsNotFound(err) {
-		r.store.deleteByResource(req.NamespacedName)
-		logger.Info("ExternalModel deleted, cleaned store", "name", req.Name)
-		return ctrl.Result{}, nil
-	}
-	if err != nil {
+	if err != nil && !errors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("unable to get ExternalModel: %w", err)
 	}
 
-	if !obj.GetDeletionTimestamp().IsZero() {
-		r.store.deleteByResource(req.NamespacedName)
+	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
+		r.store.deleteExternalModel(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
 	provider, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
-	if provider == "" {
-		logger.Info("ExternalModel missing provider, skipping", "name", req.Name)
-		r.store.deleteByResource(req.NamespacedName)
-		return ctrl.Result{}, nil
+	targetModel := req.Name // TODO this is temp! we should add targetModel to the external model spec
+	// targetModel, _, _ := unstructured.NestedString(obj.Object, "spec", "targetModel") // TODO uncomment after CRD is updated
+	credsName, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "name")
+
+	// targetModel is the model that will be used in the request body when getting inference requests.
+	info := &externalModelInfo{
+		provider:        provider,
+		targetModel:     targetModel,
+		secretName:      credsName,
+		secretNamespace: req.Namespace, // secret namespace is always the namespace of the ExternalModel
 	}
+	r.store.addOrUpdateExternalModel(req.NamespacedName, info)
 
-	info := ModelInfo{
-		provider: provider,
-	}
-
-	// Extract credentialRef
-	credName, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "name")
-	credNS, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "namespace")
-	if credName != "" {
-		info.credentialRefName = credName
-		info.credentialRefNamespace = credNS
-		if info.credentialRefNamespace == "" {
-			info.credentialRefNamespace = obj.GetNamespace()
-		}
-	}
-
-	// ExternalModel name = model key (matches the model name in request body)
-	r.store.setModelInfo(req.Name, info, req.NamespacedName)
-	logger.Info("Updated model store", "model", req.Name, "provider", provider)
-
+	logger.Info("Updated model store", "provider", provider, "targetModel", targetModel)
 	return ctrl.Result{}, nil
 }

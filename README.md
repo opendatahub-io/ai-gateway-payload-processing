@@ -6,15 +6,16 @@ BBR plugins enable custom request/response mutations of both headers and body, a
 
 ## Pre-Requisites
 
-The target cluster must have `ExternalModel` CRD deployed.  
-If you're running this deployment after `model-as-a-service`, the CRD is already included.
+The target cluster must have `MaaSModelRef` and `ExternalModel` CRDs deployed.  
+If you're running this deployment after `model-as-a-service`, the CRDs are already included.
 if you're running this repo as a standalone, you need to deploy the CRD before running the helm chart.
 
 ## Install Payload Processing
 
-1. If ExternalModel CRD is not deployed in your cluster, deploy it using the following:
+1. If MaaSModelRef and ExternalModel CRD are not deployed in your cluster, deploy it using the following:
 
     ```bash
+    kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_maasmodelrefs.yaml
     kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
     ```
 
@@ -55,8 +56,9 @@ if you're running this repo as a standalone, you need to deploy the CRD before r
     helm uninstall payload-processing --namespace ${GATEWAY_NAMESPACE}
     ```
 
-1.  Delete the ExternalModel CRD (optionally):
+1.  Delete the CRDs (optionally):
 
     ```bash
+    kubectl delete -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_maasmodelrefs.yaml
     kubectl delete -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
     ```
