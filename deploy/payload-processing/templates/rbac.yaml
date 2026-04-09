@@ -10,7 +10,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
-  # model-provider-resolver plugin: watches MaaSModelRef and ExternalModel CRDs
+  # model-provider-resolver plugin: watches ExternalModel CRD
   - apiGroups: ["maas.opendatahub.io"]
     resources: ["externalmodels"]
     verbs: ["get", "list", "watch"]
@@ -39,7 +39,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
-  # model-provider-resolver plugin: watches MaaSModelRef and ExternalModel CRDs
+  # model-provider-resolver plugin: watches ExternalModel CRD
   - apiGroups: ["maas.opendatahub.io"]
     resources: ["externalmodels"]
     verbs: ["get", "list", "watch"]
