@@ -85,10 +85,6 @@ func (p *APITranslationPlugin) WithName(name string) *APITranslationPlugin {
 // ProcessRequest reads the provider from CycleState (set by an upstream plugin) and translates
 // the request body from OpenAI format to the provider's native format if needed.
 func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
-	if request == nil || request.Headers == nil || request.Body == nil {
-		return fmt.Errorf("invalid inference request: request/headers/body must be non-nil")
-	}
-
 	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
 	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
 		return nil
