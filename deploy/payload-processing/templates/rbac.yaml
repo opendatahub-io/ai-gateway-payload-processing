@@ -12,7 +12,7 @@ rules:
     verbs: ["get", "list", "watch"]
   # model-provider-resolver plugin: watches MaaSModelRef and ExternalModel CRDs
   - apiGroups: ["maas.opendatahub.io"]
-    resources: ["maasmodelrefs", "externalmodels"]
+    resources: ["externalmodels"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -41,7 +41,7 @@ rules:
     verbs: ["get", "list", "watch"]
   # model-provider-resolver plugin: watches MaaSModelRef and ExternalModel CRDs
   - apiGroups: ["maas.opendatahub.io"]
-    resources: ["maasmodelrefs", "externalmodels"]
+    resources: ["externalmodels"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

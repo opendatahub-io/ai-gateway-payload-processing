@@ -25,40 +25,38 @@ import (
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 )
 
-func TestModelStore_MaaSModelRefAndExternalModel(t *testing.T) {
+func TestModelStore_AddAndGetExternalModel(t *testing.T) {
 	store := newModelInfoStore()
-	maasKey := types.NamespacedName{Namespace: "ns", Name: "ref"}
-	extKey := types.NamespacedName{Namespace: "ns", Name: "external-model"}
+	key := types.NamespacedName{Namespace: "ns", Name: "external-model"}
 
-	store.addOrUpdateMaaSModelRef(maasKey, extKey)
-	store.addOrUpdateExternalModel(extKey, &externalModelInfo{provider: provider.Anthropic})
+	store.addOrUpdateExternalModel(key, &externalModelInfo{provider: provider.Anthropic})
 
-	info, found := store.getModelInfo(maasKey)
+	info, found := store.getModelInfo(key)
 	assert.True(t, found)
 	assert.NotNil(t, info)
 	assert.Equal(t, provider.Anthropic, info.provider)
 }
 
-func TestModelStore_DeleteMaaSModelRef(t *testing.T) {
+func TestModelStore_GetModelInfo_NotFound(t *testing.T) {
 	store := newModelInfoStore()
-	maasKey := types.NamespacedName{Namespace: "ns", Name: "ref"}
-	extKey := types.NamespacedName{Namespace: "ns", Name: "ext"}
-	store.addOrUpdateMaaSModelRef(maasKey, extKey)
-	store.addOrUpdateExternalModel(extKey, &externalModelInfo{provider: provider.OpenAI})
+	store.addOrUpdateExternalModel(
+		types.NamespacedName{Namespace: "ns", Name: "ext"},
+		&externalModelInfo{provider: provider.OpenAI},
+	)
 
-	store.deleteMaaSModelRef(maasKey)
-	_, found := store.getModelInfo(maasKey)
+	_, found := store.getModelInfo(types.NamespacedName{Namespace: "ns", Name: "other"})
 	assert.False(t, found)
 }
 
 func TestModelStore_DeleteExternalModel(t *testing.T) {
 	store := newModelInfoStore()
-	maasKey := types.NamespacedName{Namespace: "ns", Name: "ref"}
-	extKey := types.NamespacedName{Namespace: "ns", Name: "ext"}
-	store.addOrUpdateMaaSModelRef(maasKey, extKey)
-	store.addOrUpdateExternalModel(extKey, &externalModelInfo{provider: provider.OpenAI})
+	key := types.NamespacedName{Namespace: "ns", Name: "ext"}
+	store.addOrUpdateExternalModel(key, &externalModelInfo{provider: provider.OpenAI})
 
-	store.deleteExternalModel(extKey)
-	_, found := store.getModelInfo(maasKey)
-	assert.False(t, found)
+	_, foundBefore := store.getModelInfo(key)
+	assert.True(t, foundBefore)
+
+	store.deleteExternalModel(key)
+	_, foundAfter := store.getModelInfo(key)
+	assert.False(t, foundAfter)
 }

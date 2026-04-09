@@ -33,61 +33,39 @@ type externalModelInfo struct {
 // modelInfoStore is a thread-safe in-memory store that maps model names to their provider info.
 // The reconciler writes to it; the plugin reads from it during request processing.
 type modelInfoStore struct {
-	// maasModelRefToExternalModel maps a MaaSModelRef CR to ExternalModel CR
-	maasModelRefToExternalModel map[types.NamespacedName]types.NamespacedName
-	//externalModelToModelInfo maps externalModel CR to externalModelInfo
-	externalModelToModelInfo map[types.NamespacedName]*externalModelInfo
+	//externalModelToModelInfo maps externalModel CR namespaced name to externalModelInfo
+	externalModelToModelInfo map[string]*externalModelInfo
 
 	lock sync.RWMutex
 }
 
 func newModelInfoStore() *modelInfoStore {
 	return &modelInfoStore{
-		maasModelRefToExternalModel: make(map[types.NamespacedName]types.NamespacedName),
-		externalModelToModelInfo:    make(map[types.NamespacedName]*externalModelInfo),
+		externalModelToModelInfo: make(map[string]*externalModelInfo),
 	}
-}
-
-// addOrUpdateMaaSModelRef stores mapping between MaaSModelRef to ExternalModel
-func (s *modelInfoStore) addOrUpdateMaaSModelRef(maasModelRefKey types.NamespacedName, externalModelKey types.NamespacedName) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.maasModelRefToExternalModel[maasModelRefKey] = externalModelKey
-}
-
-// deleteMaaSModelRef deletes the mapping between MaaSModelRef to ExternalModel
-func (s *modelInfoStore) deleteMaaSModelRef(maasModelRefKey types.NamespacedName) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	delete(s.maasModelRefToExternalModel, maasModelRefKey)
 }
 
 // addOrUpdateExternalModel stores ExternalModel information.
 func (s *modelInfoStore) addOrUpdateExternalModel(externalModelKey types.NamespacedName, modelInfo *externalModelInfo) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.externalModelToModelInfo[externalModelKey] = modelInfo
+	s.externalModelToModelInfo[externalModelKey.String()] = modelInfo
 }
 
 // deleteExternalModel deletes ExternalModel information.
 func (s *modelInfoStore) deleteExternalModel(externalModelKey types.NamespacedName) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	delete(s.externalModelToModelInfo, externalModelKey)
+	delete(s.externalModelToModelInfo, externalModelKey.String())
 }
 
-// getModelInfo returns the modelInfo pointed by MaaSModelRef and bool if found or not.
-// if no externalModelInfo found, nil is returned in the return value.
-func (s *modelInfoStore) getModelInfo(maasModelRefKey types.NamespacedName) (*externalModelInfo, bool) {
+// getModelInfo returns the modelInfo stored in ExternalModel and bool if found or not.
+// if no externalModelInfo found, nil is returned in the first return value.
+func (s *modelInfoStore) getModelInfo(externalModelKey types.NamespacedName) (*externalModelInfo, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	externalModelKey, ok := s.maasModelRefToExternalModel[maasModelRefKey]
-	if !ok {
-		return nil, false // MaaSModelRef not found
-	}
-
-	externalModelInfo, ok := s.externalModelToModelInfo[externalModelKey]
+	externalModelInfo, ok := s.externalModelToModelInfo[externalModelKey.String()]
 	if !ok {
 		return nil, false // ExternalModel not found
 	}

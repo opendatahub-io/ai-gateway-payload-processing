@@ -63,8 +63,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	provider, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
-	targetModel := req.Name // TODO this is temp! we should add targetModel to the external model spec
-	// targetModel, _, _ := unstructured.NestedString(obj.Object, "spec", "targetModel") // TODO uncomment after CRD is updated
+	targetModel, _, _ := unstructured.NestedString(obj.Object, "spec", "targetModel")
 	credsName, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "name")
 
 	// targetModel is the model that will be used in the request body when getting inference requests.

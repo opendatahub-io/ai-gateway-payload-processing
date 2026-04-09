@@ -26,8 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
@@ -52,30 +54,17 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 
 func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ModelProviderResolverPlugin, error) {
 	modelInfoStore := newModelInfoStore()
-	externalModelReconciler := &externalModelReconciler{
+	reconciler := &externalModelReconciler{
 		Reader: clientReader,
 		store:  modelInfoStore,
 	}
 
 	// Watch ExternalModel CRDs directly (no MaaS dependency)
-	externalModelObj := &unstructured.Unstructured{}
-	externalModelObj.SetGroupVersionKind(externalModelGVK)
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(externalModelGVK)
 
-	if err := reconcilerBuilder().For(externalModelObj).Complete(externalModelReconciler); err != nil {
+	if err := reconcilerBuilder().For(obj).Complete(reconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
-	}
-
-	maasModelRefReconciler := &maasModelRefReconciler{
-		Reader: clientReader,
-		store:  modelInfoStore,
-	}
-
-	// Watch MaaSModelRef CRDs directly (no MaaS dependency)
-	maasModelRefObj := &unstructured.Unstructured{}
-	maasModelRefObj.SetGroupVersionKind(maasModelRefGVK)
-
-	if err := reconcilerBuilder().For(maasModelRefObj).Complete(maasModelRefReconciler); err != nil {
-		return nil, fmt.Errorf("failed to register MaaSModelRef reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{
@@ -112,19 +101,31 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 		return nil // not an inference request (e.g. API key management, model listing)
 	}
 
-	maasModelRefKey := parseMaaSModelRefKeyFromPath(request.Headers[":path"])
-	if maasModelRefKey == nil {
-		return nil // wasn't able to parse namespaced name
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("received incoming request", "path", request.Headers[":path"])
+	relativePath := sanitizePath(request.Headers[":path"])
+
+	segments := strings.Split(relativePath, "/")
+	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
+		log.FromContext(ctx).V(logutil.VERBOSE).Info("wasn't able to parse namespaced name from path", "path", relativePath)
+		return nil
 	}
 
-	externalModelInfo, found := p.modelInfoStore.getModelInfo(*maasModelRefKey)
+	modelKey := types.NamespacedName{Namespace: segments[0], Name: segments[1]}
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("exported namespaced name from path", "key", modelKey)
+
+	externalModelInfo, found := p.modelInfoStore.getModelInfo(modelKey)
 	if !found { // info is stored only for external models
 		return nil // this is not considered an error, we just need to skip if it's internal model
 	}
 
+	if !strings.HasSuffix(relativePath, "chat/completions") { // no support for other input types
+		return errcommon.Error{Code: errcommon.BadRequest, Msg: "only /chat/completions input type is supported"}
+
+	}
+
 	// if there's a mismatch it's an error, we don't want to proceed
 	if externalModelInfo.targetModel != model {
-		return errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("model in request body '%s' doesn't match MaaSModelRef", model)}
+		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
 	}
 
 	// info of external model written to cycle state for next plugins
@@ -136,25 +137,12 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	return nil
 }
 
-// parseMaaSModelRefKeyFromPath extracts the MaaSModelRef namespace and name from :path.
-// Layout: /<namespace>/<maasModelRefName>/... (e.g. /llm/my-ref/v1/chat/completions).
-// A query string on :path is stripped first. Leading/trailing slashes are trimmed so
-// strings.Split after that yields namespace and name as the first two segments.
-func parseMaaSModelRefKeyFromPath(relativeUrlPath string) *types.NamespacedName {
+func sanitizePath(relativeUrlPath string) string {
 	relativeUrlPath = strings.TrimSpace(relativeUrlPath)
-	if relativeUrlPath == "" {
-		return nil
-	}
+
 	if index := strings.IndexByte(relativeUrlPath, '?'); index >= 0 {
 		relativeUrlPath = relativeUrlPath[:index] // remove query params
 	}
-	relativeUrlPath = strings.Trim(relativeUrlPath, "/")
-	if relativeUrlPath == "" {
-		return nil
-	}
-	segments := strings.Split(relativeUrlPath, "/")
-	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
-		return nil
-	}
-	return &types.NamespacedName{Namespace: segments[0], Name: segments[1]}
+
+	return strings.Trim(relativeUrlPath, "/")
 }
