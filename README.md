@@ -55,7 +55,7 @@ if you're running this repo as a standalone, you need to deploy the CRD before r
     helm uninstall payload-processing --namespace ${GATEWAY_NAMESPACE}
     ```
 
-1.  Delete the CRD (optionally):
+1.  Delete the ExternalModel CRD (optionally):
 
     ```bash
     kubectl delete -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
