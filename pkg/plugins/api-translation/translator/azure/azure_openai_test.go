@@ -413,7 +413,7 @@ func TestTranslateResponse_LiveMockIntegration(t *testing.T) {
 	req, err := http.NewRequest("POST", url, bytes.NewReader(reqBody))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", "test-key")
+	req.Header.Set("api-key", "llm-katan-azure-key")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

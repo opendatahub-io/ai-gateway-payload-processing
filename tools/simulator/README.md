@@ -27,8 +27,29 @@ llm-katan --model Qwen/Qwen3-0.6B --providers openai,anthropic,vertexai,bedrock,
 | AWS Bedrock | `POST /model/{modelId}/invoke` | `Authorization: AWS4-HMAC-SHA256 <sig>` |
 | Azure OpenAI | `POST /openai/deployments/{id}/chat/completions` | `api-key: <key>` |
 
-All endpoints require auth headers (any value accepted — validates the header exists, not the key value).
-All endpoints support streaming.
+All endpoints require auth headers. All endpoints support streaming.
+
+### API Key Validation
+
+By default, the simulator only checks that auth headers are present (any value accepted). To validate actual key values, use `--validate-keys`:
+
+```bash
+llm-katan --model test --backend echo --validate-keys --providers openai,anthropic,vertexai,bedrock,azure_openai
+```
+
+Default keys per provider (used when `--validate-keys` is enabled):
+
+| Provider | Default Key |
+|----------|------------|
+| OpenAI | `llm-katan-openai-key` |
+| Anthropic | `llm-katan-anthropic-key` |
+| Vertex AI | `llm-katan-vertexai-key` |
+| Bedrock | `llm-katan-bedrock-key` |
+| Azure OpenAI | `llm-katan-azure-key` |
+
+Override specific keys: `--api-keys openai=custom-key,anthropic=other-key`
+
+When a wrong key is sent, the error response includes the expected key — because this is a test simulator, not a security boundary.
 
 ### Bedrock InvokeModel Families
 
@@ -142,4 +163,7 @@ Optional:
   -t, --temperature FLOAT       Temperature (default: 0.7)
   --max-concurrent INTEGER      Concurrent requests (default: 1)
   --quantize/--no-quantize      CPU int8 quantization (default: enabled)
+  --tls                         Enable HTTPS with self-signed certificate
+  --validate-keys               Validate API key values (uses defaults or --api-keys overrides)
+  --api-keys TEXT               Override keys: openai=mykey,anthropic=mykey2
 ```
