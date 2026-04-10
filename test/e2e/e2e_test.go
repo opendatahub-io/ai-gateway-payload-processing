@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -206,11 +207,15 @@ var _ = ginkgo.Describe("BBR Plugin Chain", func() {
 	})
 
 	// Test that an invalid API key is rejected by the simulator when --validate-keys is enabled.
-	// This validates the full api-key-injection pipeline: if the wrong key is injected,
-	// the simulator returns 401 with the expected key in the error message.
+	// Only runs when E2E_SIMULATOR_VALIDATE_KEYS=true (simulator must be started with --validate-keys).
 	ginkgo.When("simulator has key validation enabled", func() {
+		ginkgo.BeforeEach(func() {
+			if os.Getenv("E2E_SIMULATOR_VALIDATE_KEYS") != "true" {
+				ginkgo.Skip("E2E_SIMULATOR_VALIDATE_KEYS not set, skipping key validation test")
+			}
+		})
+
 		ginkgo.It("should reject requests with an invalid API key", func() {
-			// Create a provider with a deliberately wrong key
 			wrongKeyProvider := Provider{
 				Name:         "e2e-wrong-key",
 				Provider:     "openai",
@@ -219,7 +224,6 @@ var _ = ginkgo.Describe("BBR Plugin Chain", func() {
 			createProviderResources(wrongKeyProvider)
 			defer deleteProviderResources(wrongKeyProvider)
 
-			// Wait for reconciler sync
 			time.Sleep(5 * time.Second)
 
 			curlCmd := getCurlCommand(wrongKeyProvider.Name)
@@ -231,18 +235,13 @@ var _ = ginkgo.Describe("BBR Plugin Chain", func() {
 				if err != nil {
 					return false
 				}
-				// When --validate-keys is enabled, simulator returns 401 for wrong keys.
-				// When not enabled, any key is accepted (200).
-				// Both are valid outcomes — the test documents the expected behavior.
-				return strings.Contains(resp, "401") || strings.Contains(resp, "200")
+				return strings.Contains(resp, "401")
 			}, curlTimeout*3, 5*time.Second).Should(gomega.BeTrue(),
-				fmt.Sprintf("Expected 401 or 200 for wrong key test, got:\n%s", resp))
+				fmt.Sprintf("Expected 401 for wrong key, got:\n%s", resp))
 
-			if strings.Contains(resp, "401") {
-				// Verify the error message contains the expected key hint
-				gomega.Expect(resp).To(gomega.ContainSubstring("expected"),
-					"401 response should include the expected key in the error message")
-			}
+			// Verify the error message contains the expected key hint
+			gomega.Expect(resp).To(gomega.ContainSubstring("expected"),
+				"401 response should include the expected key in the error message")
 		})
 	})
 })
