@@ -43,7 +43,7 @@ func TestTranslateRequest_PassthroughAllChatParams(t *testing.T) {
 	translatedBody, headers, headersToRemove, err := NewBedrockOpenAITranslator().TranslateRequest(body)
 	require.NoError(t, err)
 	assert.Nil(t, translatedBody, "Bedrock OpenAI-compatible API should not mutate the request body")
-	assert.Equal(t, "/openai/v1/chat/completions", headers[":path"])
+	assert.Equal(t, "/v1/chat/completions", headers[":path"])
 	assert.Equal(t, "application/json", headers["content-type"])
 	assert.Len(t, headers, 2)      // translator sets only path header
 	assert.Nil(t, headersToRemove) // no headers to remove

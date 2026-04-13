@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	// Bedrock OpenAI-compatible endpoint path
-	bedrockOpenAIPath = "/openai/v1/chat/completions"
+	// Bedrock OpenAI-compatible endpoint path.
+	// Same as OpenAI — auth differentiation is via SigV4 or Bearer token.
+	bedrockOpenAIPath = "/v1/chat/completions"
 )
 
 // compile-time interface check
