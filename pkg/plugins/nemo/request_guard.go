@@ -23,6 +23,9 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
+
+	"sort"
+	"strings"
 )
 
 const (
@@ -71,16 +74,17 @@ func NewNemoRequestGuardPlugin(nemoURL string, timeoutSeconds int) (*NemoRequest
 }
 
 // ProcessRequest calls NeMo Guardrails to evaluate input rails on the incoming request.
-// It extracts the last user message from the OpenAI-style body, POSTs to NeMo url,
-// and returns an errcommon.Error with Forbidden (403) if NeMo flags the content.
+// It extracts user-supplied text from either an OpenAI-style chat body (via "messages")
+// or an MCP JSON-RPC body (via "params.arguments"), POSTs to NeMo url, and returns an
+// errcommon.Error with Forbidden (403) if NeMo flags the content.
 //
 // NeMo always returns HTTP 200 for both allowed and blocked requests. The block/allow
 // decision is conveyed through the response body "status" field.
 // "success" means the request passed all rails; "blocked" means the request is blocked.
 func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framework.CycleState, request *framework.InferenceRequest) error {
 	model, ok := request.Body["model"].(string)
-	if !ok || model == "" {
-		return nil // not an inference request (e.g. API key management, model listing)
+	if !ok {
+		model = ""
 	}
 
 	messages, err := extractMessages(request.Body)
@@ -112,19 +116,33 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framewor
 	return nil
 }
 
-// extractMessages pulls OpenAI-style "messages" from the body and returns the last user message
-// as a single-element slice for the input-rail check. Falls back to all messages if no user
-// message is found.
+// extractMessages returns user-supplied text as a message slice suitable for NeMo's
+// OpenAI-compatible chat endpoint. It supports two payload formats:
+//
+//  1. OpenAI chat: top-level "messages" array → returns the last user message.
+//  2. MCP JSON-RPC: {"jsonrpc":"2.0","params":{"arguments":{…}}} → concatenates
+//     all string argument values into a single user message.
+//
+// Returns (nil, nil) when no content is found.
 func extractMessages(body map[string]any) ([]map[string]string, error) {
-	raw, ok := body["messages"]
-	if !ok {
-		return nil, nil
+	if raw, ok := body["messages"]; ok {
+		return extractOpenAIMessages(raw)
 	}
+	if _, ok := body["jsonrpc"]; ok {
+		return extractMCPArguments(body)
+	}
+	return nil, nil
+}
+
+// extractOpenAIMessages parses an OpenAI-style "messages" value and returns the
+// last user message, or all messages as a fallback when no user message exists.
+func extractOpenAIMessages(raw any) ([]map[string]string, error) {
 	slice, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("messages is not an array")
 	}
 	var messages []map[string]string
+
 	for _, m := range slice {
 		msg, ok := m.(map[string]any)
 		if !ok {
@@ -134,18 +152,44 @@ func extractMessages(body map[string]any) ([]map[string]string, error) {
 		content, _ := msg["content"].(string)
 		messages = append(messages, map[string]string{"role": role, "content": content})
 	}
-	var lastUser []map[string]string
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i]["role"] == "user" {
-			lastUser = messages[i : i+1]
-			break
+			return messages[i : i+1], nil
 		}
-	}
-	if len(lastUser) > 0 {
-		return lastUser, nil
 	}
 	if len(messages) > 0 {
 		return messages, nil
 	}
 	return nil, nil
+}
+
+// extractMCPArguments extracts text from an MCP JSON-RPC tools/call
+// payload. String values inside params.arguments are sorted by key and joined
+// into a single "user" message so NeMo can evaluate them with input rails.
+func extractMCPArguments(body map[string]any) ([]map[string]string, error) {
+	params, ok := body["params"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	args, ok := params["arguments"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var parts []string
+	for _, k := range keys {
+		if s, ok := args[k].(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	return []map[string]string{{"role": "user", "content": strings.Join(parts, "\n")}}, nil
 }

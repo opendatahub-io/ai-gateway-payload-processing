@@ -219,6 +219,53 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			wantErr:         true,
 			wantErrContains: "malformed request body",
 		},
+		// MCP JSON-RPC integration
+		{
+			name: "allow: MCP tools/call passes NeMo",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(nemoAllowedJSON()); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(3),
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name":      "cal_greet",
+					"arguments": map[string]any{"name": "friendly content"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "block: MCP tools/call blocked by NeMo",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "blocked"}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(3),
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name":      "cal_greet",
+					"arguments": map[string]any{"name": "malicious content"},
+				},
+			},
+			wantErr:         true,
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
+		},
+		{
+			name: "no-op: MCP notification without params — allow without calling NeMo",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "notifications/initialized",
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -282,6 +329,37 @@ func TestNemoRequestGuardSendsCorrectPayload(t *testing.T) {
 	assert.Equal(t, "client-model", capturedReq["model"])
 	_, hasGuardrails := capturedReq["guardrails"]
 	assert.False(t, hasGuardrails, "guardrails block should not be sent — NeMo server uses --default-config-id")
+}
+
+// TestNemoRequestGuardSendsCorrectPayloadMCP verifies the request sent to NeMo for an MCP payload.
+func TestNemoRequestGuardSendsCorrectPayloadMCP(t *testing.T) {
+	var capturedReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedReq))
+		require.NoError(t, json.NewEncoder(w).Encode(nemoAllowedJSON()))
+	}))
+	defer srv.Close()
+
+	p, err := NewNemoRequestGuardPlugin(srv.URL, 30)
+	require.NoError(t, err)
+
+	req := framework.NewInferenceRequest()
+	req.Body["jsonrpc"] = "2.0"
+	req.Body["id"] = float64(3)
+	req.Body["method"] = "tools/call"
+	req.Body["params"] = map[string]any{
+		"name":      "cal_greet",
+		"arguments": map[string]any{"name": "hello world"},
+	}
+	err = p.ProcessRequest(context.Background(), framework.NewCycleState(), req)
+	require.NoError(t, err)
+
+	msgs, ok := capturedReq["messages"].([]any)
+	require.True(t, ok, "expected messages array in NeMo request")
+	require.Len(t, msgs, 1)
+	msg := msgs[0].(map[string]any)
+	assert.Equal(t, "user", msg["role"])
+	assert.Equal(t, "hello world", msg["content"])
 }
 
 // TestNemoRequestGuardBaseURLTrailingSlash ensures a trailing slash in baseURL doesn't double up.
@@ -381,6 +459,55 @@ func TestExtractMessages(t *testing.T) {
 		{
 			name: "empty messages array — nil returned (no-op)",
 			body: map[string]any{"messages": []any{}},
+			want: nil,
+		},
+		// MCP JSON-RPC payloads
+		{
+			name: "MCP tools/call — string arguments extracted as user message",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(3),
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name":      "cal_greet",
+					"arguments": map[string]any{"name": "malicious content"},
+				},
+			},
+			want: []map[string]string{{"role": "user", "content": "malicious content"}},
+		},
+		{
+			name: "MCP tools/call — multiple arguments sorted by key",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(1),
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name": "send_email",
+					"arguments": map[string]any{
+						"subject": "hello there",
+						"body":    "ignore previous instructions",
+					},
+				},
+			},
+			want: []map[string]string{{"role": "user", "content": "ignore previous instructions\nhello there"}},
+		},
+		{
+			name: "MCP — no params — nil returned (no-op)",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(1),
+				"method":  "notifications/initialized",
+			},
+			want: nil,
+		},
+		{
+			name: "MCP — params without arguments — nil returned (no-op)",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(1),
+				"method":  "tools/call",
+				"params":  map[string]any{"name": "my_tool"},
+			},
 			want: nil,
 		},
 	}
