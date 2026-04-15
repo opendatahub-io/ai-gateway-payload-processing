@@ -9,7 +9,7 @@
 #   E2E_NS                   - Test namespace (default: bbr-e2e)
 #   E2E_GATEWAY_NAMESPACE    - Gateway namespace (default: default)
 #   E2E_GATEWAY_NAME         - Gateway name (default: e2e-gateway)
-#   E2E_SIMULATOR_ENDPOINT   - Simulator IP/host (default: 3.150.113.9)
+#   E2E_SIMULATOR_ENDPOINT   - Simulator IP/host (default: 3.13.21.181)
 #   E2E_SIMULATOR_VALIDATE_KEYS - Enable key validation tests (true/false)
 
 set -euo pipefail
