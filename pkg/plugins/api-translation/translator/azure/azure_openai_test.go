@@ -369,7 +369,7 @@ func TestTranslateResponse_StreamingChunkStripsAzureFields(t *testing.T) {
 
 // TestTranslateResponse_LiveMockIntegration fetches a real Azure OpenAI response from
 // the llm-katan mock server and verifies that TranslateResponse strips Azure-specific fields.
-// Set LLM_KATAN_URL to enable (e.g. LLM_KATAN_URL=http://3.150.113.9:8000).
+// Set LLM_KATAN_URL to enable (e.g. LLM_KATAN_URL=http://3.13.21.181:8000).
 func TestTranslateResponse_LiveMockIntegration(t *testing.T) {
 	baseURL := os.Getenv("LLM_KATAN_URL")
 	if baseURL == "" {

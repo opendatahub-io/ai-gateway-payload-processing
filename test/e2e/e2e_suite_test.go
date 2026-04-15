@@ -21,7 +21,7 @@ import (
 
 const (
 	defaultNs                = "bbr-e2e"
-	defaultSimulatorEndpoint = "3.150.113.9"
+	defaultSimulatorEndpoint = "3.13.21.181"
 	defaultGatewayName       = "e2e-gateway"
 	defaultGatewayNamespace  = "default"
 )
