@@ -91,7 +91,7 @@ jobs:
 
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-junit-report
           path: "**/results_e2e_xunit.xml"
@@ -99,7 +99,7 @@ jobs:
 
       - name: Publish E2E test results
         if: always()
-        uses: mikepenz/action-junit-report@v4
+        uses: mikepenz/action-junit-report@v6
         with:
           report_paths: "**/results_e2e_xunit.xml"
           check_name: E2E Test Results
