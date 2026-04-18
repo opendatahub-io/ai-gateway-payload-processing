@@ -21,7 +21,7 @@ import (
 
 const (
 	defaultNs                = "bbr-e2e"
-	defaultSimulatorEndpoint = "3.13.21.181"
+	defaultSimulatorEndpoint = "3-13-21-181.sslip.io"
 	defaultGatewayName       = "e2e-gateway"
 	defaultGatewayNamespace  = "default"
 )
@@ -74,15 +74,13 @@ metadata:
   namespace: %s
 spec:
   hosts:
-  - e2e-simulator.external
+  - %s
   location: MESH_EXTERNAL
   ports:
   - number: 443
     name: https
     protocol: HTTPS
-  resolution: STATIC
-  endpoints:
-  - address: %s
+  resolution: DNS
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
@@ -90,12 +88,13 @@ metadata:
   name: e2e-simulator
   namespace: %s
 spec:
-  host: e2e-simulator.external
+  host: %s
   trafficPolicy:
     tls:
       mode: SIMPLE
+      sni: %s
       insecureSkipVerify: true
-`, nsName, simulatorEP, nsName))
+`, nsName, simulatorEP, nsName, simulatorEP, simulatorEP))
 
 	ginkgo.By("Creating curl client pod")
 	kubectlApplyLiteral(fmt.Sprintf(`
