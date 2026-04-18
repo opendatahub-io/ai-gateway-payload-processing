@@ -78,11 +78,11 @@ metadata:
   namespace: %s
 spec:
   type: ExternalName
-  externalName: e2e-simulator.external
+  externalName: %s
   ports:
   - port: 443
     protocol: TCP
-`, p.Name, nsName))
+`, p.Name, nsName, simulatorEP))
 
 	// HTTPRoute with path-based + header-based routing
 	kubectlApplyLiteral(fmt.Sprintf(`
