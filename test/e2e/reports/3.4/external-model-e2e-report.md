@@ -636,4 +636,3 @@ spec:
 
 ---
 
-*Generated on 2026-04-19. Updated with Gemini testing, issue links, and full provider coverage matrix.*
