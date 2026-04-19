@@ -451,13 +451,15 @@ curl -sk -w "\nHTTP %{http_code}" \
 
 | Provider | Real | Simulator | Consistent? |
 |----------|------|-----------|-------------|
-| openai | **FAIL** (503) | PASS (200, echo) | **No** |
-| anthropic | **FAIL** (500) | **FAIL** (500) | **Yes (same bug)** |
-| bedrock-openai | **FAIL** (503) | PASS (200, echo) | **No** |
+| openai | PASS (400) | PASS (400) | Yes |
+| anthropic | PASS (400) | PASS (400) | Yes |
+| bedrock-openai | PASS (400) | PASS (400) | Yes |
 
-> **BUG:** The Anthropic translator crashes on empty messages array and returns 500 instead of 400.
-> See [#144](https://github.com/opendatahub-io/ai-gateway-payload-processing/issues/144).
-> For OpenAI/Bedrock, the real provider rejects with 503 while the simulator accepts it.
+> **Previously failing (fixed):** All translators returned 500 for empty messages. Fixed in
+> [PR #146](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/146) by using
+> `errcommon.Error{Code: BadRequest}` and preserving the error type through the plugin wrapper.
+> Now returns HTTP 400 with a clear error message, matching real provider behavior (OpenAI and
+> Anthropic both return 400 for empty messages).
 
 ---
 
@@ -505,11 +507,11 @@ curl -sk "https://${GATEWAY_HOST}/maas-api/v1/models" \
 | Model Mismatch | 6 | 6 | 0 |
 | Non-existent Path | 1 | 1 | 0 |
 | Malformed JSON | 6 | 6 | 0 |
-| Empty Messages | 6 | 2 | 4 |
+| Empty Messages | 6 | 6 | 0 |
 | Model Discovery | 1 | 1 | 0 |
-| **Total** | **59** | **54** | **5** |
+| **Total** | **59** | **58** | **1** |
 
-**Pass Rate: 91.5%**
+**Pass Rate: 98.3%**
 
 ### Provider Coverage Matrix
 
@@ -524,7 +526,7 @@ curl -sk "https://${GATEWAY_HOST}/maas-api/v1/models" \
 | No auth | PASS | PASS | PASS | - | PASS | PASS | PASS |
 | Model mismatch | PASS | PASS | PASS | - | PASS | PASS | PASS |
 | Malformed JSON | PASS | PASS | PASS | - | PASS | PASS | PASS |
-| Empty messages | FAIL | FAIL | FAIL | - | PASS | FAIL | PASS |
+| Empty messages | PASS | PASS | PASS | - | PASS | PASS | PASS |
 
 (1) Bedrock model (`openai.gpt-oss-20b`) is a reasoning model that doesn't reliably produce tool calls.
 Bedrock-openai is a pass-through translator — tool calling works if the model supports it.
@@ -541,19 +543,17 @@ Bedrock-openai is a pass-through translator — tool calling works if the model 
 | Auth (no header) | Both return 401 | Consistent |
 | Model mismatch | Both return 404 | Consistent |
 | Malformed JSON | Both return 400 | Consistent |
-| Empty messages (anthropic) | Both return 500 | Consistent |
-| Empty messages (openai/bedrock) | Real=503, Sim=200 | **Not consistent** |
+| Empty messages | All return 400 | Consistent |
 
 ### Known Bugs & Gaps
 
 | # | Issue | Severity | Status | Link |
 |---|-------|----------|--------|------|
 | 1 | ~~Anthropic streaming — `stream` field dropped~~ | ~~Medium~~ | **FIXED** | [PR #137](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/137) |
-| 2 | Empty messages returns 500 for Anthropic | Low | Open | [#144](https://github.com/opendatahub-io/ai-gateway-payload-processing/issues/144) |
+| 2 | ~~Empty messages returns 500~~ | ~~Low~~ | **FIXED** | [PR #146](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/146) |
 | 3 | Gemini path incompatibility (`/v1beta/openai/` vs `/v1/`) | Medium | Open | [#143](https://github.com/opendatahub-io/ai-gateway-payload-processing/issues/143) |
-| 4 | Empty messages — simulator accepts but real providers reject | Low | Open | llm-katan simulator |
-| 5 | Azure OpenAI not tested | Info | Blocked | No API key available |
-| 6 | Vertex AI not tested | Info | Blocked | No GCP service account available |
+| 4 | Azure OpenAI not tested | Info | Blocked | No API key available |
+| 5 | Vertex AI not tested | Info | Blocked | No GCP service account available |
 
 ---
 
