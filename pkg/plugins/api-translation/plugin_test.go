@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
@@ -529,8 +531,14 @@ func TestProcessResponse_OpenAIPassthrough(t *testing.T) {
 }
 
 func TestFactory_Success(t *testing.T) {
-	p, err := APITranslationFactory("test-instance", nil, nil)
+	p, err := APITranslationFactory("test-instance", nil, &testHandle{})
 	require.NoError(t, err)
 	assert.Equal(t, "test-instance", p.TypedName().Name)
 	assert.Equal(t, APITranslationPluginType, p.TypedName().Type)
 }
+
+type testHandle struct{}
+
+func (h *testHandle) Context() context.Context                { return context.Background() }
+func (h *testHandle) ClientReader() client.Reader             { return nil }
+func (h *testHandle) ReconcilerBuilder() *ctrlbuilder.Builder { return nil }

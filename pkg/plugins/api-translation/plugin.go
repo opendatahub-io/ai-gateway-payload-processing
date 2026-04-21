@@ -104,7 +104,7 @@ func NewAPITranslationPlugin(ctx context.Context, config apiTranslationConfig) (
 		keys = append(keys, key)
 	}
 
-	log.FromContext(ctx).V(logutil.VERBOSE).Info("plugin initialized with providers [ %s ]", strings.Join(keys, ","))
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("plugin initialized", "providers", strings.Join(keys, ","))
 
 	return &APITranslationPlugin{
 		typedName: plugin.TypedName{
