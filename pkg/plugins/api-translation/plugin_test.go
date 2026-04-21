@@ -28,7 +28,7 @@ import (
 )
 
 func newTestPlugin() *APITranslationPlugin {
-	p, _ := NewAPITranslationPlugin(apiTranslationConfig{})
+	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
 	return p
 }
 

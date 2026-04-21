@@ -21,9 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
@@ -46,7 +49,7 @@ var _ framework.ResponseProcessor = &APITranslationPlugin{}
 
 // apiTranslationConfig holds configuration for provider-specific translators.
 type apiTranslationConfig struct {
-	VertexOpenAI *vertexOpenAIConfig `json:"vertexOpenAI"`
+	VertexOpenAI *vertexOpenAIConfig `json:"vertexOpenAI,omitempty"`
 }
 
 type vertexOpenAIConfig struct {
@@ -56,7 +59,7 @@ type vertexOpenAIConfig struct {
 }
 
 // APITranslationFactory defines the factory function for APITranslationPlugin.
-func APITranslationFactory(name string, rawConfig json.RawMessage, _ framework.Handle) (framework.BBRPlugin, error) {
+func APITranslationFactory(name string, rawConfig json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
 	var config apiTranslationConfig
 	if len(rawConfig) > 0 {
 		if err := json.Unmarshal(rawConfig, &config); err != nil {
@@ -64,7 +67,7 @@ func APITranslationFactory(name string, rawConfig json.RawMessage, _ framework.H
 		}
 	}
 
-	p, err := NewAPITranslationPlugin(config)
+	p, err := NewAPITranslationPlugin(handle.Context(), config)
 	if err != nil {
 		return nil, err
 	}
@@ -74,20 +77,15 @@ func APITranslationFactory(name string, rawConfig json.RawMessage, _ framework.H
 // NewAPITranslationPlugin creates a new plugin instance with the given config.
 // If vertexOpenAI config is provided, the vertex-openai translator is registered.
 // If vertexOpenAI config is provided but has empty fields, an error is returned.
-func NewAPITranslationPlugin(config apiTranslationConfig) (*APITranslationPlugin, error) {
-	openaiTranslator := openai.NewOpenAITranslator()
-	anthropicTranslator := anthropic.NewAnthropicTranslator()
-	azureTranslator := azure.NewAzureOpenAITranslator()
-	bedrockTranslator := bedrock.NewBedrockOpenAITranslator()
+func NewAPITranslationPlugin(ctx context.Context, config apiTranslationConfig) (*APITranslationPlugin, error) {
 	// vertex (native GenerateContent) is not used in 3.4 ExternalModel flow.
 	// Uncomment when vertex (non-OpenAI) provider support is needed.
 	// vertexTranslator := vertex.NewVertexTranslator()
-
 	providers := map[string]translator.Translator{
-		provider.OpenAI:        openaiTranslator,
-		provider.Anthropic:     anthropicTranslator,
-		provider.AzureOpenAI:   azureTranslator,
-		provider.BedrockOpenAI: bedrockTranslator,
+		provider.OpenAI:        openai.NewOpenAITranslator(),
+		provider.Anthropic:     anthropic.NewAnthropicTranslator(),
+		provider.AzureOpenAI:   azure.NewAzureOpenAITranslator(),
+		provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(),
 	}
 
 	if config.VertexOpenAI != nil {
@@ -100,6 +98,13 @@ func NewAPITranslationPlugin(config apiTranslationConfig) (*APITranslationPlugin
 			config.VertexOpenAI.Endpoint,
 		)
 	}
+
+	keys := make([]string, 0, len(providers))
+	for key := range providers {
+		keys = append(keys, key)
+	}
+
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("plugin initialized with providers [ %s ]", strings.Join(keys, ","))
 
 	return &APITranslationPlugin{
 		typedName: plugin.TypedName{
