@@ -10,9 +10,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
-  # model-provider-resolver plugin: watches ExternalModel CRD
-  - apiGroups: ["maas.opendatahub.io"]
-    resources: ["externalmodels"]
+  # model-provider-resolver plugin: watches ExternalProvider and ExternalModel CRDs
+  - apiGroups: ["inference.opendatahub.io"]
+    resources: ["externalproviders", "externalmodels"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -39,9 +39,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
-  # model-provider-resolver plugin: watches ExternalModel CRD
-  - apiGroups: ["maas.opendatahub.io"]
-    resources: ["externalmodels"]
+  # model-provider-resolver plugin: watches ExternalProvider and ExternalModel CRDs
+  - apiGroups: ["inference.opendatahub.io"]
+    resources: ["externalproviders", "externalmodels"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bbr-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bbr-controller
+  namespace: bbr-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bbr-controller
+rules:
+  # ExternalProvider + ExternalModel CRDs
+  - apiGroups: ["inference.opendatahub.io"]
+    resources: ["externalproviders", "externalmodels"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["inference.opendatahub.io"]
+    resources: ["externalproviders/status", "externalmodels/status"]
+    verbs: ["get", "update", "patch"]
+  # Secrets (validate secretRef)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # Services (ExternalName services for providers)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # Istio networking resources
+  - apiGroups: ["networking.istio.io"]
+    resources: ["serviceentries", "destinationrules"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # HTTPRoutes (Gateway API)
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bbr-controller
+subjects:
+  - kind: ServiceAccount
+    name: bbr-controller
+    namespace: bbr-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bbr-controller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bbr-controller
+  namespace: bbr-system
+  labels:
+    app: bbr-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bbr-controller
+  template:
+    metadata:
+      labels:
+        app: bbr-controller
+    spec:
+      serviceAccountName: bbr-controller
+      containers:
+        - name: controller
+          image: bbr-controller:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --gateway-name=maas-default-gateway
+            - --gateway-namespace=istio-system
+            - --leader-elect=false
+          ports:
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi

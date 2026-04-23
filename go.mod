@@ -23,6 +23,7 @@ require (
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
+	sigs.k8s.io/gateway-api v1.5.1 // indirect
 )
 
 require (
