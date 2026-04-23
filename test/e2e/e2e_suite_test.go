@@ -37,7 +37,7 @@ var (
 
 func TestE2E(t *testing.T) {
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "BBR Plugin Chain E2E Suite")
+	ginkgo.RunSpecs(t, "Inference Payload Processor")
 }
 
 var _ = ginkgo.BeforeSuite(func() {

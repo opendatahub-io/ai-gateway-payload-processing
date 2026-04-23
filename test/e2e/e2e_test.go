@@ -152,8 +152,8 @@ func getCurlCommand(modelName string) []string {
 	}
 }
 
-var _ = ginkgo.Describe("BBR Plugin Chain", ginkgo.Label("e2e"), func() {
-	ginkgo.When("BBR is deployed with all plugins", ginkgo.Label("tier1"), func() {
+var _ = ginkgo.Describe("IPP Plugin Chain", ginkgo.Label("e2e"), func() {
+	ginkgo.When("IPP is deployed with all plugins", ginkgo.Label("tier1"), func() {
 		for _, p := range providers {
 			p := p // capture range variable
 
