@@ -43,6 +43,7 @@ import (
 
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders,verbs=get;list;watch
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=networking.istio.io,resources=serviceentries,verbs=get;list;watch;create;update;delete

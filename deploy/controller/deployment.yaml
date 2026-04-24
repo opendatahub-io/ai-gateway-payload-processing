@@ -21,6 +21,9 @@ rules:
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders/status", "externalmodels/status"]
     verbs: ["get", "update", "patch"]
+  - apiGroups: ["inference.opendatahub.io"]
+    resources: ["externalproviders/finalizers", "externalmodels/finalizers"]
+    verbs: ["update"]
   # Secrets (validate secretRef)
   - apiGroups: [""]
     resources: ["secrets"]
@@ -76,10 +79,20 @@ spec:
         app: bbr-controller
     spec:
       serviceAccountName: bbr-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: controller
           image: bbr-controller:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           args:
             - --gateway-name=maas-default-gateway
             - --gateway-namespace=istio-system

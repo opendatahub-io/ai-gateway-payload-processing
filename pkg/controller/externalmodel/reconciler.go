@@ -42,6 +42,7 @@ import (
 
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels,verbs=get;list;watch
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels/finalizers,verbs=update
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders,verbs=get;list;watch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;delete
 
@@ -94,6 +95,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger, model *inferencev1alpha1.ExternalModel) error {
+	if len(model.Spec.ExternalProviderRefs) == 0 {
+		return fmt.Errorf("ExternalModel %q has no externalProviderRefs", model.Name)
+	}
 	ref := model.Spec.ExternalProviderRefs[0]
 
 	provider := &inferencev1alpha1.ExternalProvider{}
