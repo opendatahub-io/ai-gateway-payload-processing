@@ -35,9 +35,7 @@ ARG KUBECTL_VERSION
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 
-RUN microdnf install -y curl && \
-    microdnf clean all && \
-    curl -sLo /usr/local/bin/kubectl \
+RUN curl -sLo /usr/local/bin/kubectl \
       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${TARGETOS}/${TARGETARCH}/kubectl" && \
     chmod +x /usr/local/bin/kubectl
 
