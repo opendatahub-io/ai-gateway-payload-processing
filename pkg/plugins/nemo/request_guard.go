@@ -131,7 +131,7 @@ func extractMessages(body map[string]any) ([]map[string]string, error) {
 	if _, ok := body["jsonrpc"]; ok {
 		return extractMCPArguments(body)
 	}
-	return nil, nil
+	return nil, nil // not an inference request (e.g. API key management, model listing)
 }
 
 // extractOpenAIMessages parses an OpenAI-style "messages" value and returns the
