@@ -138,10 +138,10 @@ func getCurlCommand(modelName string) []string {
 	bodyBytes, _ := json.Marshal(body)
 
 	// Access gateway service from inside the cluster via DNS.
-	// Istio creates a service named <gateway-name>-istio for each Gateway.
-	svcName := gatewayName + "-istio"
+	// Kind uses <gateway-name>-istio, OpenShift uses <gateway-name>-<namespace>.
+	// Override with E2E_GATEWAY_SVC_NAME when the default doesn't match.
 	gatewayURL := fmt.Sprintf("http://%s.%s.svc:80/%s/%s/v1/chat/completions",
-		svcName, gatewayNs, nsName, modelName)
+		gatewaySvcName, gatewayNs, nsName, modelName)
 
 	return []string{
 		"curl", "-si", "--max-time", strconv.Itoa(int(curlTimeout.Seconds())),

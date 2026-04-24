@@ -27,12 +27,13 @@ const (
 )
 
 var (
-	kubeClient  kubernetes.Interface
-	nsName      string
-	gatewayNs   string
-	gatewayName string
-	simulatorEP string
-	curlTimeout = 30 * time.Second
+	kubeClient     kubernetes.Interface
+	nsName         string
+	gatewayNs      string
+	gatewayName    string
+	gatewaySvcName string
+	simulatorEP    string
+	curlTimeout    = 30 * time.Second
 )
 
 func TestE2E(t *testing.T) {
@@ -44,6 +45,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	nsName = envOr("E2E_NS", defaultNs)
 	gatewayNs = envOr("E2E_GATEWAY_NAMESPACE", defaultGatewayNamespace)
 	gatewayName = envOr("E2E_GATEWAY_NAME", defaultGatewayName)
+	gatewaySvcName = envOr("E2E_GATEWAY_SVC_NAME", gatewayName+"-istio")
 	simulatorEP = envOr("E2E_SIMULATOR_ENDPOINT", defaultSimulatorEndpoint)
 
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
