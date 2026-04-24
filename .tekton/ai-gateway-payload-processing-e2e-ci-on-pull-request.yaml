@@ -15,9 +15,9 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
-    appstudio.openshift.io/component: odh-ai-gateway-payload-processing-ci
+    appstudio.openshift.io/component: ai-gateway-payload-processing-e2e-ci
     pipelines.appstudio.openshift.io/type: build
-  name: odh-ai-gateway-payload-processing-ci-on-pull-request
+  name: ai-gateway-payload-processing-e2e-ci-on-pull-request
   namespace: open-data-hub-tenant
 spec:
   params:
@@ -26,9 +26,9 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/odh-ai-gateway-payload-processing:odh-pr
+    value: quay.io/opendatahub/ai-gateway-payload-processing-e2e:odh-pr
   - name: dockerfile
-    value: Dockerfile
+    value: Dockerfile.e2e
   - name: path-context
     value: .
   - name: pipeline-type
@@ -46,7 +46,7 @@ spec:
     - name: pathInRepo
       value: pipeline/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-odh-ai-gateway-payload-processing-ci
+    serviceAccountName: build-pipeline-ai-gateway-payload-processing-e2e-ci
   workspaces:
   - name: git-auth
     secret:
