@@ -5,19 +5,19 @@ metadata:
     build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/ai-gateway-payload-processing?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
-    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
+    pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "push"
+      event == "pull_request"
       && target_branch == "main"
-      && ( "./**".pathChanged()
-            || ".tekton/odh-ai-gateway-payload-processing-ci-on-push.yaml".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
-    appstudio.openshift.io/component: odh-ai-gateway-payload-processing-ci
+    appstudio.openshift.io/component: ai-gateway-payload-processing-e2e-ci
     pipelines.appstudio.openshift.io/type: build
-  name: odh-ai-gateway-payload-processing-ci-on-push
+  name: ai-gateway-payload-processing-e2e-ci-on-pull-request
   namespace: open-data-hub-tenant
 spec:
   params:
@@ -26,13 +26,16 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/odh-ai-gateway-payload-processing:odh-stable
+    value: quay.io/opendatahub/ai-gateway-payload-processing-e2e:odh-pr
   - name: dockerfile
-    value: Dockerfile
+    value: Dockerfile.e2e
   - name: path-context
     value: .
   - name: pipeline-type
-    value: push
+    value: pull-request
+  - name: additional-tags
+    value:
+    - 'odh-pr-{{revision}}'
   - name: build-platforms
     value:
     - linux/x86_64
@@ -49,7 +52,7 @@ spec:
     - name: pathInRepo
       value: pipeline/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-odh-ai-gateway-payload-processing-ci
+    serviceAccountName: build-pipeline-ai-gateway-payload-processing-e2e-ci
   workspaces:
   - name: git-auth
     secret:
