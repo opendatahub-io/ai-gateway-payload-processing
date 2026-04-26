@@ -47,7 +47,7 @@ type externalModelReconciler struct {
 // the model name in inference request bodies.
 func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
+	logger.Info("reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(externalModelGVK)
@@ -75,6 +75,6 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	r.store.addOrUpdateExternalModel(req.NamespacedName, info)
 
-	logger.Info("Updated model store", "provider", provider, "targetModel", targetModel)
+	logger.Info("updated model store", "provider", provider, "targetModel", targetModel)
 	return ctrl.Result{}, nil
 }

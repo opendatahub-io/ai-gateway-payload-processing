@@ -62,7 +62,7 @@ type secretReconciler struct {
 func (r *secretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	key := req.String()
-	logger.Info("Reconciling Secret", "key", key)
+	logger.Info("reconciling Secret", "key", key)
 
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, req.NamespacedName, secret)
