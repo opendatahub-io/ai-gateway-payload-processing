@@ -83,7 +83,7 @@ func newNemoGuardBase(nemoURL string, timeoutSeconds int) (*nemoGuardBase, error
 // client-facing errcommon.Error from the returned values.
 func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (string, error) {
 	logger := log.FromContext(ctx)
-	logger.V(logutil.VERBOSE).Info("Calling NeMo guardrails")
+	logger.V(logutil.VERBOSE).Info("calling NeMo guardrails")
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, b.nemoURL, bytes.NewReader(payload))
 	if err != nil {
@@ -113,7 +113,7 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 	}
 
 	if strings.EqualFold(strings.TrimSpace(nemoResp.Status), nemoAllowedStatus) {
-		logger.V(logutil.VERBOSE).Info("Allowed by NeMo guardrails")
+		logger.V(logutil.VERBOSE).Info("allowed by NeMo guardrails")
 		return "", nil
 	}
 
@@ -123,6 +123,6 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 	}
 	railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
 
-	logger.Info("Blocked by NeMo guardrails", "railsStatus", railsStatus)
+	logger.Info("blocked by NeMo guardrails", "railsStatus", railsStatus)
 	return errcommon.Forbidden, fmt.Errorf("blocked by NeMo guardrails")
 }
