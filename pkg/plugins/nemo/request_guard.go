@@ -20,12 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
-
-	"sort"
-	"strings"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 const (
@@ -39,6 +39,7 @@ var _ framework.RequestProcessor = &NemoRequestGuardPlugin{}
 // NemoRequestGuardPlugin calls a NeMo Guardrails service over HTTP to check request content
 // using input rails. It implements RequestProcessor to intercept requests before forwarding.
 type NemoRequestGuardPlugin struct {
+	typedName plugin.TypedName
 	nemoGuardBase
 }
 
@@ -50,27 +51,40 @@ func NemoRequestGuardFactory(name string, rawParameters json.RawMessage, _ frame
 
 	if len(rawParameters) > 0 {
 		if err := json.Unmarshal(rawParameters, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' plugin - %w", NemoRequestGuardPluginType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of '%s' plugin - %w", NemoRequestGuardPluginType, err)
 		}
 	}
 
-	p, err := NewNemoRequestGuardPlugin(config.NemoURL, config.TimeoutSeconds)
+	plugin, err := NewNemoRequestGuardPlugin(config.NemoURL, config.TimeoutSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create '%s' plugin - %w", NemoRequestGuardPluginType, err)
 	}
 
-	p.WithName(name)
-	return p, nil
+	return plugin.WithName(name), nil
 }
 
 // NewNemoRequestGuardPlugin builds a NeMo request guard plugin from validated parameters.
 // The NeMo server is expected to have a default configuration (--default-config-id).
 func NewNemoRequestGuardPlugin(nemoURL string, timeoutSeconds int) (*NemoRequestGuardPlugin, error) {
-	base, err := newNemoGuardBase(NemoRequestGuardPluginType, nemoURL, timeoutSeconds)
+	base, err := newNemoGuardBase(nemoURL, timeoutSeconds)
 	if err != nil {
 		return nil, err
 	}
-	return &NemoRequestGuardPlugin{nemoGuardBase: *base}, nil
+	return &NemoRequestGuardPlugin{
+		typedName:     plugin.TypedName{Type: NemoRequestGuardPluginType, Name: NemoRequestGuardPluginType},
+		nemoGuardBase: *base,
+	}, nil
+}
+
+// TypedName returns the type and name tuple of this plugin instance.
+func (p *NemoRequestGuardPlugin) TypedName() plugin.TypedName {
+	return p.typedName
+}
+
+// WithName sets the name of the plugin instance.
+func (p *NemoRequestGuardPlugin) WithName(name string) *NemoRequestGuardPlugin {
+	p.typedName.Name = name
+	return p
 }
 
 // ProcessRequest calls NeMo Guardrails to evaluate input rails on the incoming request.

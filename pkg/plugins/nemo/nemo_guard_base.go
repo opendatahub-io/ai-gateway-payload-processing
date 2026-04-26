@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 const (
@@ -38,7 +38,7 @@ const (
 	maxNemoResponseBytes = 1 << 20 // 1 MiB
 )
 
-// nemoGuardConfig is the shared JSON configuration for nemo guard plugins.
+// nemoGuardConfig is the configuration for nemo guard plugins.
 type nemoGuardConfig struct {
 	NemoURL        string `json:"nemoURL"`
 	TimeoutSeconds int    `json:"timeoutSeconds"`
@@ -56,14 +56,13 @@ type nemoRailStatusEntry struct {
 
 // nemoGuardBase holds the shared fields and HTTP logic for nemo guard plugins.
 type nemoGuardBase struct {
-	typedName  plugin.TypedName
 	nemoURL    string
 	httpClient *http.Client
 }
 
-func newNemoGuardBase(pluginType, nemoURL string, timeoutSeconds int) (*nemoGuardBase, error) {
+func newNemoGuardBase(nemoURL string, timeoutSeconds int) (*nemoGuardBase, error) {
 	if nemoURL == "" {
-		return nil, fmt.Errorf("nemoURL is required for plugin '%s'", pluginType)
+		return nil, errors.New("nemoURL is required")
 	}
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -71,22 +70,11 @@ func newNemoGuardBase(pluginType, nemoURL string, timeoutSeconds int) (*nemoGuar
 	}
 
 	return &nemoGuardBase{
-		typedName: plugin.TypedName{Type: pluginType, Name: pluginType},
-		nemoURL:   nemoURL,
+		nemoURL: nemoURL,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
 	}, nil
-}
-
-func (b *nemoGuardBase) TypedName() plugin.TypedName {
-	return b.typedName
-}
-
-// WithName sets the name of the plugin instance.
-func (b *nemoGuardBase) WithName(name string) *nemoGuardBase {
-	b.typedName.Name = name
-	return b
 }
 
 // callNemoGuard POSTs the payload to the NeMo guardrail checks endpoint, parses the
@@ -95,17 +83,17 @@ func (b *nemoGuardBase) WithName(name string) *nemoGuardBase {
 // client-facing errcommon.Error from the returned values.
 func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (string, error) {
 	logger := log.FromContext(ctx)
-	logger.V(logutil.VERBOSE).Info("Calling NeMo guardrails", "pluginType", b.typedName.Type, "pluginName", b.typedName.Name, "url", b.nemoURL)
+	logger.V(logutil.VERBOSE).Info("Calling NeMo guardrails")
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, b.nemoURL, bytes.NewReader(payload))
 	if err != nil {
-		return errcommon.Internal, fmt.Errorf("create request: %w", err)
+		return errcommon.Internal, fmt.Errorf("failed to create nemo request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := b.httpClient.Do(httpReq)
 	if err != nil {
-		return errcommon.ServiceUnavailable, fmt.Errorf("call failed: %w", err)
+		return errcommon.ServiceUnavailable, fmt.Errorf("nemo call failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -116,16 +104,16 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 	limited := io.LimitReader(resp.Body, maxNemoResponseBytes)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return errcommon.ServiceUnavailable, fmt.Errorf("read response: %w", err)
+		return errcommon.ServiceUnavailable, fmt.Errorf("failed to read nemo response: %w", err)
 	}
 
 	var nemoResp nemoResponse
 	if err := json.Unmarshal(body, &nemoResp); err != nil {
-		return errcommon.ServiceUnavailable, fmt.Errorf("decode response: %w", err)
+		return errcommon.ServiceUnavailable, fmt.Errorf("failed to decode nemo response: %w", err)
 	}
 
 	if strings.EqualFold(strings.TrimSpace(nemoResp.Status), nemoAllowedStatus) {
-		logger.V(logutil.VERBOSE).Info("Allowed by NeMo guardrails", "pluginType", b.typedName.Type, "pluginName", b.typedName.Name)
+		logger.V(logutil.VERBOSE).Info("Allowed by NeMo guardrails")
 		return "", nil
 	}
 
@@ -135,6 +123,6 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 	}
 	railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
 
-	logger.Info("Blocked by NeMo guardrails", "pluginType", b.typedName.Type, "pluginName", b.typedName.Name, "railsStatus", railsStatus)
+	logger.Info("Blocked by NeMo guardrails", "railsStatus", railsStatus)
 	return errcommon.Forbidden, fmt.Errorf("blocked by NeMo guardrails")
 }

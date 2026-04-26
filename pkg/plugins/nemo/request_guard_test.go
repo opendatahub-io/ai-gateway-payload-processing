@@ -201,7 +201,7 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
-			wantErrContains: "decode response",
+			wantErrContains: "decode nemo response",
 		},
 		{
 			name:    "no-op: body has no messages field — allow without calling NeMo",
