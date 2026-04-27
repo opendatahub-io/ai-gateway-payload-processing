@@ -36,7 +36,7 @@ func TestBuildHTTPRoute(t *testing.T) {
 		"api.openai.com", "my-openai",
 		"gpt4", "gpt-4o",
 		"models", 443,
-		"default-gateway", "openshift-ingress",
+		"default-gateway", "openshift-ingress", "300s",
 		commonLabels("gpt4"),
 	)
 
@@ -82,7 +82,7 @@ func TestBuildHTTPRoute_TargetModelDiffersFromName(t *testing.T) {
 		"bedrock.us-east-1.amazonaws.com", "my-bedrock",
 		"claude", "anthropic.claude-3-opus",
 		"models", 443,
-		"my-gateway", "gateway-ns",
+		"my-gateway", "gateway-ns", "300s",
 		commonLabels("claude"),
 	)
 

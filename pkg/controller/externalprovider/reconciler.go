@@ -28,11 +28,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -73,13 +75,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.reconcileResources(ctx, logger, provider); err != nil {
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
+	if err := r.validateSecretRef(ctx, provider); err != nil {
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
 		return ctrl.Result{}, err
 	}
 
-	if err := r.validateSecretRef(ctx, provider); err != nil {
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
+	if err := r.reconcileResources(ctx, logger, provider); err != nil {
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -219,9 +221,20 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err != nil {
 		return err
 	}
+
+	seObj := &unstructured.Unstructured{}
+	seObj.SetGroupVersionKind(schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "ServiceEntry"})
+
+	drObj := &unstructured.Unstructured{}
+	drObj.SetGroupVersionKind(schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRule"})
+
+	ownerHandler := handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &inferencev1alpha1.ExternalProvider{})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&inferencev1alpha1.ExternalProvider{}).
 		Owns(&corev1.Service{}, builder.WithPredicates(managedByPredicate)).
+		Watches(seObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
+		Watches(drObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
 		Named("external-provider-reconciler").
 		Complete(r)
 }

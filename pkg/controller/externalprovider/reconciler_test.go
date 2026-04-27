@@ -352,15 +352,10 @@ func TestReconcile_MissingSecret(t *testing.T) {
 	assert.Equal(t, "SecretNotFound", provider.Status.Conditions[0].Reason)
 	assert.Contains(t, provider.Status.Conditions[0].Message, "nonexistent-secret")
 
-	// Networking resources should still be created (they're independent of the secret)
+	// Networking resources should NOT be created (validation runs before resource creation)
 	svc := &corev1.Service{}
-	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "no-secret", Namespace: ns}, svc))
-	assert.Equal(t, "api.openai.com", svc.Spec.ExternalName)
-
-	se := getUnstructured(t, serviceEntryGVK, "no-secret", ns)
-	seSpec := se.Object["spec"].(map[string]any)
-	hosts := seSpec["hosts"].([]any)
-	assert.Equal(t, "api.openai.com", hosts[0])
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: "no-secret", Namespace: ns}, svc)
+	assert.True(t, apierrors.IsNotFound(err), "Service should not exist when secret is missing")
 }
 
 func TestReconcile_TwoProviders(t *testing.T) {

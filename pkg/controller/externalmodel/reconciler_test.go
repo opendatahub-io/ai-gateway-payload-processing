@@ -134,6 +134,9 @@ func createExternalProvider(t *testing.T, name, namespace, endpoint string) {
 		},
 	}
 	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	provider.Status.Phase = "Ready"
+	require.NoError(t, k8sClient.Status().Update(ctx, provider))
 }
 
 func newExternalModel(name, namespace, providerName, targetModel string) *inferencev1alpha1.ExternalModel {
