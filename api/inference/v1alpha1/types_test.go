@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,4 +80,35 @@ func TestExternalModelDeepCopy(t *testing.T) {
 	// Verify deep copy — mutating the copy must not affect the original
 	copied.Spec.ExternalProviderRefs[0].TargetModel = "gpt-3.5"
 	assert.Equal(t, "gpt-4o", original.Spec.ExternalProviderRefs[0].TargetModel)
+}
+
+// CRD schema validation (patterns) is enforced at admission time by the K8s API server,
+// not in Go structs. These tests verify the regex patterns themselves are correct.
+
+func TestNameReferencePattern(t *testing.T) {
+	pattern := regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$`)
+
+	valid := []string{"my-openai", "a", "openai-key-v2", "a1b2"}
+	for _, name := range valid {
+		assert.True(t, pattern.MatchString(name), "should accept %q", name)
+	}
+
+	invalid := []string{"My-OpenAI", "UPPERCASE", "-leading-dash", "trailing-", "has/slash", "has.dot", "has space"}
+	for _, name := range invalid {
+		assert.False(t, pattern.MatchString(name), "should reject %q", name)
+	}
+}
+
+func TestEndpointPattern(t *testing.T) {
+	pattern := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)+$`)
+
+	valid := []string{"api.openai.com", "bedrock.us-east-1.amazonaws.com", "3-13-21-181.sslip.io", "a.b"}
+	for _, ep := range valid {
+		assert.True(t, pattern.MatchString(ep), "should accept %q", ep)
+	}
+
+	invalid := []string{"openai", "localhost", "-bad.com", "bad-.com", "has space.com", "has/slash.com"}
+	for _, ep := range invalid {
+		assert.False(t, pattern.MatchString(ep), "should reject %q", ep)
+	}
 }
