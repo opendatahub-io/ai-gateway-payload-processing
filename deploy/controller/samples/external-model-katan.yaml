@@ -1,0 +1,22 @@
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: new-katan-openai
+  namespace: llm
+spec:
+  externalProviderRefs:
+    - ref:
+        name: katan-openai-provider
+      targetModel: llm-katan-echo
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: new-katan-vertex-openai
+  namespace: llm
+spec:
+  externalProviderRefs:
+    - ref:
+        name: katan-vertex-provider
+      targetModel: llm-katan-echo
+      apiFormat: vertex-openai
