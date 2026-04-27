@@ -763,9 +763,7 @@ func TestTranslateRequest_EmptyMessages(t *testing.T) {
 	assert.Contains(t, err.Error(), "non-system message")
 }
 
-func TestTranslateRequest_NonTextContentSkipped(t *testing.T) {
-	// Non-text content (images) is currently extracted as text-only.
-	// Full multimodal support is tracked in a separate issue.
+func TestTranslateRequest_ImageContent(t *testing.T) {
 	body := map[string]any{
 		"model": "claude-sonnet-4-20250514",
 		"messages": []any{
@@ -773,7 +771,9 @@ func TestTranslateRequest_NonTextContentSkipped(t *testing.T) {
 				"role": "user",
 				"content": []any{
 					map[string]any{"type": "text", "text": "Describe this"},
-					map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/img.png"}},
+					map[string]any{"type": "image_url", "image_url": map[string]any{
+						"url": "data:image/png;base64,iVBORw0KGgo=",
+					}},
 				},
 			},
 		},
@@ -783,5 +783,67 @@ func TestTranslateRequest_NonTextContentSkipped(t *testing.T) {
 	require.NoError(t, err)
 
 	msgs := translated["messages"].([]map[string]any)
-	assert.Equal(t, "Describe this", msgs[0]["content"])
+	blocks, ok := msgs[0]["content"].([]any)
+	require.True(t, ok, "content should be an array of blocks for multimodal")
+	require.Len(t, blocks, 2)
+
+	textBlock := blocks[0].(map[string]any)
+	assert.Equal(t, "text", textBlock["type"])
+	assert.Equal(t, "Describe this", textBlock["text"])
+
+	imageBlock := blocks[1].(map[string]any)
+	assert.Equal(t, "image", imageBlock["type"])
+	source := imageBlock["source"].(map[string]any)
+	assert.Equal(t, "base64", source["type"])
+	assert.Equal(t, "image/png", source["media_type"])
+	assert.Equal(t, "iVBORw0KGgo=", source["data"])
+}
+
+func TestTranslateRequest_ImageContent_NonDataURL(t *testing.T) {
+	body := map[string]any{
+		"model": "claude-sonnet-4-20250514",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "Describe this"},
+					map[string]any{"type": "image_url", "image_url": map[string]any{
+						"url": "https://example.com/img.png",
+					}},
+				},
+			},
+		},
+	}
+
+	translated, _, _, err := NewAnthropicTranslator().TranslateRequest(body)
+	require.NoError(t, err)
+
+	msgs := translated["messages"].([]map[string]any)
+	blocks, ok := msgs[0]["content"].([]any)
+	require.True(t, ok, "content should be blocks when image_url is present")
+	require.Len(t, blocks, 1, "non-data URL images should be skipped")
+	assert.Equal(t, "text", blocks[0].(map[string]any)["type"])
+}
+
+func TestTranslateRequest_TextOnlyArray(t *testing.T) {
+	body := map[string]any{
+		"model": "claude-sonnet-4-20250514",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "Hello"},
+					map[string]any{"type": "text", "text": "World"},
+				},
+			},
+		},
+	}
+
+	translated, _, _, err := NewAnthropicTranslator().TranslateRequest(body)
+	require.NoError(t, err)
+
+	msgs := translated["messages"].([]map[string]any)
+	content, ok := msgs[0]["content"].(string)
+	require.True(t, ok, "text-only array should be flattened to string")
+	assert.Equal(t, "Hello World", content)
 }

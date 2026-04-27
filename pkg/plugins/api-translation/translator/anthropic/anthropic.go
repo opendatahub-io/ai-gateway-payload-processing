@@ -193,10 +193,9 @@ func separateSystemMessages(messages []map[string]any) (string, []map[string]any
 			content := extractContentString(msg)
 			systemParts = append(systemParts, content)
 		case "user":
-			content := extractContentString(msg)
 			anthropicMessages = append(anthropicMessages, map[string]any{
 				"role":    "user",
-				"content": content,
+				"content": buildUserContent(msg),
 			})
 		case "assistant":
 			anthropicMessages = append(anthropicMessages, buildAssistantMessage(msg))
@@ -350,6 +349,94 @@ func extractMessages(body map[string]any) ([]map[string]any, error) {
 	}
 
 	return messages, nil
+}
+
+// buildUserContent converts an OpenAI user message content to Anthropic format.
+// For simple string content, returns the string directly.
+// For array content with image_url blocks, returns Anthropic content blocks
+// (text blocks + image blocks with base64 source).
+func buildUserContent(msg map[string]any) any {
+	content, ok := msg["content"]
+	if !ok {
+		return ""
+	}
+
+	if s, ok := content.(string); ok {
+		return s
+	}
+
+	parts, ok := content.([]any)
+	if !ok {
+		return ""
+	}
+
+	hasImages := false
+	for _, part := range parts {
+		if partMap, ok := part.(map[string]any); ok {
+			if partType, _ := partMap["type"].(string); partType == "image_url" {
+				hasImages = true
+				break
+			}
+		}
+	}
+
+	if !hasImages {
+		return extractContentString(msg)
+	}
+
+	var blocks []any
+	for _, part := range parts {
+		partMap, ok := part.(map[string]any)
+		if !ok {
+			continue
+		}
+		partType, _ := partMap["type"].(string)
+
+		switch partType {
+		case "text":
+			text, _ := partMap["text"].(string)
+			blocks = append(blocks, map[string]any{
+				"type": "text",
+				"text": text,
+			})
+		case "image_url":
+			imageURL, _ := partMap["image_url"].(map[string]any)
+			url, _ := imageURL["url"].(string)
+
+			mediaType, data := parseDataURL(url)
+			if data != "" {
+				blocks = append(blocks, map[string]any{
+					"type": "image",
+					"source": map[string]any{
+						"type":       "base64",
+						"media_type": mediaType,
+						"data":       data,
+					},
+				})
+			}
+		}
+	}
+
+	return blocks
+}
+
+// parseDataURL extracts media type and base64 data from a data URL.
+// e.g., "data:image/png;base64,iVBOR..." → ("image/png", "iVBOR...")
+func parseDataURL(url string) (string, string) {
+	if !strings.HasPrefix(url, "data:") {
+		return "", ""
+	}
+	url = url[5:]
+	semicolon := strings.Index(url, ";")
+	if semicolon < 0 {
+		return "", ""
+	}
+	mediaType := url[:semicolon]
+	rest := url[semicolon+1:]
+	if !strings.HasPrefix(rest, "base64,") {
+		return "", ""
+	}
+	return mediaType, rest[7:]
 }
 
 // extractContentString extracts text content from a message, handling both
