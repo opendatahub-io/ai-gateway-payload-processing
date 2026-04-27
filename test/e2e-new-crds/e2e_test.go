@@ -192,20 +192,6 @@ func getCurlCommandRaw(modelName string, body string) []string {
 	}
 }
 
-func filterProviders(providers []Provider, excludeTypes ...string) []Provider {
-	exclude := make(map[string]bool, len(excludeTypes))
-	for _, t := range excludeTypes {
-		exclude[t] = true
-	}
-	var result []Provider
-	for _, p := range providers {
-		if !exclude[p.ProviderType] {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
 func parseResponseBody(resp string) (map[string]any, error) {
 	parts := strings.SplitN(resp, "\r\n\r\n", 2)
 	if len(parts) < 2 {
