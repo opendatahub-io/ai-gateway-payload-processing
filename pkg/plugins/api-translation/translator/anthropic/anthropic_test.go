@@ -785,3 +785,33 @@ func TestTranslateRequest_NonTextContentSkipped(t *testing.T) {
 	msgs := translated["messages"].([]map[string]any)
 	assert.Equal(t, "Describe this", msgs[0]["content"])
 }
+
+func TestTranslateRequest_ResponseFormat(t *testing.T) {
+	body := map[string]any{
+		"model":    "claude-3-opus",
+		"messages": []any{map[string]any{"role": "user", "content": "list 3 colors as JSON"}},
+		"response_format": map[string]any{
+			"type": "json_object",
+		},
+	}
+
+	translated, _, _, err := NewAnthropicTranslator().TranslateRequest(body)
+	require.NoError(t, err)
+
+	rf, ok := translated["response_format"].(map[string]any)
+	require.True(t, ok, "response_format should be passed through")
+	assert.Equal(t, "json_object", rf["type"])
+}
+
+func TestTranslateRequest_NoResponseFormat(t *testing.T) {
+	body := map[string]any{
+		"model":    "claude-3-opus",
+		"messages": []any{map[string]any{"role": "user", "content": "hello"}},
+	}
+
+	translated, _, _, err := NewAnthropicTranslator().TranslateRequest(body)
+	require.NoError(t, err)
+
+	_, ok := translated["response_format"]
+	assert.False(t, ok, "response_format should not be present when not in input")
+}
