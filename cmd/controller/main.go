@@ -48,12 +48,14 @@ func main() {
 	var enableLeaderElection bool
 	var gatewayName string
 	var gatewayNamespace string
+	var routeTimeout string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metrics endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election.")
 	flag.StringVar(&gatewayName, "gateway-name", "default-gateway", "The name of the Gateway resource to use for model HTTPRoutes.")
 	flag.StringVar(&gatewayNamespace, "gateway-namespace", "openshift-ingress", "The namespace of the Gateway resource.")
+	flag.StringVar(&routeTimeout, "default-route-timeout", "300s", "Default timeout for HTTPRoute rules (e.g., 300s, 600s).")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -87,6 +89,7 @@ func main() {
 		Scheme:           mgr.GetScheme(),
 		GatewayName:      gatewayName,
 		GatewayNamespace: gatewayNamespace,
+		RouteTimeout:     routeTimeout,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ExternalModel")
 		os.Exit(1)

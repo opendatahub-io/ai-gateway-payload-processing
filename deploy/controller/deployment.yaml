@@ -96,7 +96,7 @@ spec:
           args:
             - --gateway-name=maas-default-gateway
             - --gateway-namespace=istio-system
-            - --leader-elect=false
+            - --leader-elect=false  # Set to true for production (multi-replica) deployments
           ports:
             - name: health
               containerPort: 8081

@@ -53,6 +53,7 @@ type Reconciler struct {
 	Scheme           *runtime.Scheme
 	GatewayName      string
 	GatewayNamespace string
+	RouteTimeout     string
 }
 
 func (r *Reconciler) gatewayName() string {
@@ -67,6 +68,13 @@ func (r *Reconciler) gatewayNamespace() string {
 		return r.GatewayNamespace
 	}
 	return defaultGatewayNamespace
+}
+
+func (r *Reconciler) routeTimeout() string {
+	if r.RouteTimeout != "" {
+		return r.RouteTimeout
+	}
+	return defaultRouteTimeout
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -109,6 +117,10 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		return fmt.Errorf("failed to get ExternalProvider %q: %w", ref.Ref.Name, err)
 	}
 
+	if provider.Status.Phase != "Ready" {
+		return fmt.Errorf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase)
+	}
+
 	labels := commonLabels(model.Name)
 	hr := buildHTTPRoute(
 		provider.Spec.Endpoint,
@@ -119,6 +131,7 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		ctrlcommon.DefaultPort,
 		r.gatewayName(),
 		r.gatewayNamespace(),
+		r.routeTimeout(),
 		labels,
 	)
 

@@ -28,6 +28,7 @@ const (
 
 	defaultGatewayName      = "default-gateway"
 	defaultGatewayNamespace = "openshift-ingress"
+	defaultRouteTimeout     = "300s"
 )
 
 func commonLabels(modelName string) map[string]string {
@@ -41,13 +42,13 @@ func commonLabels(modelName string) map[string]string {
 // Path prefix is /<namespace>/<modelName> for namespace isolation.
 // Backend ref points to the ExternalProvider's Service (providerName).
 // Host header is set for TLS SNI — must happen before BBR ext-proc runs.
-func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, namespace string, port int32, gatewayName, gatewayNamespace string, labels map[string]string) *gatewayapiv1.HTTPRoute {
+func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
 	gwNamespace := gatewayapiv1.Namespace(gatewayNamespace)
 	pathType := gatewayapiv1.PathMatchPathPrefix
 	pathPrefix := "/" + namespace + "/" + modelName
 	headerType := gatewayapiv1.HeaderMatchExact
 	gwPort := gatewayapiv1.PortNumber(port)
-	timeout := gatewayapiv1.Duration("300s")
+	timeout := gatewayapiv1.Duration(routeTimeout)
 
 	backendRefs := []gatewayapiv1.HTTPBackendRef{
 		{
