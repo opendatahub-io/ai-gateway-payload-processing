@@ -26,7 +26,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
@@ -68,6 +70,7 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientR
 	}
 
 	// Watch ExternalModel CRDs (inference.opendatahub.io/v1alpha1)
+	// Cross-watch ExternalProviders so credential/endpoint changes propagate to modelStore
 	modelObj := &unstructured.Unstructured{}
 	modelObj.SetGroupVersionKind(externalModelGVK)
 	modelReconciler := &externalModelReconciler{
@@ -75,7 +78,41 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientR
 		modelStore:    modelStore,
 		providerStore: providerStore,
 	}
-	if err := reconcilerBuilder().For(modelObj).Complete(modelReconciler); err != nil {
+	mapProviderToModels := func(ctx context.Context, obj client.Object) []reconcile.Request {
+		providerName := obj.GetName()
+		providerNamespace := obj.GetNamespace()
+		modelList := &unstructured.UnstructuredList{}
+		modelList.SetGroupVersionKind(externalModelGVK)
+		if err := clientReader.List(ctx, modelList, client.InNamespace(providerNamespace)); err != nil {
+			return nil
+		}
+		var requests []reconcile.Request
+		for i := range modelList.Items {
+			refs, _, _ := unstructured.NestedSlice(modelList.Items[i].Object, "spec", "externalProviderRefs")
+			if len(refs) == 0 {
+				continue
+			}
+			refMap, ok := refs[0].(map[string]any)
+			if !ok {
+				continue
+			}
+			if nestedString(refMap, "ref", "name") == providerName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      modelList.Items[i].GetName(),
+						Namespace: modelList.Items[i].GetNamespace(),
+					},
+				})
+			}
+		}
+		return requests
+	}
+	providerWatchObj := &unstructured.Unstructured{}
+	providerWatchObj.SetGroupVersionKind(externalProviderGVK)
+	if err := reconcilerBuilder().
+		For(modelObj).
+		Watches(providerWatchObj, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
+		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 

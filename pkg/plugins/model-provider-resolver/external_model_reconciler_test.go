@@ -131,6 +131,48 @@ func TestModelReconciler_DeletedCR(t *testing.T) {
 	assert.False(t, found, "model store entry should be removed on delete")
 }
 
+func TestModelReconciler_ProviderUpdatePropagates(t *testing.T) {
+	modelKey := types.NamespacedName{Namespace: "models", Name: "gpt4-update"}
+	providerKey := types.NamespacedName{Namespace: "models", Name: "my-openai"}
+
+	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
+		modelKey: newModelUnstructured("gpt4-update", "models", "my-openai", "gpt-4o"),
+	}}
+
+	provStore := newProviderInfoStore()
+	provStore.addOrUpdate(providerKey, &providerInfo{
+		provider: "openai", endpoint: "api.openai.com",
+		secretName: "old-key", secretNamespace: "models",
+	})
+
+	modelStore := newModelInfoStore()
+	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
+
+	// First reconcile — model gets old-key
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found := modelStore.getModelInfo(modelKey)
+	require.True(t, found)
+	assert.Equal(t, "old-key", info.secretName)
+
+	// Simulate provider update (credential rotation)
+	provStore.addOrUpdate(providerKey, &providerInfo{
+		provider: "openai", endpoint: "api.openai.com",
+		secretName: "new-key", secretNamespace: "models",
+	})
+
+	// Re-reconcile (triggered by cross-watch in production) — model picks up new-key
+	result, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found = modelStore.getModelInfo(modelKey)
+	require.True(t, found)
+	assert.Equal(t, "new-key", info.secretName, "model store should reflect updated provider credentials")
+}
+
 func TestModelReconciler_NoProviderRefs(t *testing.T) {
 	modelKey := types.NamespacedName{Namespace: "models", Name: "empty"}
 
