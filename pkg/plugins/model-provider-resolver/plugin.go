@@ -53,23 +53,35 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 }
 
 func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ModelProviderResolverPlugin, error) {
-	modelInfoStore := newModelInfoStore()
-	reconciler := &externalModelReconciler{
+	providerStore := newProviderInfoStore()
+	modelStore := newModelInfoStore()
+
+	// Watch ExternalProvider CRDs (inference.opendatahub.io/v1alpha1)
+	providerObj := &unstructured.Unstructured{}
+	providerObj.SetGroupVersionKind(externalProviderGVK)
+	providerReconciler := &externalProviderReconciler{
 		Reader: clientReader,
-		store:  modelInfoStore,
+		store:  providerStore,
+	}
+	if err := reconcilerBuilder().For(providerObj).Complete(providerReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalProvider reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
-	// Watch ExternalModel CRDs directly (no MaaS dependency)
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-
-	if err := reconcilerBuilder().For(obj).Complete(reconciler); err != nil {
+	// Watch ExternalModel CRDs (inference.opendatahub.io/v1alpha1)
+	modelObj := &unstructured.Unstructured{}
+	modelObj.SetGroupVersionKind(externalModelGVK)
+	modelReconciler := &externalModelReconciler{
+		Reader:        clientReader,
+		modelStore:    modelStore,
+		providerStore: providerStore,
+	}
+	if err := reconcilerBuilder().For(modelObj).Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{
 		typedName:      plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
-		modelInfoStore: modelInfoStore,
+		modelInfoStore: modelStore,
 	}, nil
 }
 
@@ -133,6 +145,9 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
 	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
 	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
+	if len(externalModelInfo.config) > 0 {
+		cycleState.Write(state.ProviderConfigKey, externalModelInfo.config)
+	}
 
 	return nil
 }
