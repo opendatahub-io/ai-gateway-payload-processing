@@ -84,6 +84,8 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientR
 		modelList := &unstructured.UnstructuredList{}
 		modelList.SetGroupVersionKind(externalModelGVK)
 		if err := clientReader.List(ctx, modelList, client.InNamespace(providerNamespace)); err != nil {
+			log.FromContext(ctx).Error(err, "failed to list ExternalModels for provider mapping",
+				"provider", providerName, "namespace", providerNamespace)
 			return nil
 		}
 		var requests []reconcile.Request

@@ -61,7 +61,8 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	secretName, _, _ := unstructured.NestedString(obj.Object, "spec", "auth", "secretRef", "name")
 
 	if providerType == "" || endpoint == "" || secretName == "" {
-		logger.Info("ExternalProvider missing required fields, skipping",
+		r.store.delete(req.NamespacedName)
+		logger.Info("ExternalProvider missing required fields, removing from store",
 			"provider", providerType, "endpoint", endpoint, "secretName", secretName)
 		return ctrl.Result{}, nil
 	}

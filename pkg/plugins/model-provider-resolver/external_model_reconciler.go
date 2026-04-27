@@ -61,11 +61,13 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	refs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "externalProviderRefs")
 	if len(refs) == 0 {
+		r.modelStore.deleteExternalModel(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
 	refMap, ok := refs[0].(map[string]any)
 	if !ok {
+		r.modelStore.deleteExternalModel(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
@@ -73,6 +75,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	targetModel := nestedString(refMap, "targetModel")
 
 	if providerRefName == "" {
+		r.modelStore.deleteExternalModel(req.NamespacedName)
 		logger.Info("ExternalModel missing provider ref name, skipping")
 		return ctrl.Result{}, nil
 	}
