@@ -1,5 +1,5 @@
 name: Docker Build and Push
-description: Build multi-platform image and push to GitHub Container Registry
+description: Build image and push to GitHub Container Registry (supports push-by-digest for multi-arch)
 
 inputs:
   image-name:
@@ -11,9 +11,17 @@ inputs:
   registry:
     required: true
     description: Container registry (e.g., ghcr.io/opendatahub-io)
+  platform:
+    required: false
+    default: "linux/amd64"
+    description: Target platform (e.g., linux/amd64, linux/arm64)
   github-token:
     required: true
     description: GitHub token for registry authentication
+  push-by-digest:
+    required: false
+    default: "false"
+    description: If true, push by digest only (no tag). Use for multi-arch manifest builds.
   prerelease:
     required: false
     default: "false"
@@ -23,6 +31,11 @@ inputs:
     default: "Dockerfile"
     description: Path to Dockerfile
 
+outputs:
+  digest:
+    description: Image digest (sha256:...)
+    value: ${{ steps.build-digest.outputs.digest || steps.build-tag.outputs.digest }}
+
 runs:
   using: composite
   steps:
@@ -30,8 +43,11 @@ runs:
       uses: docker/setup-buildx-action@v4
 
     - name: Login to GitHub Container Registry
-      shell: bash
-      run: echo "${{ inputs.github-token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}
 
     - name: Extract build metadata
       id: meta
@@ -40,29 +56,53 @@ runs:
         echo "commit_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
         echo "build_ref=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-    - name: Build and push
+    - name: Build and push by digest
+      if: inputs.push-by-digest == 'true'
+      id: build-digest
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ${{ inputs.dockerfile }}
+        platforms: ${{ inputs.platform }}
+        outputs: type=image,name=${{ inputs.registry }}/${{ inputs.image-name }},push-by-digest=true,name-canonical=true,push=true
+        cache-from: type=gha,scope=${{ inputs.image-name }}-${{ inputs.platform }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.image-name }}-${{ inputs.platform }}
+        build-args: |
+          COMMIT_SHA=${{ steps.meta.outputs.commit_sha }}
+          BUILD_REF=${{ steps.meta.outputs.build_ref }}
+
+    - name: Build and push with tag
+      if: inputs.push-by-digest != 'true'
+      id: build-tag
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ${{ inputs.dockerfile }}
+        platforms: ${{ inputs.platform }}
+        push: true
+        tags: ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}
+        cache-from: type=gha,scope=${{ inputs.image-name }}-${{ inputs.platform }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.image-name }}-${{ inputs.platform }}
+        build-args: |
+          COMMIT_SHA=${{ steps.meta.outputs.commit_sha }}
+          BUILD_REF=${{ steps.meta.outputs.build_ref }}
+
+    - name: Tag as latest
+      if: inputs.push-by-digest != 'true' && inputs.prerelease != 'true'
       shell: bash
       run: |
-        TAGS="-t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}"
-        
-        if [[ "${{ inputs.prerelease }}" != "true" ]]; then
-          TAGS="$TAGS -t ${{ inputs.registry }}/${{ inputs.image-name }}:latest"
-        fi
-        
-        docker buildx build \
-          --platform linux/amd64 \
-          --cache-from type=gha,scope=${{ inputs.image-name }} \
-          --cache-to type=gha,mode=max,scope=${{ inputs.image-name }} \
-          --build-arg COMMIT_SHA=${{ steps.meta.outputs.commit_sha }} \
-          --build-arg BUILD_REF=${{ steps.meta.outputs.build_ref }} \
-          $TAGS \
-          -f ${{ inputs.dockerfile }} \
-          --push .
+        docker buildx imagetools create \
+          -t ${{ inputs.registry }}/${{ inputs.image-name }}:latest \
+          ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}
 
     - name: Print image info
       shell: bash
       run: |
-        echo "Pushed: ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}"
-        if [[ "${{ inputs.prerelease }}" != "true" ]]; then
-          echo "Pushed: ${{ inputs.registry }}/${{ inputs.image-name }}:latest"
+        if [[ "${{ inputs.push-by-digest }}" == "true" ]]; then
+          echo "Pushed by digest: ${{ steps.build-digest.outputs.digest }}"
+        else
+          echo "Pushed: ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}"
+          if [[ "${{ inputs.prerelease }}" != "true" ]]; then
+            echo "Pushed: ${{ inputs.registry }}/${{ inputs.image-name }}:latest"
+          fi
         fi
