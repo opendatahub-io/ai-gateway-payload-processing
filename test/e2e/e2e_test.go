@@ -128,18 +128,9 @@ func deleteProviderResources(p Provider) {
 	kubectlDeleteResource("secret", p.Name, nsName)
 }
 
-// getCurlCommand builds a curl command to send a chat completion request
-// from inside the cluster to the gateway service.
-func getCurlCommand(modelName string) []string {
-	body := map[string]any{
-		"model":    modelName,
-		"messages": []map[string]string{{"role": "user", "content": "hello from " + modelName}},
-	}
+func buildCurlCommand(modelName string, body map[string]any) []string {
 	bodyBytes, _ := json.Marshal(body)
 
-	// Access gateway service from inside the cluster via DNS.
-	// Kind uses <gateway-name>-istio, OpenShift uses <gateway-name>-<namespace>.
-	// Override with E2E_GATEWAY_SVC_NAME when the default doesn't match.
 	gatewayURL := fmt.Sprintf("http://%s.%s.svc:80/%s/%s/v1/chat/completions",
 		gatewaySvcName, gatewayNs, nsName, modelName)
 
@@ -150,6 +141,67 @@ func getCurlCommand(modelName string) []string {
 		"-H", "Connection: close",
 		"-d", string(bodyBytes),
 	}
+}
+
+// getCurlCommand builds a curl command to send a chat completion request
+// from inside the cluster to the gateway service.
+func getCurlCommand(modelName string) []string {
+	return buildCurlCommand(modelName, map[string]any{
+		"model":    modelName,
+		"messages": []map[string]string{{"role": "user", "content": "hello from " + modelName}},
+	})
+}
+
+func getCurlCommandWithTools(modelName string) []string {
+	return buildCurlCommand(modelName, map[string]any{
+		"model":    modelName,
+		"messages": []map[string]string{{"role": "user", "content": "whats the weather in paris"}},
+		"tools": []map[string]any{{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "get_weather",
+				"description": "Get weather for a location",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"location": map[string]string{"type": "string"}},
+					"required":   []string{"location"},
+				},
+			},
+		}},
+	})
+}
+
+func getCurlCommandWithImage(modelName string) []string {
+	return buildCurlCommand(modelName, map[string]any{
+		"model": modelName,
+		"messages": []any{map[string]any{
+			"role": "user",
+			"content": []map[string]any{
+				{"type": "text", "text": "What is this?"},
+				{"type": "image_url", "image_url": map[string]string{
+					"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+				}},
+			},
+		}},
+	})
+}
+
+func getCurlCommandWithJSONMode(modelName string) []string {
+	return buildCurlCommand(modelName, map[string]any{
+		"model":           modelName,
+		"messages":        []map[string]string{{"role": "user", "content": "list 3 colors as JSON"}},
+		"response_format": map[string]string{"type": "json_object"},
+	})
+}
+
+func parseResponseBody(resp string) (map[string]any, error) {
+	parts := strings.SplitN(resp, "\r\n\r\n", 2)
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("no body separator found")
+	}
+	var result map[string]any
+	err := json.Unmarshal([]byte(strings.TrimSpace(parts[1])), &result)
+	return result, err
 }
 
 var _ = ginkgo.Describe("IPP Plugin Chain", ginkgo.Label("e2e"), func() {
@@ -241,5 +293,162 @@ var _ = ginkgo.Describe("IPP Plugin Chain", ginkgo.Label("e2e"), func() {
 			gomega.Expect(resp).To(gomega.ContainSubstring("expected"),
 				"401 response should include the expected key in the error message")
 		})
+	})
+
+	ginkgo.When("tool calling through BBR pipeline", ginkgo.Label("tier2", "tool-calling"), func() {
+		for _, p := range providers {
+			p := p
+
+			ginkgo.It(fmt.Sprintf("should return tool_calls for provider %s", p.Provider), func() {
+				curlCmd := getCurlCommandWithTools(p.Name)
+
+				var resp string
+				gomega.Eventually(func() bool {
+					var err error
+					resp, err = execInPod("curl", nsName, "curl", curlCmd)
+					return err == nil && (strings.Contains(resp, "200 OK") || strings.Contains(resp, "HTTP/1.1 200"))
+				}, curlTimeout*3, 5*time.Second).Should(gomega.BeTrue(),
+					fmt.Sprintf("Expected 200 for tool call on %s, got:\n%s", p.Provider, resp))
+
+				result, err := parseResponseBody(resp)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				choices, ok := result["choices"].([]any)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(len(choices)).To(gomega.BeNumerically(">", 0))
+
+				choice := choices[0].(map[string]any)
+				gomega.Expect(choice["finish_reason"]).To(gomega.Equal("tool_calls"),
+					fmt.Sprintf("Expected finish_reason=tool_calls for %s", p.Provider))
+
+				msg := choice["message"].(map[string]any)
+				toolCalls, ok := msg["tool_calls"].([]any)
+				gomega.Expect(ok).To(gomega.BeTrue(), "Expected tool_calls array")
+				gomega.Expect(len(toolCalls)).To(gomega.BeNumerically(">", 0))
+
+				tc := toolCalls[0].(map[string]any)
+				gomega.Expect(tc).To(gomega.HaveKey("id"))
+				fn := tc["function"].(map[string]any)
+				gomega.Expect(fn["name"]).To(gomega.Equal("get_weather"))
+			})
+		}
+	})
+
+	ginkgo.When("multimodal requests through BBR pipeline", ginkgo.Label("tier2", "multimodal"), func() {
+		for _, p := range providers {
+			p := p
+
+			ginkgo.It(fmt.Sprintf("should handle image content for provider %s", p.Provider), func() {
+				curlCmd := getCurlCommandWithImage(p.Name)
+
+				var resp string
+				gomega.Eventually(func() bool {
+					var err error
+					resp, err = execInPod("curl", nsName, "curl", curlCmd)
+					return err == nil && (strings.Contains(resp, "200 OK") || strings.Contains(resp, "HTTP/1.1 200"))
+				}, curlTimeout*3, 5*time.Second).Should(gomega.BeTrue(),
+					fmt.Sprintf("Expected 200 for multimodal on %s, got:\n%s", p.Provider, resp))
+
+				result, err := parseResponseBody(resp)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				choices, ok := result["choices"].([]any)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(len(choices)).To(gomega.BeNumerically(">", 0))
+
+				choice := choices[0].(map[string]any)
+				msg := choice["message"].(map[string]any)
+				content, ok := msg["content"].(string)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(content).To(gomega.ContainSubstring("[image:"),
+					fmt.Sprintf("Expected echo response to contain [image: for %s", p.Provider))
+			})
+		}
+	})
+
+	ginkgo.When("JSON mode through BBR pipeline", ginkgo.Label("tier2", "json-mode"), func() {
+		for _, p := range providers {
+			p := p
+
+			ginkgo.It(fmt.Sprintf("should return valid JSON content for provider %s", p.Provider), func() {
+				curlCmd := getCurlCommandWithJSONMode(p.Name)
+
+				var resp string
+				gomega.Eventually(func() bool {
+					var err error
+					resp, err = execInPod("curl", nsName, "curl", curlCmd)
+					return err == nil && (strings.Contains(resp, "200 OK") || strings.Contains(resp, "HTTP/1.1 200"))
+				}, curlTimeout*3, 5*time.Second).Should(gomega.BeTrue(),
+					fmt.Sprintf("Expected 200 for JSON mode on %s, got:\n%s", p.Provider, resp))
+
+				result, err := parseResponseBody(resp)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				choices, ok := result["choices"].([]any)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(len(choices)).To(gomega.BeNumerically(">", 0))
+
+				choice := choices[0].(map[string]any)
+				msg := choice["message"].(map[string]any)
+				content, ok := msg["content"].(string)
+				gomega.Expect(ok).To(gomega.BeTrue())
+
+				var jsonContent map[string]any
+				err = json.Unmarshal([]byte(content), &jsonContent)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+					fmt.Sprintf("Expected valid JSON content for %s, got: %s", p.Provider, content))
+			})
+		}
+	})
+
+	ginkgo.When("system prompts and multi-turn conversations", ginkgo.Label("tier2", "conversation"), func() {
+		for _, p := range providers {
+			p := p
+
+			ginkgo.It(fmt.Sprintf("should handle system prompt for provider %s", p.Provider), func() {
+				curlCmd := buildCurlCommand(p.Name, map[string]any{
+					"model": p.Name,
+					"messages": []map[string]string{
+						{"role": "system", "content": "You are a helpful assistant."},
+						{"role": "user", "content": "hello"},
+					},
+				})
+
+				var resp string
+				gomega.Eventually(func() bool {
+					var err error
+					resp, err = execInPod("curl", nsName, "curl", curlCmd)
+					return err == nil && (strings.Contains(resp, "200 OK") || strings.Contains(resp, "HTTP/1.1 200"))
+				}, curlTimeout*3, 5*time.Second).Should(gomega.BeTrue(),
+					fmt.Sprintf("Expected 200 for system prompt on %s, got:\n%s", p.Provider, resp))
+
+				result, err := parseResponseBody(resp)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(result).To(gomega.HaveKey("choices"))
+			})
+
+			ginkgo.It(fmt.Sprintf("should handle multi-turn conversation for provider %s", p.Provider), func() {
+				curlCmd := buildCurlCommand(p.Name, map[string]any{
+					"model": p.Name,
+					"messages": []map[string]string{
+						{"role": "user", "content": "my name is test-user"},
+						{"role": "assistant", "content": "nice to meet you"},
+						{"role": "user", "content": "what is my name"},
+					},
+				})
+
+				var resp string
+				gomega.Eventually(func() bool {
+					var err error
+					resp, err = execInPod("curl", nsName, "curl", curlCmd)
+					return err == nil && (strings.Contains(resp, "200 OK") || strings.Contains(resp, "HTTP/1.1 200"))
+				}, curlTimeout*3, 5*time.Second).Should(gomega.BeTrue(),
+					fmt.Sprintf("Expected 200 for multi-turn on %s, got:\n%s", p.Provider, resp))
+
+				result, err := parseResponseBody(resp)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(result).To(gomega.HaveKey("choices"))
+			})
+		}
 	})
 })
