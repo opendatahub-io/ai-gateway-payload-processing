@@ -147,6 +147,7 @@ func newExternalModel(name, namespace, providerName, targetModel string) *infere
 				{
 					Ref:         inferencev1alpha1.NameReference{Name: providerName},
 					TargetModel: targetModel,
+					APIFormat:   "openai",
 				},
 			},
 		},
