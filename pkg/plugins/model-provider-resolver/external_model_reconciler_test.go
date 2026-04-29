@@ -225,7 +225,7 @@ func TestModelReconciler_ProviderUpdatePropagates(t *testing.T) {
 		secretName: "new-key", secretNamespace: "models",
 	})
 
-	result, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
+	_, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
 
 	info, found = modelStore.getModelInfo(modelKey)
