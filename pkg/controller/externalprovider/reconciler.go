@@ -75,6 +75,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
+	if provider.Status.Phase == "" {
+		r.setStatus(ctx, logger, provider, "Pending", metav1.ConditionFalse, "Reconciling", "Reconciliation in progress")
+	}
+
 	if err := r.validateSecretRef(ctx, provider); err != nil {
 		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
 		return ctrl.Result{}, err
@@ -132,11 +136,15 @@ func (r *Reconciler) validateSecretRef(ctx context.Context, provider *inferencev
 		Name:      provider.Spec.Auth.SecretRef.Name,
 		Namespace: provider.Namespace,
 	}
-	if err := r.Get(ctx, key, &corev1.Secret{}); err != nil {
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("secret %q not found in namespace %q", key.Name, key.Namespace)
 		}
 		return fmt.Errorf("failed to get secret %q: %w", key.Name, err)
+	}
+	if len(secret.Data["api-key"]) == 0 {
+		return fmt.Errorf("secret %q exists but missing required 'api-key' data key", key.Name)
 	}
 	return nil
 }

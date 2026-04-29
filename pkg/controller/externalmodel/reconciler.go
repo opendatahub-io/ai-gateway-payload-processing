@@ -93,6 +93,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
+	if model.Status.Phase == "" {
+		r.setStatus(ctx, logger, model, "Pending", metav1.ConditionFalse, "Reconciling", "Reconciliation in progress")
+	}
+
 	if err := r.reconcileHTTPRoute(ctx, logger, model); err != nil {
 		r.setStatus(ctx, logger, model, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
 		return ctrl.Result{}, err
