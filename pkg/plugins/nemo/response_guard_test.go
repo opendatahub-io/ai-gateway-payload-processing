@@ -496,6 +496,38 @@ func TestExtractAssistantMessages(t *testing.T) {
 			body:    map[string]any{"choices": "not-an-array"},
 			wantErr: true,
 		},
+		{
+			name: "mcp text content",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"result":  map[string]any{"content": []any{map[string]any{"type": "text", "text": "Hello"}}},
+			},
+			want: []map[string]string{{"role": "assistant", "content": "Hello"}},
+		},
+		{
+			name: "mcp text content — empty content array — nil",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"result":  map[string]any{"content": []any{}},
+			},
+			want: nil,
+		},
+		{
+			name: "mcp text content — empty content entry — nil",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"result":  map[string]any{"content": []any{map[string]any{"type": "text", "text": ""}}},
+			},
+			want: nil,
+		},
+		{
+			name: "mcp text content — text is not a string — fail closed",
+			body: map[string]any{
+				"jsonrpc": "2.0",
+				"result":  map[string]any{"content": []any{map[string]any{"type": "text", "text": 42}}},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
