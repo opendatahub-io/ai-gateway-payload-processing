@@ -40,6 +40,63 @@ func newCycleStateWithProvider(providerName string) *framework.CycleState {
 	return cs
 }
 
+func newCycleStateWithAPIFormat(apiFormat string) *framework.CycleState {
+	cs := framework.NewCycleState()
+	cs.Write(state.APIFormatKey, apiFormat)
+	return cs
+}
+
+func TestProcessRequest_APIFormatOverridesProvider(t *testing.T) {
+	p := newTestPlugin()
+
+	cs := framework.NewCycleState()
+	cs.Write(state.ProviderKey, "openai")
+	cs.Write(state.APIFormatKey, "anthropic")
+
+	req := framework.NewInferenceRequest()
+	req.Body["model"] = "some-model"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	// Should have used Anthropic translator (apiFormat), not OpenAI (provider)
+	assert.Equal(t, "/v1/messages", req.Headers[":path"],
+		"apiFormat=anthropic should override provider=openai")
+}
+
+func TestProcessRequest_APIFormatDirect(t *testing.T) {
+	p := newTestPlugin()
+
+	cs := newCycleStateWithAPIFormat("anthropic")
+
+	req := framework.NewInferenceRequest()
+	req.Body["model"] = "claude-3"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/v1/messages", req.Headers[":path"])
+}
+
+func TestProcessRequest_FallsBackToProvider(t *testing.T) {
+	p := newTestPlugin()
+
+	// Only provider set, no apiFormat
+	cs := newCycleStateWithProvider("anthropic")
+
+	req := framework.NewInferenceRequest()
+	req.Body["model"] = "claude-3"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/v1/messages", req.Headers[":path"],
+		"should fall back to provider when apiFormat is not set")
+}
+
 func TestProcessRequest_NoProvider(t *testing.T) {
 	p := newTestPlugin()
 
@@ -239,7 +296,7 @@ func TestProcessRequest_UnknownProvider(t *testing.T) {
 
 	err := p.ProcessRequest(context.Background(), cs, req)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported provider")
+	assert.Contains(t, err.Error(), "unsupported api format")
 	assert.Contains(t, err.Error(), "unknown")
 }
 

@@ -73,6 +73,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	providerRefName := nestedString(refMap, "ref", "name")
 	targetModel := nestedString(refMap, "targetModel")
+	apiFormat := nestedString(refMap, "apiFormat")
 
 	if providerRefName == "" {
 		r.modelStore.deleteExternalModel(req.NamespacedName)
@@ -93,6 +94,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		secretName:      provInfo.secretName,
 		secretNamespace: provInfo.secretNamespace,
 		config:          provInfo.config,
+		apiFormat:       apiFormat,
 	}
 	r.modelStore.addOrUpdateExternalModel(req.NamespacedName, info)
 

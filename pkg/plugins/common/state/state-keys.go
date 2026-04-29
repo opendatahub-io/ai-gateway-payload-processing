@@ -23,4 +23,5 @@ const (
 	CredsRefName      = "credential-ref-name"
 	CredsRefNamespace = "credential-ref-namespace"
 	ProviderConfigKey = "provider-config"
+	APIFormatKey      = "api-format"
 )

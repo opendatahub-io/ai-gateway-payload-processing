@@ -29,6 +29,7 @@ type externalModelInfo struct {
 	secretName      string
 	secretNamespace string
 	config          map[string]string
+	apiFormat       string
 }
 
 // modelInfoStore is a thread-safe in-memory store that maps model names to their provider info.

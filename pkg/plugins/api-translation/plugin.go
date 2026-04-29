@@ -133,17 +133,31 @@ func (p *APITranslationPlugin) WithName(name string) *APITranslationPlugin {
 	return p
 }
 
-// ProcessRequest reads the provider from CycleState (set by an upstream plugin) and translates
+// resolveTranslatorKey returns the translator key from CycleState.
+// Prefers APIFormatKey (explicit translation selection from ExternalModel) over
+// ProviderKey (provider type from ExternalProvider).
+func (p *APITranslationPlugin) resolveTranslatorKey(cycleState *framework.CycleState) string {
+	if apiFormat, err := framework.ReadCycleStateKey[string](cycleState, state.APIFormatKey); err == nil && apiFormat != "" {
+		return apiFormat
+	}
+	if providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey); err == nil && providerName != "" {
+		return providerName
+	}
+	return ""
+}
+
+// ProcessRequest reads the API format (or provider) from CycleState and translates
 // the request body from OpenAI format to the provider's native format if needed.
+// apiFormat takes precedence over provider for translator selection.
 func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
-	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
-	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
+	translatorKey := p.resolveTranslatorKey(cycleState)
+	if translatorKey == "" {
 		return nil
 	}
 
-	translator, ok := p.providers[providerName]
+	translator, ok := p.providers[translatorKey]
 	if !ok {
-		return fmt.Errorf("unsupported provider - '%s'", providerName)
+		return fmt.Errorf("unsupported api format - '%s'", translatorKey)
 	}
 
 	translatedBody, headersToMutate, headersToRemove, err := translator.TranslateRequest(request.Body)
@@ -152,7 +166,7 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *f
 		if errors.As(err, &commErr) {
 			return commErr
 		}
-		return fmt.Errorf("request translation failed for provider '%s' - %w", providerName, err)
+		return fmt.Errorf("request translation failed for '%s' - %w", translatorKey, err)
 	}
 
 	if translatedBody != nil {
@@ -175,17 +189,17 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *f
 	return nil
 }
 
-// ProcessResponse reads the provider from CycleState and translates the response
-// back to OpenAI Chat Completions format if needed.
+// ProcessResponse reads the API format (or provider) from CycleState and translates
+// the response back to OpenAI Chat Completions format if needed.
 func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *framework.CycleState, response *framework.InferenceResponse) error {
-	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
-	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
+	translatorKey := p.resolveTranslatorKey(cycleState)
+	if translatorKey == "" {
 		return nil
 	}
 
-	translator, ok := p.providers[providerName]
+	translator, ok := p.providers[translatorKey]
 	if !ok {
-		return fmt.Errorf("unsupported provider - '%s'", providerName)
+		return fmt.Errorf("unsupported api format - '%s'", translatorKey)
 	}
 
 	model, _ := framework.ReadCycleStateKey[string](cycleState, state.ModelKey)
@@ -196,7 +210,7 @@ func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *
 		if errors.As(err, &commErr) {
 			return commErr
 		}
-		return fmt.Errorf("response translation failed for provider '%s' - %w", providerName, err)
+		return fmt.Errorf("response translation failed for '%s' - %w", translatorKey, err)
 	}
 
 	if translatedBody != nil {
