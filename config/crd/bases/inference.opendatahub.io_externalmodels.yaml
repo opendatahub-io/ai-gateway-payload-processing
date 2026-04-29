@@ -57,10 +57,8 @@ spec:
               externalProviderRefs:
                 description: |-
                   ExternalProviderRefs maps this model to one or more external providers.
-                  Each entry specifies the provider, provider-side model name, and API format.
-
-                  Phase 1: limited to a single provider ref. MaxItems will be increased
-                  when traffic splitting is implemented in Phase 2.
+                  Each entry specifies the provider, provider-side model name, API format,
+                  and an optional weight for traffic splitting.
                 items:
                   description: ExternalProviderRef binds this model to a specific
                     provider with translation config.
@@ -91,12 +89,19 @@ spec:
                       maxLength: 253
                       minLength: 1
                       type: string
+                    weight:
+                      default: 1
+                      description: |-
+                        Weight for traffic splitting across providers. Weights are relative and
+                        do not need to sum to 100. If omitted, defaults to 1.
+                      format: int32
+                      minimum: 0
+                      type: integer
                   required:
                   - apiFormat
                   - ref
                   - targetModel
                   type: object
-                maxItems: 1
                 minItems: 1
                 type: array
             required:

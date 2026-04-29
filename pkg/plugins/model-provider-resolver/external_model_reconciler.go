@@ -59,46 +59,71 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	refs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "externalProviderRefs")
-	if len(refs) == 0 {
+	rawRefs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "externalProviderRefs")
+	if len(rawRefs) == 0 {
 		r.modelStore.deleteExternalModel(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
-	refMap, ok := refs[0].(map[string]any)
-	if !ok {
+	var resolvedRefs []providerRef
+	for _, rawRef := range rawRefs {
+		refMap, ok := rawRef.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		providerRefName := nestedString(refMap, "ref", "name")
+		if providerRefName == "" {
+			continue
+		}
+
+		providerKey := types.NamespacedName{Namespace: req.Namespace, Name: providerRefName}
+		provInfo, found := r.providerStore.get(providerKey)
+		if !found {
+			logger.Info("ExternalProvider not yet available, requeueing", "provider", providerRefName)
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+
+		weight := int32(1)
+		if w, ok := refMap["weight"]; ok {
+			switch v := w.(type) {
+			case float64:
+				weight = int32(v)
+			case int64:
+				weight = int32(v)
+			}
+		}
+
+		resolvedRefs = append(resolvedRefs, providerRef{
+			providerName:    providerRefName,
+			provider:        provInfo.provider,
+			targetModel:     nestedString(refMap, "targetModel"),
+			secretName:      provInfo.secretName,
+			secretNamespace: provInfo.secretNamespace,
+			config:          provInfo.config,
+			apiFormat:       nestedString(refMap, "apiFormat"),
+			weight:          weight,
+		})
+	}
+
+	if len(resolvedRefs) == 0 {
 		r.modelStore.deleteExternalModel(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
-	providerRefName := nestedString(refMap, "ref", "name")
-	targetModel := nestedString(refMap, "targetModel")
-	apiFormat := nestedString(refMap, "apiFormat")
-
-	if providerRefName == "" {
-		r.modelStore.deleteExternalModel(req.NamespacedName)
-		logger.Info("ExternalModel missing provider ref name, skipping")
-		return ctrl.Result{}, nil
-	}
-
-	providerKey := types.NamespacedName{Namespace: req.Namespace, Name: providerRefName}
-	provInfo, found := r.providerStore.get(providerKey)
-	if !found {
-		logger.Info("ExternalProvider not yet available, requeueing", "provider", providerRefName)
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	var totalWeight int32
+	for i := range resolvedRefs {
+		totalWeight += resolvedRefs[i].weight
 	}
 
 	info := &externalModelInfo{
-		provider:        provInfo.provider,
-		targetModel:     targetModel,
-		secretName:      provInfo.secretName,
-		secretNamespace: provInfo.secretNamespace,
-		config:          provInfo.config,
-		apiFormat:       apiFormat,
+		modelName:   req.Name,
+		refs:        resolvedRefs,
+		totalWeight: totalWeight,
 	}
 	r.modelStore.addOrUpdateExternalModel(req.NamespacedName, info)
 
-	logger.Info("Updated model store", "provider", provInfo.provider, "targetModel", targetModel)
+	logger.Info("Updated model store", "model", req.Name, "providers", len(resolvedRefs))
 	return ctrl.Result{}, nil
 }
 

@@ -17,28 +17,56 @@ limitations under the License.
 package model_provider_resolver
 
 import (
+	"math/rand"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// externalModelInfo holds the provider and secret name/namespace for an external model.
-type externalModelInfo struct {
+// providerRef holds the resolved info for a single provider ref on an ExternalModel.
+type providerRef struct {
+	providerName    string
 	provider        string
-	targetModel     string // this is the name of the model that will be used in the request
+	targetModel     string
 	secretName      string
 	secretNamespace string
 	config          map[string]string
 	apiFormat       string
+	weight          int32
+}
+
+// externalModelInfo holds all provider refs for an external model.
+type externalModelInfo struct {
+	modelName   string // metadata.name — the client-facing model name
+	refs        []providerRef
+	totalWeight int32 // precomputed sum of weights
+}
+
+// selectProvider picks a provider ref using weighted random selection.
+func (m *externalModelInfo) selectProvider() *providerRef {
+	if len(m.refs) == 1 {
+		return &m.refs[0]
+	}
+	if m.totalWeight <= 0 {
+		return &m.refs[0]
+	}
+
+	r := rand.Int31n(m.totalWeight)
+	var cumulative int32
+	for i := range m.refs {
+		cumulative += m.refs[i].weight
+		if r < cumulative {
+			return &m.refs[i]
+		}
+	}
+	return &m.refs[len(m.refs)-1]
 }
 
 // modelInfoStore is a thread-safe in-memory store that maps model names to their provider info.
 // The reconciler writes to it; the plugin reads from it during request processing.
 type modelInfoStore struct {
-	//externalModelToModelInfo maps externalModel CR namespaced name to externalModelInfo
 	externalModelToModelInfo map[string]*externalModelInfo
-
-	lock sync.RWMutex
+	lock                     sync.RWMutex
 }
 
 func newModelInfoStore() *modelInfoStore {
@@ -62,15 +90,14 @@ func (s *modelInfoStore) deleteExternalModel(externalModelKey types.NamespacedNa
 }
 
 // getModelInfo returns the modelInfo stored in ExternalModel and bool if found or not.
-// if no externalModelInfo found, nil is returned in the first return value.
 func (s *modelInfoStore) getModelInfo(externalModelKey types.NamespacedName) (*externalModelInfo, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	externalModelInfo, ok := s.externalModelToModelInfo[externalModelKey.String()]
+	info, ok := s.externalModelToModelInfo[externalModelKey.String()]
 	if !ok {
-		return nil, false // ExternalModel not found
+		return nil, false
 	}
 
-	return externalModelInfo, true
+	return info, true
 }

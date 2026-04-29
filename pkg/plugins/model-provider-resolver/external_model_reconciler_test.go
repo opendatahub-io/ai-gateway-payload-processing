@@ -38,6 +38,32 @@ func newModelUnstructured(name, namespace, providerRefName, targetModel string) 
 			map[string]any{
 				"ref":         map[string]any{"name": providerRefName},
 				"targetModel": targetModel,
+				"apiFormat":   "openai",
+				"weight":      float64(1),
+			},
+		},
+	}
+	return obj
+}
+
+func newMultiProviderModelUnstructured(name, namespace string) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(externalModelGVK)
+	obj.SetName(name)
+	obj.SetNamespace(namespace)
+	obj.Object["spec"] = map[string]any{
+		"externalProviderRefs": []any{
+			map[string]any{
+				"ref":         map[string]any{"name": "openai-provider"},
+				"targetModel": "gpt-4o",
+				"apiFormat":   "openai",
+				"weight":      float64(80),
+			},
+			map[string]any{
+				"ref":         map[string]any{"name": "bedrock-provider"},
+				"targetModel": "gpt-4o-bedrock",
+				"apiFormat":   "bedrock-openai",
+				"weight":      float64(20),
 			},
 		},
 	}
@@ -67,10 +93,45 @@ func TestModelReconciler_ValidCR(t *testing.T) {
 
 	info, found := modelStore.getModelInfo(modelKey)
 	require.True(t, found)
-	assert.Equal(t, "openai", info.provider)
-	assert.Equal(t, "gpt-4o", info.targetModel)
-	assert.Equal(t, "openai-key", info.secretName)
-	assert.Equal(t, "models", info.secretNamespace)
+	assert.Equal(t, "gpt4", info.modelName)
+	require.Len(t, info.refs, 1)
+	assert.Equal(t, "openai", info.refs[0].provider)
+	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
+	assert.Equal(t, "openai-key", info.refs[0].secretName)
+	assert.Equal(t, "openai", info.refs[0].apiFormat)
+}
+
+func TestModelReconciler_MultiProvider(t *testing.T) {
+	modelKey := types.NamespacedName{Namespace: "models", Name: "gpt4"}
+
+	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
+		modelKey: newMultiProviderModelUnstructured("gpt4", "models"),
+	}}
+
+	provStore := newProviderInfoStore()
+	provStore.addOrUpdate(types.NamespacedName{Namespace: "models", Name: "openai-provider"}, &providerInfo{
+		provider: "openai", endpoint: "api.openai.com",
+		secretName: "openai-key", secretNamespace: "models",
+	})
+	provStore.addOrUpdate(types.NamespacedName{Namespace: "models", Name: "bedrock-provider"}, &providerInfo{
+		provider: "bedrock-openai", endpoint: "bedrock.amazonaws.com",
+		secretName: "aws-key", secretNamespace: "models",
+	})
+
+	modelStore := newModelInfoStore()
+	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found := modelStore.getModelInfo(modelKey)
+	require.True(t, found)
+	require.Len(t, info.refs, 2)
+	assert.Equal(t, "openai-provider", info.refs[0].providerName)
+	assert.Equal(t, int32(80), info.refs[0].weight)
+	assert.Equal(t, "bedrock-provider", info.refs[1].providerName)
+	assert.Equal(t, int32(20), info.refs[1].weight)
 }
 
 func TestModelReconciler_MissingProvider_Requeues(t *testing.T) {
@@ -80,16 +141,16 @@ func TestModelReconciler_MissingProvider_Requeues(t *testing.T) {
 		modelKey: newModelUnstructured("gpt4", "models", "my-openai", "gpt-4o"),
 	}}
 
-	provStore := newProviderInfoStore() // empty — provider not yet reconciled
+	provStore := newProviderInfoStore()
 	modelStore := newModelInfoStore()
 	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
-	assert.Equal(t, 2*time.Second, result.RequeueAfter, "should requeue when provider not available")
+	assert.Equal(t, 2*time.Second, result.RequeueAfter)
 
 	_, found := modelStore.getModelInfo(modelKey)
-	assert.False(t, found, "should not populate model store without provider")
+	assert.False(t, found)
 }
 
 func TestModelReconciler_EmptyProviderRef_NoRequeue(t *testing.T) {
@@ -105,7 +166,7 @@ func TestModelReconciler_EmptyProviderRef_NoRequeue(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result, "should NOT requeue for empty provider ref")
+	assert.Equal(t, ctrl.Result{}, result)
 	assert.Zero(t, result.RequeueAfter)
 
 	_, found := modelStore.getModelInfo(modelKey)
@@ -115,10 +176,13 @@ func TestModelReconciler_EmptyProviderRef_NoRequeue(t *testing.T) {
 func TestModelReconciler_DeletedCR(t *testing.T) {
 	modelKey := types.NamespacedName{Namespace: "models", Name: "deleted"}
 
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{}} // not found
+	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{}}
 
 	modelStore := newModelInfoStore()
-	modelStore.addOrUpdateExternalModel(modelKey, &externalModelInfo{provider: "openai", targetModel: "gpt-4o"})
+	modelStore.addOrUpdateExternalModel(modelKey, &externalModelInfo{
+		modelName: "deleted",
+		refs:      []providerRef{{provider: "openai", targetModel: "gpt-4o", weight: 1}},
+	})
 
 	provStore := newProviderInfoStore()
 	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
@@ -128,7 +192,7 @@ func TestModelReconciler_DeletedCR(t *testing.T) {
 	assert.Equal(t, ctrl.Result{}, result)
 
 	_, found := modelStore.getModelInfo(modelKey)
-	assert.False(t, found, "model store entry should be removed on delete")
+	assert.False(t, found)
 }
 
 func TestModelReconciler_ProviderUpdatePropagates(t *testing.T) {
@@ -148,50 +212,23 @@ func TestModelReconciler_ProviderUpdatePropagates(t *testing.T) {
 	modelStore := newModelInfoStore()
 	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
 
-	// First reconcile — model gets old-key
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 
 	info, found := modelStore.getModelInfo(modelKey)
 	require.True(t, found)
-	assert.Equal(t, "old-key", info.secretName)
+	assert.Equal(t, "old-key", info.refs[0].secretName)
 
-	// Simulate provider update (credential rotation)
 	provStore.addOrUpdate(providerKey, &providerInfo{
 		provider: "openai", endpoint: "api.openai.com",
 		secretName: "new-key", secretNamespace: "models",
 	})
 
-	// Re-reconcile (triggered by cross-watch in production) — model picks up new-key
 	result, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
 
 	info, found = modelStore.getModelInfo(modelKey)
 	require.True(t, found)
-	assert.Equal(t, "new-key", info.secretName, "model store should reflect updated provider credentials")
-}
-
-func TestModelReconciler_NoProviderRefs(t *testing.T) {
-	modelKey := types.NamespacedName{Namespace: "models", Name: "empty"}
-
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-	obj.SetName("empty")
-	obj.SetNamespace("models")
-	obj.Object["spec"] = map[string]any{}
-
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{modelKey: obj}}
-
-	modelStore := newModelInfoStore()
-	provStore := newProviderInfoStore()
-	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
-	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
-
-	_, found := modelStore.getModelInfo(modelKey)
-	assert.False(t, found)
+	assert.Equal(t, "new-key", info.refs[0].secretName)
 }

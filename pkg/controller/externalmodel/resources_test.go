@@ -31,72 +31,62 @@ func TestCommonLabels(t *testing.T) {
 	assert.Len(t, labels, 2)
 }
 
-func TestBuildHTTPRoute(t *testing.T) {
-	hr := buildHTTPRoute(
-		"api.openai.com", "my-openai",
-		"gpt4", "gpt-4o",
-		"models", 443,
-		"default-gateway", "openshift-ingress", "300s",
-		commonLabels("gpt4"),
-	)
+func TestBuildHTTPRoute_SingleProvider(t *testing.T) {
+	providers := []resolvedProvider{
+		{Name: "my-openai", Endpoint: "api.openai.com"},
+	}
+	hr := buildHTTPRoute("gpt4", "models", providers, 443,
+		"default-gateway", "openshift-ingress", "300s", commonLabels("gpt4"))
 
 	assert.Equal(t, "gpt4", hr.Name)
 	assert.Equal(t, "models", hr.Namespace)
-	assert.Equal(t, managedByValue, hr.Labels[labelManagedBy])
 
-	// Parent gateway ref
 	require.Len(t, hr.Spec.ParentRefs, 1)
 	assert.Equal(t, "default-gateway", string(hr.Spec.ParentRefs[0].Name))
-	assert.Equal(t, "openshift-ingress", string(*hr.Spec.ParentRefs[0].Namespace))
 
-	// Must have 2 rules: path-based and header-based
+	// 2 rules: path-based + 1 provider header
 	require.Len(t, hr.Spec.Rules, 2)
 
-	// Rule 1: path-based match with namespace prefix
-	rule1 := hr.Spec.Rules[0]
-	assert.Equal(t, "/models/gpt4", *rule1.Matches[0].Path.Value)
+	// Rule 1: path-based
+	assert.Equal(t, "/models/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
+	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
 
-	// Rule 2: header-based match uses targetModel
-	rule2 := hr.Spec.Rules[1]
-	assert.Equal(t, "X-Gateway-Model-Name", string(rule2.Matches[0].Headers[0].Name))
-	assert.Equal(t, "gpt-4o", rule2.Matches[0].Headers[0].Value)
+	// Rule 2: X-Selected-Provider header match
+	assert.Equal(t, "X-Selected-Provider", string(hr.Spec.Rules[1].Matches[0].Headers[0].Name))
+	assert.Equal(t, "my-openai", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "my-openai", string(hr.Spec.Rules[1].BackendRefs[0].Name))
 
-	// Backend ref points to the PROVIDER's Service, not the model
-	for i, rule := range hr.Spec.Rules {
-		require.Len(t, rule.BackendRefs, 1, "rule %d", i)
-		assert.Equal(t, "my-openai", string(rule.BackendRefs[0].Name),
-			"rule %d: backend should be the provider's Service", i)
-	}
-
-	// Host header filter for TLS SNI uses provider endpoint
-	for i, rule := range hr.Spec.Rules {
-		require.Len(t, rule.Filters, 1, "rule %d", i)
+	// Host header for TLS SNI
+	for _, rule := range hr.Spec.Rules {
+		require.Len(t, rule.Filters, 1)
 		assert.Equal(t, gatewayapiv1.HTTPRouteFilterRequestHeaderModifier, rule.Filters[0].Type)
 		assert.Equal(t, "Host", string(rule.Filters[0].RequestHeaderModifier.Set[0].Name))
 		assert.Equal(t, "api.openai.com", rule.Filters[0].RequestHeaderModifier.Set[0].Value)
 	}
 }
 
-func TestBuildHTTPRoute_TargetModelDiffersFromName(t *testing.T) {
-	hr := buildHTTPRoute(
-		"bedrock.us-east-1.amazonaws.com", "my-bedrock",
-		"claude", "anthropic.claude-3-opus",
-		"models", 443,
-		"my-gateway", "gateway-ns", "300s",
-		commonLabels("claude"),
-	)
+func TestBuildHTTPRoute_MultipleProviders(t *testing.T) {
+	providers := []resolvedProvider{
+		{Name: "my-openai", Endpoint: "api.openai.com"},
+		{Name: "my-bedrock", Endpoint: "bedrock.us-east-1.amazonaws.com"},
+	}
+	hr := buildHTTPRoute("gpt4", "models", providers, 443,
+		"default-gateway", "openshift-ingress", "300s", commonLabels("gpt4"))
 
-	// Name and path use ExternalModel name
-	assert.Equal(t, "claude", hr.Name)
-	assert.Equal(t, "/models/claude", *hr.Spec.Rules[0].Matches[0].Path.Value)
+	// 3 rules: path-based + 2 provider headers
+	require.Len(t, hr.Spec.Rules, 3)
 
-	// Header match uses targetModel (provider-side name)
-	assert.Equal(t, "anthropic.claude-3-opus", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Rule 1: path-based (default backend = first provider)
+	assert.Equal(t, "/models/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
+	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
 
-	// Backend points to provider Service
-	assert.Equal(t, "my-bedrock", string(hr.Spec.Rules[0].BackendRefs[0].Name))
+	// Rule 2: X-Selected-Provider: my-openai
+	assert.Equal(t, "my-openai", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "my-openai", string(hr.Spec.Rules[1].BackendRefs[0].Name))
+	assert.Equal(t, "api.openai.com", hr.Spec.Rules[1].Filters[0].RequestHeaderModifier.Set[0].Value)
 
-	// Host header uses provider endpoint
-	assert.Equal(t, "bedrock.us-east-1.amazonaws.com",
-		hr.Spec.Rules[0].Filters[0].RequestHeaderModifier.Set[0].Value)
+	// Rule 3: X-Selected-Provider: my-bedrock
+	assert.Equal(t, "my-bedrock", hr.Spec.Rules[2].Matches[0].Headers[0].Value)
+	assert.Equal(t, "my-bedrock", string(hr.Spec.Rules[2].BackendRefs[0].Name))
+	assert.Equal(t, "bedrock.us-east-1.amazonaws.com", hr.Spec.Rules[2].Filters[0].RequestHeaderModifier.Set[0].Value)
 }

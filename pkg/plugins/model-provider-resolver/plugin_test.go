@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
@@ -39,10 +40,16 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	store.addOrUpdateExternalModel(
 		types.NamespacedName{Namespace: extNS, Name: extName},
 		&externalModelInfo{
-			provider:        provider.Anthropic,
-			targetModel:     targetModel,
-			secretName:      credName,
-			secretNamespace: extNS,
+			modelName: extName,
+			refs: []providerRef{{
+				providerName:    "my-anthropic",
+				provider:        provider.Anthropic,
+				targetModel:     targetModel,
+				secretName:      credName,
+				secretNamespace: extNS,
+				apiFormat:       "anthropic",
+				weight:          1,
+			}},
 		},
 	)
 
@@ -50,11 +57,14 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
 	req.Headers[":path"] = "/" + extNS + "/" + extName + "/v1/chat/completions"
-	// Body "model" must match targetModel on the ExternalModel (ProcessRequest validates this).
-	req.Body["model"] = targetModel
+	// Body "model" must match the ExternalModel CR name (client-facing name)
+	req.Body["model"] = extName
 
 	err := plugin.ProcessRequest(context.Background(), cs, req)
 	require.NoError(t, err)
+
+	// Model field should be rewritten to targetModel
+	assert.Equal(t, targetModel, req.Body["model"])
 
 	actualModel, err := framework.ReadCycleStateKey[string](cs, state.ModelKey)
 	require.NoError(t, err)
@@ -71,6 +81,17 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	actualCredsNamespace, err := framework.ReadCycleStateKey[string](cs, state.CredsRefNamespace)
 	require.NoError(t, err)
 	require.Equal(t, extNS, actualCredsNamespace)
+
+	actualAPIFormat, err := framework.ReadCycleStateKey[string](cs, state.APIFormatKey)
+	require.NoError(t, err)
+	require.Equal(t, "anthropic", actualAPIFormat)
+
+	actualSelectedProvider, err := framework.ReadCycleStateKey[string](cs, state.SelectedProviderKey)
+	require.NoError(t, err)
+	require.Equal(t, "my-anthropic", actualSelectedProvider)
+
+	// X-Selected-Provider header should be set
+	assert.Equal(t, "my-anthropic", req.Headers["X-Selected-Provider"])
 }
 
 func TestProcessRequest_ModelNotFound(t *testing.T) {
@@ -85,7 +106,7 @@ func TestProcessRequest_ModelNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = framework.ReadCycleStateKey[string](cs, state.ProviderKey)
-	require.Error(t, err) // not found in CycleState
+	require.Error(t, err)
 }
 
 func TestProcessRequest_NoModel(t *testing.T) {
@@ -96,7 +117,6 @@ func TestProcessRequest_NoModel(t *testing.T) {
 	err := p.ProcessRequest(context.Background(), cs, framework.NewInferenceRequest())
 	require.NoError(t, err)
 
-	// CycleState should remain empty — request passes through unmodified
 	_, err = framework.ReadCycleStateKey[string](cs, state.ProviderKey)
 	require.Error(t, err)
 	_, err = framework.ReadCycleStateKey[string](cs, state.ModelKey)
@@ -107,7 +127,13 @@ func TestProcessRequest_BadPath(t *testing.T) {
 	store := newModelInfoStore()
 	store.addOrUpdateExternalModel(
 		types.NamespacedName{Namespace: "llm", Name: "ext"},
-		&externalModelInfo{provider: provider.OpenAI, targetModel: "gpt-4o", secretName: "k", secretNamespace: "llm"},
+		&externalModelInfo{
+			modelName: "ext",
+			refs: []providerRef{{
+				provider: provider.OpenAI, targetModel: "gpt-4o",
+				secretName: "k", secretNamespace: "llm", weight: 1,
+			}},
+		},
 	)
 	p := &ModelProviderResolverPlugin{modelInfoStore: store}
 	cs := framework.NewCycleState()
@@ -120,4 +146,56 @@ func TestProcessRequest_BadPath(t *testing.T) {
 
 	_, err = framework.ReadCycleStateKey[string](cs, state.ProviderKey)
 	require.Error(t, err)
+}
+
+func TestProcessRequest_ModelNameMismatch(t *testing.T) {
+	store := newModelInfoStore()
+	store.addOrUpdateExternalModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
+		&externalModelInfo{
+			modelName: "gpt4",
+			refs: []providerRef{{
+				provider: provider.OpenAI, targetModel: "gpt-4o",
+				secretName: "k", secretNamespace: "llm", weight: 1,
+			}},
+		},
+	)
+	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	cs := framework.NewCycleState()
+	req := framework.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
+	req.Body["model"] = "wrong-model-name"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "wrong-model-name")
+	assert.Contains(t, err.Error(), "gpt4")
+}
+
+func TestProcessRequest_MultiProviderSetsHeader(t *testing.T) {
+	store := newModelInfoStore()
+	store.addOrUpdateExternalModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
+		&externalModelInfo{
+			modelName: "gpt4",
+			refs: []providerRef{
+				{providerName: "openai-provider", provider: "openai", targetModel: "gpt-4o",
+					secretName: "k1", secretNamespace: "llm", apiFormat: "openai", weight: 100},
+				{providerName: "bedrock-provider", provider: "bedrock-openai", targetModel: "gpt-4o-bedrock",
+					secretName: "k2", secretNamespace: "llm", apiFormat: "bedrock-openai", weight: 0},
+			},
+		},
+	)
+	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	cs := framework.NewCycleState()
+	req := framework.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
+	req.Body["model"] = "gpt4"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	// Weight 100 vs 0 — should always select openai-provider
+	assert.Equal(t, "openai-provider", req.Headers["X-Selected-Provider"])
+	assert.Equal(t, "gpt-4o", req.Body["model"], "model field should be rewritten to targetModel")
 }

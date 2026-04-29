@@ -106,28 +106,33 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 	if len(model.Spec.ExternalProviderRefs) == 0 {
 		return fmt.Errorf("ExternalModel %q has no externalProviderRefs", model.Name)
 	}
-	ref := model.Spec.ExternalProviderRefs[0]
 
-	provider := &inferencev1alpha1.ExternalProvider{}
-	providerKey := types.NamespacedName{Name: ref.Ref.Name, Namespace: model.Namespace}
-	if err := r.Get(ctx, providerKey, provider); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("ExternalProvider %q not found in namespace %q", ref.Ref.Name, model.Namespace)
+	var providers []resolvedProvider
+	for _, ref := range model.Spec.ExternalProviderRefs {
+		provider := &inferencev1alpha1.ExternalProvider{}
+		providerKey := types.NamespacedName{Name: ref.Ref.Name, Namespace: model.Namespace}
+		if err := r.Get(ctx, providerKey, provider); err != nil {
+			if apierrors.IsNotFound(err) {
+				return fmt.Errorf("ExternalProvider %q not found in namespace %q", ref.Ref.Name, model.Namespace)
+			}
+			return fmt.Errorf("failed to get ExternalProvider %q: %w", ref.Ref.Name, err)
 		}
-		return fmt.Errorf("failed to get ExternalProvider %q: %w", ref.Ref.Name, err)
-	}
 
-	if provider.Status.Phase != "Ready" {
-		return fmt.Errorf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase)
+		if provider.Status.Phase != "Ready" {
+			return fmt.Errorf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase)
+		}
+
+		providers = append(providers, resolvedProvider{
+			Name:     provider.Name,
+			Endpoint: provider.Spec.Endpoint,
+		})
 	}
 
 	labels := commonLabels(model.Name)
 	hr := buildHTTPRoute(
-		provider.Spec.Endpoint,
-		provider.Name,
 		model.Name,
-		ref.TargetModel,
 		model.Namespace,
+		providers,
 		ctrlcommon.DefaultPort,
 		r.gatewayName(),
 		r.gatewayNamespace(),
@@ -145,8 +150,7 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 
 	logger.Info("ExternalModel HTTPRoute reconciled",
 		"httpRoute", model.Name,
-		"provider", provider.Name,
-		"targetModel", ref.TargetModel,
+		"providers", len(providers),
 	)
 	return nil
 }

@@ -40,13 +40,10 @@ type ExternalModel struct {
 // ExternalModelSpec defines the desired state of ExternalModel.
 type ExternalModelSpec struct {
 	// ExternalProviderRefs maps this model to one or more external providers.
-	// Each entry specifies the provider, provider-side model name, and API format.
-	//
-	// Phase 1: limited to a single provider ref. MaxItems will be increased
-	// when traffic splitting is implemented in Phase 2.
+	// Each entry specifies the provider, provider-side model name, API format,
+	// and an optional weight for traffic splitting.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=1
 	ExternalProviderRefs []ExternalProviderRef `json:"externalProviderRefs"`
 }
 
@@ -69,6 +66,13 @@ type ExternalProviderRef struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	APIFormat string `json:"apiFormat"`
+
+	// Weight for traffic splitting across providers. Weights are relative and
+	// do not need to sum to 100. If omitted, defaults to 1.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=1
+	Weight *int32 `json:"weight,omitempty"`
 }
 
 // NameReference is a reference to a Kubernetes resource by name.

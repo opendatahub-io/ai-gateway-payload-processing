@@ -184,13 +184,15 @@ func TestReconcile_CreatesHTTPRoute(t *testing.T) {
 	require.Len(t, hr.Spec.ParentRefs, 1)
 	assert.Equal(t, "test-gateway", string(hr.Spec.ParentRefs[0].Name))
 
-	// Two rules: path + header
+	// Two rules: path-based + X-Selected-Provider header
 	require.Len(t, hr.Spec.Rules, 2)
 	assert.Equal(t, "/"+ns+"/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
-	assert.Equal(t, "gpt-4o", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "X-Selected-Provider", string(hr.Spec.Rules[1].Matches[0].Headers[0].Name))
+	assert.Equal(t, "my-openai", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Backend ref points to provider's Service
 	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
+	assert.Equal(t, "my-openai", string(hr.Spec.Rules[1].BackendRefs[0].Name))
 
 	// Host header for TLS SNI
 	assert.Equal(t, "api.openai.com",
@@ -305,9 +307,9 @@ func TestReconcile_TwoModelsOneProvider(t *testing.T) {
 	assert.Equal(t, "shared-provider", string(hr1.Spec.Rules[0].BackendRefs[0].Name))
 	assert.Equal(t, "shared-provider", string(hr2.Spec.Rules[0].BackendRefs[0].Name))
 
-	// But different target models in header match
-	assert.Equal(t, "gpt-4o", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
-	assert.Equal(t, "gpt-3.5-turbo", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Both use X-Selected-Provider header pointing to same provider
+	assert.Equal(t, "shared-provider", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "shared-provider", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Different path prefixes
 	assert.Equal(t, "/"+ns+"/gpt4", *hr1.Spec.Rules[0].Matches[0].Path.Value)
@@ -318,4 +320,55 @@ func TestReconcile_TwoModelsOneProvider(t *testing.T) {
 	assert.Equal(t, "gpt35", hr2.Labels[labelExternalModel])
 	assert.Equal(t, "gpt4", hr1.OwnerReferences[0].Name)
 	assert.Equal(t, "gpt35", hr2.OwnerReferences[0].Name)
+}
+
+func TestReconcile_MultiProviderHTTPRoute(t *testing.T) {
+	ns := createTestNamespace(t)
+	createExternalProvider(t, "prov-openai", ns, "api.openai.com")
+	createExternalProvider(t, "prov-anthropic", ns, "api.anthropic.com")
+
+	weight80 := int32(80)
+	weight20 := int32(20)
+	model := &inferencev1alpha1.ExternalModel{
+		ObjectMeta: metav1.ObjectMeta{Name: "multi-model", Namespace: ns},
+		Spec: inferencev1alpha1.ExternalModelSpec{
+			ExternalProviderRefs: []inferencev1alpha1.ExternalProviderRef{
+				{
+					Ref:         inferencev1alpha1.NameReference{Name: "prov-openai"},
+					TargetModel: "gpt-4o",
+					APIFormat:   "openai",
+					Weight:      &weight80,
+				},
+				{
+					Ref:         inferencev1alpha1.NameReference{Name: "prov-anthropic"},
+					TargetModel: "claude-3-opus",
+					APIFormat:   "anthropic",
+					Weight:      &weight20,
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, model))
+
+	waitForModelPhase(t, "multi-model", ns, "Ready")
+
+	hr := &gatewayapiv1.HTTPRoute{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "multi-model", Namespace: ns}, hr))
+
+	// 3 rules: path-based + 2 X-Selected-Provider headers
+	require.Len(t, hr.Spec.Rules, 3)
+
+	// Rule 1: path-based
+	assert.Equal(t, "/"+ns+"/multi-model", *hr.Spec.Rules[0].Matches[0].Path.Value)
+
+	// Rule 2: X-Selected-Provider: prov-openai
+	assert.Equal(t, "X-Selected-Provider", string(hr.Spec.Rules[1].Matches[0].Headers[0].Name))
+	assert.Equal(t, "prov-openai", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "prov-openai", string(hr.Spec.Rules[1].BackendRefs[0].Name))
+	assert.Equal(t, "api.openai.com", hr.Spec.Rules[1].Filters[0].RequestHeaderModifier.Set[0].Value)
+
+	// Rule 3: X-Selected-Provider: prov-anthropic
+	assert.Equal(t, "prov-anthropic", hr.Spec.Rules[2].Matches[0].Headers[0].Value)
+	assert.Equal(t, "prov-anthropic", string(hr.Spec.Rules[2].BackendRefs[0].Name))
+	assert.Equal(t, "api.anthropic.com", hr.Spec.Rules[2].Filters[0].RequestHeaderModifier.Set[0].Value)
 }

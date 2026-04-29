@@ -144,12 +144,12 @@ func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolv
 }
 
 // ProcessRequest reads the model name from the request body, resolves the provider
-// from the modelInfoStore (populated by ExternalModel reconciler), and writes model, provider
-// and credential reference info to CycleState.
+// from the modelInfoStore (populated by ExternalModel reconciler), selects a provider
+// using weighted random if multiple are configured, and writes provider info to CycleState.
 func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
 	model, ok := request.Body["model"].(string)
 	if !ok || model == "" {
-		return nil // not an inference request (e.g. API key management, model listing)
+		return nil
 	}
 
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("received incoming request", "path", request.Headers[":path"])
@@ -164,30 +164,39 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	modelKey := types.NamespacedName{Namespace: segments[0], Name: segments[1]}
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("exported namespaced name from path", "key", modelKey)
 
-	externalModelInfo, found := p.modelInfoStore.getModelInfo(modelKey)
-	if !found { // info is stored only for external models
-		return nil // this is not considered an error, we just need to skip if it's internal model
+	modelInfo, found := p.modelInfoStore.getModelInfo(modelKey)
+	if !found {
+		return nil
 	}
 
-	if !strings.HasSuffix(relativePath, "chat/completions") { // no support for other input types
+	if !strings.HasSuffix(relativePath, "chat/completions") {
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "only /chat/completions input type is supported"}
-
 	}
 
-	// if there's a mismatch it's an error, we don't want to proceed
-	if externalModelInfo.targetModel != model {
-		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
+	// Validate request model matches the ExternalModel CR name (client-facing name)
+	if modelInfo.modelName != model {
+		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel '%s'", model, modelInfo.modelName)}
 	}
 
-	// info of external model written to cycle state for next plugins
-	cycleState.Write(state.ProviderKey, externalModelInfo.provider)
-	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
-	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
-	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
-	cycleState.Write(state.APIFormatKey, externalModelInfo.apiFormat)
-	if len(externalModelInfo.config) > 0 {
-		cycleState.Write(state.ProviderConfigKey, externalModelInfo.config)
+	// Select provider using weighted random
+	selected := modelInfo.selectProvider()
+
+	// Rewrite the model field to the provider's targetModel
+	request.Body["model"] = selected.targetModel
+
+	// Write selected provider info to CycleState for downstream plugins
+	cycleState.Write(state.ProviderKey, selected.provider)
+	cycleState.Write(state.ModelKey, selected.targetModel)
+	cycleState.Write(state.CredsRefName, selected.secretName)
+	cycleState.Write(state.CredsRefNamespace, selected.secretNamespace)
+	cycleState.Write(state.APIFormatKey, selected.apiFormat)
+	cycleState.Write(state.SelectedProviderKey, selected.providerName)
+	if len(selected.config) > 0 {
+		cycleState.Write(state.ProviderConfigKey, selected.config)
 	}
+
+	// Set header for HTTPRoute matching — tells Envoy which provider backend to use
+	request.SetHeader("X-Selected-Provider", selected.providerName)
 
 	return nil
 }
