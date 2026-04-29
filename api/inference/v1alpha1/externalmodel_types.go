@@ -64,11 +64,11 @@ type ExternalProviderRef struct {
 	TargetModel string `json:"targetModel"`
 
 	// APIFormat determines how requests/responses are translated for this provider.
-	// e.g. "openai-chat", "anthropic", "bedrock-anthropic", "azure-openai", "vertex-openai".
-	// If omitted, no API translation is performed (assumes native OpenAI format).
-	// +optional
+	// e.g. "openai", "anthropic", "bedrock-openai", "azure-openai", "vertex-openai".
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	APIFormat string `json:"apiFormat,omitempty"`
+	APIFormat string `json:"apiFormat"`
 }
 
 // NameReference is a reference to a Kubernetes resource by name.
@@ -83,7 +83,10 @@ type NameReference struct {
 
 // ExternalModelStatus defines the observed state of ExternalModel.
 type ExternalModelStatus struct {
-	// Phase represents the current lifecycle phase.
+	// Phase represents the current reconciliation phase.
+	// Ready: all networking resources created successfully.
+	// Failed: reconciliation error (e.g., missing ExternalProvider, missing Secret).
+	// This reflects controller reconciliation state, not runtime request health.
 	// +kubebuilder:validation:Enum=Pending;Ready;Failed
 	// +optional
 	Phase string `json:"phase,omitempty"`

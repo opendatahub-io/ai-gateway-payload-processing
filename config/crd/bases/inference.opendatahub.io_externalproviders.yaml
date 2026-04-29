@@ -163,7 +163,11 @@ spec:
                   type: object
                 type: array
               phase:
-                description: Phase represents the current lifecycle phase.
+                description: |-
+                  Phase represents the current reconciliation phase.
+                  Ready: all networking resources created and Secret validated.
+                  Failed: reconciliation error (e.g., missing Secret, Istio resource creation failed).
+                  This reflects controller reconciliation state, not runtime request health.
                 enum:
                 - Pending
                 - Ready

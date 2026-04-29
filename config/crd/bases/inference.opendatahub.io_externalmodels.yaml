@@ -68,9 +68,9 @@ spec:
                     apiFormat:
                       description: |-
                         APIFormat determines how requests/responses are translated for this provider.
-                        e.g. "openai-chat", "anthropic", "bedrock-anthropic", "azure-openai", "vertex-openai".
-                        If omitted, no API translation is performed (assumes native OpenAI format).
+                        e.g. "openai", "anthropic", "bedrock-openai", "azure-openai", "vertex-openai".
                       maxLength: 63
+                      minLength: 1
                       type: string
                     ref:
                       description: Ref identifies the ExternalProvider CR (must be
@@ -92,6 +92,7 @@ spec:
                       minLength: 1
                       type: string
                   required:
+                  - apiFormat
                   - ref
                   - targetModel
                   type: object
@@ -163,7 +164,11 @@ spec:
                   type: object
                 type: array
               phase:
-                description: Phase represents the current lifecycle phase.
+                description: |-
+                  Phase represents the current reconciliation phase.
+                  Ready: all networking resources created successfully.
+                  Failed: reconciliation error (e.g., missing ExternalProvider, missing Secret).
+                  This reflects controller reconciliation state, not runtime request health.
                 enum:
                 - Pending
                 - Ready

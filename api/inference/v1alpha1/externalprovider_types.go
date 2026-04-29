@@ -75,7 +75,10 @@ type AuthConfig struct {
 
 // ExternalProviderStatus defines the observed state of ExternalProvider.
 type ExternalProviderStatus struct {
-	// Phase represents the current lifecycle phase.
+	// Phase represents the current reconciliation phase.
+	// Ready: all networking resources created and Secret validated.
+	// Failed: reconciliation error (e.g., missing Secret, Istio resource creation failed).
+	// This reflects controller reconciliation state, not runtime request health.
 	// +kubebuilder:validation:Enum=Pending;Ready;Failed
 	// +optional
 	Phase string `json:"phase,omitempty"`
