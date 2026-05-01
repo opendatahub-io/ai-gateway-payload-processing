@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-credentials
+  labels:
+    inference.networking.k8s.io/bbr-managed: "true"
+type: Opaque
+stringData:
+  api-key: <your-anthropic-api-key>
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: anthropic
+spec:
+  provider: anthropic
+  endpoint: api.anthropic.com
+  auth:
+    secretRef:
+      name: anthropic-credentials
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: claude
+spec:
+  externalProviderRefs:
+    - ref:
+        name: anthropic
+      targetModel: claude-sonnet-4-20250514
+      apiFormat: anthropic

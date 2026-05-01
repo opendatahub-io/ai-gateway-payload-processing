@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+  labels:
+    inference.networking.k8s.io/bbr-managed: "true"
+type: Opaque
+stringData:
+  api-key: <your-openai-api-key>
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: openai
+spec:
+  provider: openai
+  endpoint: api.openai.com
+  auth:
+    secretRef:
+      name: openai-credentials
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gpt4
+spec:
+  externalProviderRefs:
+    - ref:
+        name: openai
+      targetModel: gpt-4o
+      apiFormat: openai

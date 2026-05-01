@@ -45,7 +45,7 @@ var _ framework.RequestProcessor = &ApiKeyInjectionPlugin{}
 
 // APIKeyInjectionFactory defines the factory function for ApiKeyInjectionPlugin.
 func APIKeyInjectionFactory(name string, _ json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
-	plugin, err := NewAPIKeyInjectionPlugin(handle.ReconcilerBuilder, handle.ClientReader())
+	plugin, err := NewAPIKeyInjectionPlugin(handle.ReconcilerBuilder, handle.Client())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", APIKeyInjectionPluginType, err)
 	}

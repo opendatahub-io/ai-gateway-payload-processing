@@ -39,7 +39,7 @@ import (
 type testHandle struct{}
 
 func (h *testHandle) Context() context.Context                { return context.Background() }
-func (h *testHandle) ClientReader() client.Reader             { return nil }
+func (h *testHandle) Client() client.Client                   { return nil }
 func (h *testHandle) ReconcilerBuilder() *ctrlbuilder.Builder { return nil }
 
 func newTestPlugin() *APITranslationPlugin {

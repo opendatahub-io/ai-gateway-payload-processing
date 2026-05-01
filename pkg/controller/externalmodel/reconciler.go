@@ -191,9 +191,9 @@ func (r *Reconciler) applyHTTPRoute(ctx context.Context, logger logr.Logger, des
 	return r.Update(ctx, existing)
 }
 
-// mapProviderToModels returns reconcile requests for all ExternalModels that
+// MapProviderToModels returns reconcile requests for all ExternalModels that
 // reference the changed ExternalProvider.
-func (r *Reconciler) mapProviderToModels(ctx context.Context, obj client.Object) []reconcile.Request {
+func (r *Reconciler) MapProviderToModels(ctx context.Context, obj client.Object) []reconcile.Request {
 	provider := obj.(*inferencev1alpha1.ExternalProvider)
 	modelList := &inferencev1alpha1.ExternalModelList{}
 	if err := r.List(ctx, modelList, client.InNamespace(provider.Namespace)); err != nil {
@@ -223,7 +223,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&inferencev1alpha1.ExternalModel{}).
 		Owns(&gatewayapiv1.HTTPRoute{}).
 		Watches(&inferencev1alpha1.ExternalProvider{},
-			handler.EnqueueRequestsFromMapFunc(r.mapProviderToModels)).
+			handler.EnqueueRequestsFromMapFunc(r.MapProviderToModels)).
 		Named("external-model-reconciler").
 		Complete(r)
 }

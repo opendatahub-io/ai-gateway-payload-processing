@@ -25,15 +25,25 @@ package main
 import (
 	"os"
 
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/bbr/runner"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	api_translation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation"
 	apikey_injection "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection"
+	controller_plugin "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/controller"
 	provider_resolver "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/model-provider-resolver"
 	nemo "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/nemo"
 )
+
+func init() {
+	utilruntime.Must(inferencev1alpha1.AddToScheme(clientgoscheme.Scheme))
+	utilruntime.Must(gatewayapiv1.Install(clientgoscheme.Scheme))
+}
 
 func main() {
 	// Register ai-gateway payload processing plugins with pluggable bbr
@@ -53,4 +63,5 @@ func registerPlugins() {
 	framework.Register(apikey_injection.APIKeyInjectionPluginType, apikey_injection.APIKeyInjectionFactory)
 	framework.Register(nemo.NemoRequestGuardPluginType, nemo.NemoRequestGuardFactory)
 	framework.Register(nemo.NemoResponseGuardPluginType, nemo.NemoResponseGuardFactory)
+	framework.Register(controller_plugin.ControllerPluginType, controller_plugin.ControllerFactory)
 }
