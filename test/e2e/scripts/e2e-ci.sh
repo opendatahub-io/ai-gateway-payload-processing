@@ -18,9 +18,11 @@ echo "  Payload Processing E2E Image: $PAYLOAD_PROCESSING_E2E_IMAGE"
 echo "================================================"
 
 echo "Checking simulator connectivity..."
-if curl -sk --max-time 10 "https://${E2E_SIMULATOR_ENDPOINT}/health" >/dev/null 2>&1; then
+if curl --silent --fail --max-time 10 --output /dev/null --write-out "HTTP %{http_code} | time: %{time_total}s | ip: %{remote_ip}\n" "https://${E2E_SIMULATOR_ENDPOINT}/health"; then
+    reachable=true
     echo "Simulator is reachable"
 else
+    reachable=false
     echo "Simulator is NOT reachable at https://${E2E_SIMULATOR_ENDPOINT}/health"
     echo "Payload Processing E2E Testing Failed"
     exit 1
