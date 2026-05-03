@@ -1,3 +1,4 @@
+---
 {{- $bbr := .Values.upstreamBbr.bbr }}
 {{- if $bbr.multiNamespace }}
 ---
