@@ -21,9 +21,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Sources
+COPY api/ api/
 COPY cmd/ cmd/
 COPY pkg/ pkg/
-COPY api/ api/
 
 # -X needs the exact import path of the dependency's version package (matches go.mod / module graph).
 RUN VERSION_PKG="$(go list -f '{{.ImportPath}}' sigs.k8s.io/gateway-api-inference-extension/version)" && \

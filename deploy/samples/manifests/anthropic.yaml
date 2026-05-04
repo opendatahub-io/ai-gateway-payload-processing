@@ -3,7 +3,7 @@ kind: Secret
 metadata:
   name: anthropic-credentials
   labels:
-    inference.networking.k8s.io/bbr-managed: "true"
+    inference.networking.k8s.io/bbr-managed: "true" # TODO: will change to inference.llm-d.ai/ipp-managed
 type: Opaque
 stringData:
   api-key: <your-anthropic-api-key>
@@ -28,4 +28,4 @@ spec:
     - ref:
         name: anthropic
       targetModel: claude-sonnet-4-20250514
-      apiFormat: anthropic
+      apiFormat: messages

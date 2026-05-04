@@ -35,7 +35,6 @@ import (
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	api_translation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation"
 	apikey_injection "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection"
-	controller_plugin "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/controller"
 	provider_resolver "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/model-provider-resolver"
 	nemo "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/nemo"
 )
@@ -63,5 +62,4 @@ func registerPlugins() {
 	framework.Register(apikey_injection.APIKeyInjectionPluginType, apikey_injection.APIKeyInjectionFactory)
 	framework.Register(nemo.NemoRequestGuardPluginType, nemo.NemoRequestGuardFactory)
 	framework.Register(nemo.NemoResponseGuardPluginType, nemo.NemoResponseGuardFactory)
-	framework.Register(controller_plugin.ControllerPluginType, controller_plugin.ControllerFactory)
 }
