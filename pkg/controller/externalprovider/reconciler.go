@@ -103,7 +103,7 @@ func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger,
 	ns := provider.Namespace
 	endpoint := provider.Spec.Endpoint
 	labels := commonLabels(name)
-	port := ctrlcommon.DefaultPort
+	port := ctrlcommon.DefaultTLSPort
 
 	// 1. ExternalName Service
 	svc := buildService(endpoint, name, ns, port, labels)

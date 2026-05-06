@@ -18,7 +18,7 @@ package common
 
 const (
 	ConditionTypeReady = "Ready"
-	DefaultPort        = int32(443)
+	DefaultTLSPort     = int32(443)
 
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 
