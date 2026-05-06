@@ -19,4 +19,10 @@ package common
 const (
 	ConditionTypeReady = "Ready"
 	DefaultPort        = int32(443)
+
+	LabelManagedBy = "app.kubernetes.io/managed-by"
+
+	DefaultGatewayName      = "default-gateway"
+	DefaultGatewayNamespace = "openshift-ingress"
+	DefaultRouteTimeout     = "300s"
 )

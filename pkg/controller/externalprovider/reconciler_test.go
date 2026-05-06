@@ -187,7 +187,7 @@ func TestReconcile_CreatesResources(t *testing.T) {
 	assert.Equal(t, corev1.ServiceTypeExternalName, svc.Spec.Type)
 	assert.Equal(t, "api.openai.com", svc.Spec.ExternalName)
 	assert.Equal(t, int32(443), svc.Spec.Ports[0].Port)
-	assert.Equal(t, managedByValue, svc.Labels[labelManagedBy])
+	assert.Equal(t, managedByValue, svc.Labels[ctrlcommon.LabelManagedBy])
 
 	// Verify ServiceEntry
 	se := getUnstructured(t, serviceEntryGVK, "my-openai", ns)

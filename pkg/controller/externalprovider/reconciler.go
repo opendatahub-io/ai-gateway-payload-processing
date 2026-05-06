@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +43,10 @@ import (
 	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
+const (
+	labelExternalProvider = "inference.opendatahub.io/external-provider"
+	managedByValue        = "ipp-external-provider-reconciler"
+)
 
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders,verbs=get;list;watch
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders/status,verbs=get;update;patch
@@ -163,7 +168,6 @@ func (r *Reconciler) setStatus(ctx context.Context, logger logr.Logger, provider
 	}
 }
 
-// setUnstructuredOwner sets the controller OwnerReference on an unstructured resource.
 func setUnstructuredOwner(owner *inferencev1alpha1.ExternalProvider, obj *unstructured.Unstructured) {
 	isController := true
 	blockDeletion := true
@@ -224,7 +228,7 @@ func (r *Reconciler) applyUnstructured(ctx context.Context, logger logr.Logger, 
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	managedByPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
-		MatchLabels: map[string]string{labelManagedBy: managedByValue},
+		MatchLabels: map[string]string{ctrlcommon.LabelManagedBy: managedByValue},
 	})
 	if err != nil {
 		return err
@@ -245,4 +249,73 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(drObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
 		Named("external-provider-reconciler").
 		Complete(r)
+}
+
+func commonLabels(providerName string) map[string]string {
+	return map[string]string{
+		ctrlcommon.LabelManagedBy: managedByValue,
+		labelExternalProvider:     providerName,
+	}
+}
+
+func buildService(endpoint, name, namespace string, port int32, labels map[string]string) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:         corev1.ServiceTypeExternalName,
+			ExternalName: endpoint,
+			Ports: []corev1.ServicePort{
+				{
+					Port:       port,
+					TargetPort: intstr.FromInt32(port),
+				},
+			},
+		},
+	}
+}
+
+func buildServiceEntry(endpoint, name, namespace string, port int32, labels map[string]string) *unstructured.Unstructured {
+	se := &unstructured.Unstructured{}
+	se.SetAPIVersion("networking.istio.io/v1")
+	se.SetKind("ServiceEntry")
+	se.SetName(name)
+	se.SetNamespace(namespace)
+	se.SetLabels(labels)
+
+	se.Object["spec"] = map[string]any{
+		"hosts":      []any{endpoint},
+		"location":   "MESH_EXTERNAL",
+		"resolution": "DNS",
+		"ports": []any{
+			map[string]any{
+				"number":   int64(port),
+				"name":     "https",
+				"protocol": "HTTPS",
+			},
+		},
+	}
+	return se
+}
+
+func buildDestinationRule(endpoint, name, namespace string, labels map[string]string) *unstructured.Unstructured {
+	dr := &unstructured.Unstructured{}
+	dr.SetAPIVersion("networking.istio.io/v1")
+	dr.SetKind("DestinationRule")
+	dr.SetName(name)
+	dr.SetNamespace(namespace)
+	dr.SetLabels(labels)
+
+	dr.Object["spec"] = map[string]any{
+		"host": endpoint,
+		"trafficPolicy": map[string]any{
+			"tls": map[string]any{
+				"mode": "SIMPLE",
+			},
+		},
+	}
+	return dr
 }

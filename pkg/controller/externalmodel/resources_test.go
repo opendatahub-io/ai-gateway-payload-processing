@@ -22,11 +22,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
 func TestCommonLabels(t *testing.T) {
 	labels := commonLabels("gpt4")
-	assert.Equal(t, managedByValue, labels[labelManagedBy])
+	assert.Equal(t, managedByValue, labels[ctrlcommon.LabelManagedBy])
 	assert.Equal(t, "gpt4", labels[labelExternalModel])
 	assert.Len(t, labels, 2)
 }
@@ -42,7 +44,7 @@ func TestBuildHTTPRoute(t *testing.T) {
 
 	assert.Equal(t, "gpt4", hr.Name)
 	assert.Equal(t, "models", hr.Namespace)
-	assert.Equal(t, managedByValue, hr.Labels[labelManagedBy])
+	assert.Equal(t, managedByValue, hr.Labels[ctrlcommon.LabelManagedBy])
 
 	// Parent gateway ref
 	require.Len(t, hr.Spec.ParentRefs, 1)

@@ -39,6 +39,10 @@ import (
 	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
+const (
+	labelExternalModel = "inference.opendatahub.io/external-model"
+	managedByValue     = "ipp-external-model-reconciler"
+)
 
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels,verbs=get;list;watch
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels/status,verbs=get;update;patch
@@ -60,21 +64,21 @@ func (r *Reconciler) gatewayName() string {
 	if r.GatewayName != "" {
 		return r.GatewayName
 	}
-	return defaultGatewayName
+	return ctrlcommon.DefaultGatewayName
 }
 
 func (r *Reconciler) gatewayNamespace() string {
 	if r.GatewayNamespace != "" {
 		return r.GatewayNamespace
 	}
-	return defaultGatewayNamespace
+	return ctrlcommon.DefaultGatewayNamespace
 }
 
 func (r *Reconciler) routeTimeout() string {
 	if r.RouteTimeout != "" {
 		return r.RouteTimeout
 	}
-	return defaultRouteTimeout
+	return ctrlcommon.DefaultRouteTimeout
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -211,7 +215,6 @@ func (r *Reconciler) MapProviderToModels(ctx context.Context, obj client.Object)
 						Namespace: model.Namespace,
 					},
 				})
-				break
 			}
 		}
 	}
@@ -226,4 +229,94 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.MapProviderToModels)).
 		Named("external-model-reconciler").
 		Complete(r)
+}
+
+func commonLabels(modelName string) map[string]string {
+	return map[string]string{
+		ctrlcommon.LabelManagedBy: managedByValue,
+		labelExternalModel:        modelName,
+	}
+}
+
+func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
+	gwNamespace := gatewayapiv1.Namespace(gatewayNamespace)
+	pathType := gatewayapiv1.PathMatchPathPrefix
+	pathPrefix := "/" + namespace + "/" + modelName
+	headerType := gatewayapiv1.HeaderMatchExact
+	gwPort := gatewayapiv1.PortNumber(port)
+	timeout := gatewayapiv1.Duration(routeTimeout)
+
+	backendRefs := []gatewayapiv1.HTTPBackendRef{
+		{
+			BackendRef: gatewayapiv1.BackendRef{
+				BackendObjectReference: gatewayapiv1.BackendObjectReference{
+					Name: gatewayapiv1.ObjectName(providerName),
+					Port: &gwPort,
+				},
+			},
+		},
+	}
+
+	filters := []gatewayapiv1.HTTPRouteFilter{
+		{
+			Type: gatewayapiv1.HTTPRouteFilterRequestHeaderModifier,
+			RequestHeaderModifier: &gatewayapiv1.HTTPHeaderFilter{
+				Set: []gatewayapiv1.HTTPHeader{
+					{
+						Name:  "Host",
+						Value: providerEndpoint,
+					},
+				},
+			},
+		},
+	}
+
+	return &gatewayapiv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      modelName,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: gatewayapiv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayapiv1.CommonRouteSpec{
+				ParentRefs: []gatewayapiv1.ParentReference{
+					{
+						Name:      gatewayapiv1.ObjectName(gatewayName),
+						Namespace: &gwNamespace,
+					},
+				},
+			},
+			Rules: []gatewayapiv1.HTTPRouteRule{
+				{
+					Matches: []gatewayapiv1.HTTPRouteMatch{
+						{
+							Path: &gatewayapiv1.HTTPPathMatch{
+								Type:  &pathType,
+								Value: &pathPrefix,
+							},
+						},
+					},
+					BackendRefs: backendRefs,
+					Filters:     filters,
+					Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
+				},
+				{
+					Matches: []gatewayapiv1.HTTPRouteMatch{
+						{
+							Headers: []gatewayapiv1.HTTPHeaderMatch{
+								{
+									Name:  "X-Gateway-Model-Name",
+									Type:  &headerType,
+									Value: targetModel,
+								},
+							},
+						},
+					},
+					BackendRefs: backendRefs,
+					Filters:     filters,
+					Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
+				},
+			},
+		},
+	}
 }

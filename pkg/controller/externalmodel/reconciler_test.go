@@ -40,6 +40,7 @@ import (
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
 var (
@@ -197,7 +198,7 @@ func TestReconcile_CreatesHTTPRoute(t *testing.T) {
 		hr.Spec.Rules[0].Filters[0].RequestHeaderModifier.Set[0].Value)
 
 	// Labels
-	assert.Equal(t, managedByValue, hr.Labels[labelManagedBy])
+	assert.Equal(t, managedByValue, hr.Labels[ctrlcommon.LabelManagedBy])
 	assert.Equal(t, "gpt4", hr.Labels[labelExternalModel])
 
 	// OwnerReference

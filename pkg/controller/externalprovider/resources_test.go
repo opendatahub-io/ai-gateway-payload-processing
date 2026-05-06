@@ -22,12 +22,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+
+	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
 func TestCommonLabels(t *testing.T) {
 	labels := commonLabels("my-openai")
 
-	assert.Equal(t, managedByValue, labels[labelManagedBy])
+	assert.Equal(t, managedByValue, labels[ctrlcommon.LabelManagedBy])
 	assert.Equal(t, "my-openai", labels[labelExternalProvider])
 	assert.Len(t, labels, 2)
 }
@@ -67,7 +69,7 @@ func TestBuildService(t *testing.T) {
 			require.Len(t, svc.Spec.Ports, 1)
 			assert.Equal(t, tt.port, svc.Spec.Ports[0].Port)
 			assert.Equal(t, tt.port, svc.Spec.Ports[0].TargetPort.IntVal)
-			assert.Equal(t, managedByValue, svc.Labels[labelManagedBy])
+			assert.Equal(t, managedByValue, svc.Labels[ctrlcommon.LabelManagedBy])
 			assert.Equal(t, tt.svcName, svc.Labels[labelExternalProvider])
 		})
 	}
@@ -80,7 +82,7 @@ func TestBuildServiceEntry(t *testing.T) {
 	assert.Equal(t, "networking.istio.io/v1", se.GetAPIVersion())
 	assert.Equal(t, "my-openai", se.GetName())
 	assert.Equal(t, "models", se.GetNamespace())
-	assert.Equal(t, managedByValue, se.GetLabels()[labelManagedBy])
+	assert.Equal(t, managedByValue, se.GetLabels()[ctrlcommon.LabelManagedBy])
 
 	spec, ok := se.Object["spec"].(map[string]any)
 	require.True(t, ok)
@@ -121,7 +123,7 @@ func TestBuildDestinationRule(t *testing.T) {
 	assert.Equal(t, "networking.istio.io/v1", dr.GetAPIVersion())
 	assert.Equal(t, "my-openai", dr.GetName())
 	assert.Equal(t, "models", dr.GetNamespace())
-	assert.Equal(t, managedByValue, dr.GetLabels()[labelManagedBy])
+	assert.Equal(t, managedByValue, dr.GetLabels()[ctrlcommon.LabelManagedBy])
 
 	spec, ok := dr.Object["spec"].(map[string]any)
 	require.True(t, ok)
