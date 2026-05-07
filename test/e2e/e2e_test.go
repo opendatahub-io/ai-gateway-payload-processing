@@ -147,6 +147,7 @@ func getCurlCommand(modelName string) []string {
 		"curl", "-si", "--max-time", strconv.Itoa(int(curlTimeout.Seconds())),
 		gatewayURL,
 		"-H", "Content-Type: application/json",
+		"-H", "x-ai-gateway-request-namespace: " + nsName,
 		"-H", "Connection: close",
 		"-d", string(bodyBytes),
 	}
