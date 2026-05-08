@@ -32,7 +32,7 @@ RUN VERSION_PKG="$(go list -f '{{.ImportPath}}' sigs.k8s.io/gateway-api-inferenc
 USER 1001
 
 # Multistage deploy
-FROM --platform=$TARGETPLATFORM registry.access.redhat.com/ubi9/ubi-minimal:9.5@sha256:a50731d3397a4ee28583f1699842183d4d24fadcc565c4688487af9ee4e13a44
+FROM --platform=$TARGETPLATFORM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:b9b10f42d7eba7ad4a6d5ef26b7d34fdc892b2ffe59b8d0372ec884008569eb6
 
 WORKDIR /
 COPY --from=builder /bbr /bbr
