@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-E2E_SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3-13-21-181.sslip.io}"
+E2E_SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3-147-232-199.sslip.io}"
 PAYLOAD_PROCESSING_IMAGE="${PAYLOAD_PROCESSING_IMAGE:-quay.io/opendatahub/ai-gateway-payload-processing:odh-stable}"
 PAYLOAD_PROCESSING_E2E_IMAGE="${PAYLOAD_PROCESSING_E2E_IMAGE:-quay.io/opendatahub/ai-gateway-payload-processing-e2e:odh-stable}"
 
