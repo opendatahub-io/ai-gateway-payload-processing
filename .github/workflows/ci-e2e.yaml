@@ -9,7 +9,7 @@ on:
       - main
 
 env:
-  E2E_SIMULATOR_ENDPOINT: "3.13.21.181"
+  E2E_SIMULATOR_ENDPOINT: "3.147.232.199"
 
 jobs:
   check-changes:

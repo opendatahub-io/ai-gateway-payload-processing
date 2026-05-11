@@ -102,7 +102,7 @@ func TestNameReferencePattern(t *testing.T) {
 func TestEndpointPattern(t *testing.T) {
 	pattern := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)+$`)
 
-	valid := []string{"api.openai.com", "bedrock.us-east-1.amazonaws.com", "3-13-21-181.sslip.io", "a.b"}
+	valid := []string{"api.openai.com", "bedrock.us-east-1.amazonaws.com", "3-147-232-199.sslip.io", "a.b"}
 	for _, ep := range valid {
 		assert.True(t, pattern.MatchString(ep), "should accept %q", ep)
 	}

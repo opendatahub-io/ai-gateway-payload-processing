@@ -9,7 +9,7 @@
 # Environment variables:
 #   KIND_CLUSTER_NAME    - Kind cluster name (default: bbr-e2e)
 #   ISTIO_VERSION        - Istio version (default: 1.27.0-alpha.0)
-#   E2E_SIMULATOR_ENDPOINT - Simulator IP (default: 3.13.21.181)
+#   E2E_SIMULATOR_ENDPOINT - Simulator IP (default: 3.147.232.199)
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-bbr-e2e}"
 ISTIO_VERSION="${ISTIO_VERSION:-1.29.2}"
-SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3.13.21.181}"
+SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3.147.232.199}"
 GATEWAY_NAMESPACE="default"
 GATEWAY_NAME="e2e-gateway"
 
