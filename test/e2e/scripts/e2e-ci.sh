@@ -206,7 +206,6 @@ echo ""
 echo "=== Step 5: Create test namespace ==="
 
 kubectl create namespace "$E2E_NS" --dry-run=client -o yaml | kubectl apply -f -
-kubectl label namespace "$E2E_NS" istio-injection=enabled --overwrite 2>/dev/null || true
 echo "  Namespace '$E2E_NS' ready"
 
 # ─── Step 6: Run E2E tests ──────────────────────────────────────────────
