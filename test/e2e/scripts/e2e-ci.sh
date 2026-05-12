@@ -35,6 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 E2E_SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3.147.232.199}"
+ISTIO_VERSION="${ISTIO_VERSION:-1.29.2}"
 PAYLOAD_PROCESSING_IMAGE="${PAYLOAD_PROCESSING_IMAGE:-quay.io/opendatahub/odh-ai-gateway-payload-processing:odh-stable}"
 PAYLOAD_PROCESSING_E2E_IMAGE="${PAYLOAD_PROCESSING_E2E_IMAGE:-quay.io/opendatahub/ai-gateway-payload-processing-e2e:odh-stable}"
 GATEWAY_NAMESPACE="${E2E_GATEWAY_NAMESPACE:-istio-system}"
@@ -88,16 +89,28 @@ fi
 echo "  Cluster connectivity: OK"
 
 if ! kubectl get crd gateways.gateway.networking.k8s.io >/dev/null 2>&1; then
-    echo "ERROR: Gateway API CRDs not installed."
-    exit 1
+    echo "  Gateway API CRDs not found, installing..."
+    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+    echo "  Gateway API CRDs: installed"
+else
+    echo "  Gateway API CRDs: OK"
 fi
-echo "  Gateway API CRDs: OK"
 
 if ! kubectl get deployment istiod -n istio-system >/dev/null 2>&1; then
-    echo "ERROR: Istio not installed (istiod not found in istio-system)."
-    exit 1
+    echo "  Istio not found, installing ${ISTIO_VERSION}..."
+    if ! command -v istioctl &>/dev/null; then
+        curl -sL https://istio.io/downloadIstio | ISTIO_VERSION="$ISTIO_VERSION" sh -
+        export PATH="$PWD/istio-${ISTIO_VERSION}/bin:$PATH"
+    fi
+    istioctl install --set profile=minimal \
+        --set values.pilot.env.SUPPORT_GATEWAY_API_INFERENCE_EXTENSION=true \
+        --set values.pilot.env.ENABLE_GATEWAY_API_INFERENCE_EXTENSION=true \
+        -y
+    kubectl rollout status deployment/istiod -n istio-system --timeout=120s
+    echo "  Istio: installed"
+else
+    echo "  Istio: OK"
 fi
-echo "  Istio: OK"
 
 echo "  Checking simulator connectivity..."
 if curl --silent --fail --insecure --max-time 10 --output /dev/null \
