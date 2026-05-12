@@ -356,4 +356,4 @@ fi
 echo "  JUnit Report: $E2E_JUNIT_REPORT"
 echo "================================================"
 
-exit $TEST_EXIT
+exit "$TEST_EXIT"
