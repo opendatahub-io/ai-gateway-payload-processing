@@ -19,36 +19,32 @@ package model_provider_resolver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 )
 
-// externalModelGVK is the GroupVersionKind for ExternalModel CRD.
 var externalModelGVK = schema.GroupVersionKind{
-	Group:   "maas.opendatahub.io",
+	Group:   "inference.opendatahub.io",
 	Version: "v1alpha1",
 	Kind:    "ExternalModel",
 }
 
-// externalModelReconciler watches ExternalModel CRDs (via unstructured client)
-// and updates the model store with provider and credential information.
 type externalModelReconciler struct {
 	client.Reader
-	store *modelInfoStore
+	modelStore    *modelInfoStore
+	providerStore *providerInfoStore
 }
 
-// Reconcile handles create/update/delete events for ExternalModel resources.
-// The ExternalModel CR name is used as the model key in the store, matching
-// the model name in inference request bodies.
 func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).V(logutil.DEFAULT)
-	logger.Info("reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(externalModelGVK)
@@ -59,24 +55,63 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
-		r.store.deleteExternalModel(req.NamespacedName)
-		logger.Info("ExternalModel removed from store", "name", req.Name, "namespace", req.Namespace)
+		r.modelStore.deleteExternalModel(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
-	provider, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
-	targetModel, _, _ := unstructured.NestedString(obj.Object, "spec", "targetModel")
-	credsName, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "name")
-
-	// targetModel is the model that will be used in the request body when getting inference requests.
-	info := &externalModelInfo{
-		provider:        provider,
-		targetModel:     targetModel,
-		secretName:      credsName,
-		secretNamespace: req.Namespace, // secret namespace is always the namespace of the ExternalModel
+	refs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "externalProviderRefs")
+	if len(refs) == 0 {
+		r.modelStore.deleteExternalModel(req.NamespacedName)
+		return ctrl.Result{}, nil
 	}
-	r.store.addOrUpdateExternalModel(req.NamespacedName, info)
 
-	logger.Info("updated model store", "provider", provider, "targetModel", targetModel)
+	refMap, ok := refs[0].(map[string]any)
+	if !ok {
+		r.modelStore.deleteExternalModel(req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
+
+	providerRefName := nestedString(refMap, "ref", "name")
+	targetModel := nestedString(refMap, "targetModel")
+
+	if providerRefName == "" {
+		r.modelStore.deleteExternalModel(req.NamespacedName)
+		logger.Info("ExternalModel missing provider ref name, skipping")
+		return ctrl.Result{}, nil
+	}
+
+	providerKey := types.NamespacedName{Namespace: req.Namespace, Name: providerRefName}
+	provInfo, found := r.providerStore.get(providerKey)
+	if !found {
+		logger.Info("ExternalProvider not yet available, requeueing", "provider", providerRefName)
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	info := &externalModelInfo{
+		provider:        provInfo.provider,
+		targetModel:     targetModel,
+		secretName:      provInfo.secretName,
+		secretNamespace: provInfo.secretNamespace,
+		config:          provInfo.config,
+	}
+	r.modelStore.addOrUpdateExternalModel(req.NamespacedName, info)
+
+	logger.Info("Updated model store", "provider", provInfo.provider, "targetModel", targetModel)
 	return ctrl.Result{}, nil
+}
+
+func nestedString(obj map[string]any, fields ...string) string {
+	current := obj
+	for i, f := range fields {
+		if i == len(fields)-1 {
+			s, _ := current[f].(string)
+			return s
+		}
+		next, ok := current[f].(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = next
+	}
+	return ""
 }
