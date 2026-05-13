@@ -288,6 +288,8 @@ spec:
       value: "${GATEWAY_SVC_NAME}"
     - name: E2E_SIMULATOR_ENDPOINT
       value: "${E2E_SIMULATOR_ENDPOINT}"
+    - name: E2E_SIMULATOR_VALIDATE_KEYS
+      value: "true"
     volumeMounts:
     - name: results
       mountPath: /results
