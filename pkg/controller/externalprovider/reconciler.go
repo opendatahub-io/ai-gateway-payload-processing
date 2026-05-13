@@ -18,7 +18,6 @@ package externalprovider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -43,8 +42,6 @@ import (
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
-
-var errSecretInvalid = errors.New("secret invalid")
 
 const (
 	labelExternalProvider = "inference.opendatahub.io/external-provider"
@@ -88,11 +85,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if err := r.validateSecretRef(ctx, provider); err != nil {
-		reason := "SecretNotFound"
-		if errors.Is(err, errSecretInvalid) {
-			reason = "SecretInvalid"
-		}
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, reason, err.Error())
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -154,9 +147,6 @@ func (r *Reconciler) validateSecretRef(ctx context.Context, provider *inferencev
 			return fmt.Errorf("secret %q not found in namespace %q", key.Name, key.Namespace)
 		}
 		return fmt.Errorf("failed to get secret %q: %w", key.Name, err)
-	}
-	if len(secret.Data["api-key"]) == 0 {
-		return fmt.Errorf("%w: secret %q exists but missing required 'api-key' data key", errSecretInvalid, key.Name)
 	}
 	return nil
 }

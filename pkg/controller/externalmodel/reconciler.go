@@ -287,6 +287,7 @@ func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, name
 				},
 			},
 			Rules: []gatewayapiv1.HTTPRouteRule{
+				// TODO: remove path prefix rule when unified entrypoint (RHAISTRAT-1540) is wired.
 				{
 					Matches: []gatewayapiv1.HTTPRouteMatch{
 						{
