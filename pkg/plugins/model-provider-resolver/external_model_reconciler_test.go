@@ -422,7 +422,7 @@ func TestModelReconciler_UnresolvedPlaceholderSkipsRef(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, providerRequeueDelay, result.RequeueAfter, "should requeue when all refs fail validation")
 
-	_, found := store.getModel(key)
+	_, found := store.getModelByName(key.Name)
 	assert.False(t, found, "model should not be stored when path has unresolved placeholders")
 }
 

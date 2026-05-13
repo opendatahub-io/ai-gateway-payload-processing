@@ -33,7 +33,7 @@ import (
 const (
 	// managedLabel selects Secrets managed by the apikey-injection plugin.
 	// Only Secrets carrying this label are watched by the reconciler.
-	managedLabel = "inference.networking.k8s.io/bbr-managed"
+	managedLabel = "inference.llm-d.ai/ipp-managed"
 )
 
 func hasManagedLabel(object client.Object) bool {
@@ -41,7 +41,7 @@ func hasManagedLabel(object client.Object) bool {
 }
 
 // managedLabelPredicate filters events to only Secrets labeled with
-// "inference.networking.k8s.io/bbr-managed" = "true".
+// "inference.llm-d.ai/ipp-managed" = "true".
 // For updates, it accepts the event when either the old or new object carries
 // the label so that label-removal is visible to the reconciler.
 func managedLabelPredicate() predicate.Predicate {

@@ -1,12 +1,17 @@
 package e2e
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -42,21 +47,45 @@ var providers = []Provider{
 }
 
 func createProviderResources(p Provider) {
-	// Secret with API key matching llm-katan simulator defaults
-	kubectlApplyLiteral(fmt.Sprintf(`
+	// Create Secret based on provider auth requirements
+	if p.Provider == "vertex-openai" {
+		// vertex-openai uses GCP OAuth2 - provide mock service account JSON
+		// with token_uri pointing to the mock token server deployed in the test namespace
+		mockTokenServerURL := fmt.Sprintf("http://mock-token-server.%s.svc.cluster.local:8081/token", nsName)
+		serviceAccountJSON := createMockServiceAccountJSON(mockTokenServerURL)
+		kubectlApplyLiteral(fmt.Sprintf(`
 apiVersion: v1
 kind: Secret
 metadata:
   name: %s
   namespace: %s
   labels:
-    inference.networking.k8s.io/bbr-managed: "true"
+    inference.llm-d.ai/ipp-managed: "true"
+type: Opaque
+stringData:
+  gcp-service-account-json: '%s'
+`, p.Name, nsName, serviceAccountJSON))
+	} else {
+		// Other providers use simple API key
+		kubectlApplyLiteral(fmt.Sprintf(`
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: %s
 `, p.Name, nsName, p.SimulatorKey))
+	}
 
-	// ExternalProvider CR
+	// ExternalProvider CR - set auth.type based on provider for test setup
+	authType := "apikey"
+	if p.Provider == "vertex-openai" {
+		authType = "oauth2"
+	}
 	kubectlApplyLiteral(fmt.Sprintf(`
 apiVersion: inference.opendatahub.io/v1alpha1
 kind: ExternalProvider
@@ -67,10 +96,10 @@ spec:
   provider: %s
   endpoint: %s
   auth:
-    type: apikey
+    type: %s
     secretRef:
       name: %s
-`, p.Name, nsName, p.Provider, simulatorFQDN, p.Name))
+`, p.Name, nsName, p.Provider, simulatorFQDN, authType, p.Name))
 
 	// ExternalModel CR
 	kubectlApplyLiteral(fmt.Sprintf(`
@@ -434,3 +463,37 @@ var _ = ginkgo.Describe("IPP Plugin Chain", ginkgo.Label("e2e"), func() {
 		}
 	})
 })
+
+// createMockServiceAccountJSON creates a fake GCP service account JSON for E2E testing.
+// The token_uri points to the mock token server which returns a static token.
+func createMockServiceAccountJSON(tokenURL string) string {
+	// This is a minimal service account JSON structure that Google's library can parse.
+	// The private key is a valid RSA key format but not a real GCP key.
+	sa := map[string]any{
+		"type":                        "service_account",
+		"project_id":                  "e2e-test-project",
+		"private_key_id":              "e2e-key-id",
+		"private_key":                 generateTestPrivateKeyPEM(),
+		"client_email":                "e2e-test@e2e-test-project.iam.gserviceaccount.com",
+		"client_id":                   "123456789",
+		"auth_uri":                    "https://accounts.google.com/o/oauth2/auth",
+		"token_uri":                   tokenURL,
+		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+		"client_x509_cert_url":        "https://www.googleapis.com/robot/v1/metadata/x509/e2e-test",
+	}
+	jsonBytes, _ := json.Marshal(sa)
+	return string(jsonBytes)
+}
+
+// generateTestPrivateKeyPEM generates a fresh RSA private key for testing.
+func generateTestPrivateKeyPEM() string {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate RSA key: %v", err))
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal private key: %v", err))
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}

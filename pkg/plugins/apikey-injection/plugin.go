@@ -74,6 +74,7 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 		authHeadersGenerators: map[auth.Auth]authgenerator.AuthHeadersGenerator{
 			auth.APIKey: authgenerator.NewAPIKeyAuthGenerator(),
 			auth.SigV4:  authgenerator.NewSigV4AuthGenerator(),
+			auth.OAuth2: authgenerator.NewGCPOAuth2Generator(),
 		},
 		store: store,
 	}), nil
