@@ -236,15 +236,22 @@ func TestReconcile_UpdateEndpoint(t *testing.T) {
 	}, 10*time.Second, 100*time.Millisecond)
 
 	// Verify ServiceEntry updated
-	se := getUnstructured(t, serviceEntryGVK, "updatable", ns)
-	seSpec := se.Object["spec"].(map[string]any)
-	hosts := seSpec["hosts"].([]any)
-	assert.Equal(t, "api.anthropic.com", hosts[0])
+	require.Eventually(t, func() bool {
+		se := getUnstructured(t, serviceEntryGVK, "updatable", ns)
+		seSpec, ok := se.Object["spec"].(map[string]any)
+		if !ok {
+			return false
+		}
+		hosts, ok := seSpec["hosts"].([]any)
+		return ok && len(hosts) > 0 && hosts[0] == "api.anthropic.com"
+	}, 10*time.Second, 100*time.Millisecond)
 
 	// Verify DestinationRule updated
-	dr := getUnstructured(t, destinationRuleGVK, "updatable", ns)
-	drSpec := dr.Object["spec"].(map[string]any)
-	assert.Equal(t, "api.anthropic.com", drSpec["host"])
+	require.Eventually(t, func() bool {
+		dr := getUnstructured(t, destinationRuleGVK, "updatable", ns)
+		drSpec, ok := dr.Object["spec"].(map[string]any)
+		return ok && drSpec["host"] == "api.anthropic.com"
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 // --- resource builder tests (folded from resources_test.go) ---
