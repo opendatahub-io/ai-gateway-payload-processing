@@ -22,16 +22,26 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalmodel"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalprovider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -42,9 +52,25 @@ const (
 // compile-time type validation
 var _ framework.RequestProcessor = &ModelProviderResolverPlugin{}
 
+type resolverConfig struct {
+	GatewayName      string `json:"gatewayName,omitempty"`
+	GatewayNamespace string `json:"gatewayNamespace,omitempty"`
+	RouteTimeout     string `json:"routeTimeout,omitempty"`
+}
+
 // ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin
-func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
-	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
+func ModelProviderResolverFactory(name string, rawConfig json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
+	utilruntime.Must(inferencev1alpha1.AddToScheme(handle.Client().Scheme()))
+	utilruntime.Must(gatewayapiv1.Install(handle.Client().Scheme()))
+
+	var config resolverConfig
+	if len(rawConfig) > 0 {
+		if err := json.Unmarshal(rawConfig, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse model-provider-resolver config: %w", err)
+		}
+	}
+
+	plugin, err := NewModelProviderResolver(handle, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
@@ -52,24 +78,112 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 	return plugin.WithName(name), nil
 }
 
-func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ModelProviderResolverPlugin, error) {
-	modelInfoStore := newModelInfoStore()
-	reconciler := &externalModelReconciler{
-		Reader: clientReader,
-		store:  modelInfoStore,
+func NewModelProviderResolver(handle framework.Handle, config resolverConfig) (*ModelProviderResolverPlugin, error) {
+	reconcilerBuilder := handle.ReconcilerBuilder
+	k8sClient := handle.Client()
+	providerStore := newProviderInfoStore()
+	modelStore := newModelInfoStore()
+
+	// Watch ExternalProvider CRDs (inference.opendatahub.io/v1alpha1)
+	providerObj := &unstructured.Unstructured{}
+	providerObj.SetGroupVersionKind(externalProviderGVK)
+	providerReconciler := &externalProviderReconciler{
+		Reader: k8sClient,
+		store:  providerStore,
+	}
+	if err := reconcilerBuilder().For(providerObj).Complete(providerReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalProvider reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
-	// Watch ExternalModel CRDs directly (no MaaS dependency)
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-
-	if err := reconcilerBuilder().For(obj).Complete(reconciler); err != nil {
+	// Watch ExternalModel CRDs (inference.opendatahub.io/v1alpha1)
+	// Cross-watch ExternalProviders so credential/endpoint changes propagate to modelStore
+	modelObj := &unstructured.Unstructured{}
+	modelObj.SetGroupVersionKind(externalModelGVK)
+	modelReconciler := &externalModelReconciler{
+		Reader:        k8sClient,
+		modelStore:    modelStore,
+		providerStore: providerStore,
+	}
+	mapProviderToModels := func(ctx context.Context, obj client.Object) []reconcile.Request {
+		providerName := obj.GetName()
+		providerNamespace := obj.GetNamespace()
+		modelList := &unstructured.UnstructuredList{}
+		modelList.SetGroupVersionKind(externalModelGVK)
+		if err := k8sClient.List(ctx, modelList, client.InNamespace(providerNamespace)); err != nil {
+			log.FromContext(ctx).Error(err, "failed to list ExternalModels for provider mapping",
+				"provider", providerName, "namespace", providerNamespace)
+			return nil
+		}
+		var requests []reconcile.Request
+		for i := range modelList.Items {
+			refs, _, _ := unstructured.NestedSlice(modelList.Items[i].Object, "spec", "externalProviderRefs")
+			if len(refs) == 0 {
+				continue
+			}
+			refMap, ok := refs[0].(map[string]any)
+			if !ok {
+				continue
+			}
+			if nestedString(refMap, "ref", "name") == providerName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      modelList.Items[i].GetName(),
+						Namespace: modelList.Items[i].GetNamespace(),
+					},
+				})
+			}
+		}
+		return requests
+	}
+	providerWatchObj := &unstructured.Unstructured{}
+	providerWatchObj.SetGroupVersionKind(externalProviderGVK)
+	if err := reconcilerBuilder().
+		For(modelObj).
+		Watches(providerWatchObj, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
+		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
+	// Controller reconcilers — create Istio networking resources and HTTPRoutes
+	managedByPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
+		MatchLabels: map[string]string{"app.kubernetes.io/managed-by": "bbr-external-provider-reconciler"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create label predicate: %w", err)
+	}
+
+	ctrlProviderReconciler := &externalprovider.Reconciler{
+		Client: k8sClient,
+		Scheme: k8sClient.Scheme(),
+	}
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalProvider{}).
+		Owns(&corev1.Service{}, builder.WithPredicates(managedByPredicate)).
+		Named("external-provider-controller").
+		Complete(ctrlProviderReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalProvider controller: %w", err)
+	}
+
+	ctrlModelReconciler := &externalmodel.Reconciler{
+		Client:           k8sClient,
+		Scheme:           k8sClient.Scheme(),
+		GatewayName:      config.GatewayName,
+		GatewayNamespace: config.GatewayNamespace,
+		RouteTimeout:     config.RouteTimeout,
+	}
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalModel{}).
+		Owns(&gatewayapiv1.HTTPRoute{}).
+		Watches(&inferencev1alpha1.ExternalProvider{},
+			handler.EnqueueRequestsFromMapFunc(ctrlModelReconciler.MapProviderToModels)).
+		Named("external-model-controller").
+		Complete(ctrlModelReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalModel controller: %w", err)
 	}
 
 	return &ModelProviderResolverPlugin{
 		typedName:      plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
-		modelInfoStore: modelInfoStore,
+		modelInfoStore: modelStore,
 	}, nil
 }
 
@@ -96,8 +210,6 @@ func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolv
 // from the modelInfoStore (populated by ExternalModel reconciler), and writes model, provider
 // and credential reference info to CycleState.
 func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
-	logger := log.FromContext(ctx).V(logutil.DEFAULT)
-
 	model, ok := request.Body["model"].(string)
 	if !ok || model == "" {
 		return nil // not an inference request (e.g. API key management, model listing)
@@ -121,13 +233,12 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	}
 
 	if !strings.HasSuffix(relativePath, "chat/completions") { // no support for other input types
-		logger.Error(nil, "unsupported route for external model", "model", modelKey.String(), "path", relativePath)
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "only /chat/completions input type is supported"}
+
 	}
 
 	// if there's a mismatch it's an error, we don't want to proceed
 	if externalModelInfo.targetModel != model {
-		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", externalModelInfo.targetModel)
 		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
 	}
 
@@ -136,8 +247,10 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
 	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
 	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
+	if len(externalModelInfo.config) > 0 {
+		cycleState.Write(state.ProviderConfigKey, externalModelInfo.config)
+	}
 
-	logger.Info("external model resolved", "model", modelKey.String(), "provider", externalModelInfo.provider)
 	return nil
 }
 
