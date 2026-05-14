@@ -83,7 +83,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	providerKey := types.NamespacedName{Namespace: req.Namespace, Name: providerRefName}
 	provInfo, found := r.providerStore.get(providerKey)
 	if !found {
-		logger.Info("ExternalProvider not yet available, requeueing", "provider", providerRefName)
+		logger.Info("ExternalProvider not yet available, requeuing", "provider", providerRefName)
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
