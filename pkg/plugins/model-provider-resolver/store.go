@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// providerInfo holds cached ExternalProvider state.
 type providerInfo struct {
 	provider        string
 	endpoint        string
@@ -30,6 +31,16 @@ type providerInfo struct {
 	config          map[string]string
 }
 
+// externalModelInfo holds cached ExternalModel state with resolved provider info.
+type externalModelInfo struct {
+	provider        string
+	targetModel     string
+	secretName      string
+	secretNamespace string
+	config          map[string]string
+}
+
+// providerInfoStore is a thread-safe in-memory store for ExternalProvider info.
 type providerInfoStore struct {
 	providers map[string]*providerInfo
 	lock      sync.RWMutex
@@ -57,5 +68,38 @@ func (s *providerInfoStore) get(key types.NamespacedName) (*providerInfo, bool) 
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	info, ok := s.providers[key.String()]
+	return info, ok
+}
+
+// modelInfoStore is a thread-safe in-memory store that maps model names to their
+// resolved provider info. The reconciler writes to it; the plugin reads from it
+// during request processing.
+type modelInfoStore struct {
+	models map[string]*externalModelInfo
+	lock   sync.RWMutex
+}
+
+func newModelInfoStore() *modelInfoStore {
+	return &modelInfoStore{
+		models: make(map[string]*externalModelInfo),
+	}
+}
+
+func (s *modelInfoStore) addOrUpdateExternalModel(key types.NamespacedName, info *externalModelInfo) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.models[key.String()] = info
+}
+
+func (s *modelInfoStore) deleteExternalModel(key types.NamespacedName) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	delete(s.models, key.String())
+}
+
+func (s *modelInfoStore) getModelInfo(key types.NamespacedName) (*externalModelInfo, bool) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	info, ok := s.models[key.String()]
 	return info, ok
 }

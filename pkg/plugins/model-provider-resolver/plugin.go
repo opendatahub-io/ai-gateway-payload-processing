@@ -190,7 +190,7 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
 	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
 	if len(externalModelInfo.config) > 0 {
-		cycleState.Write(state.ProviderConfigKey, externalModelInfo.config)
+		cycleState.Write(state.ModelConfigKey, externalModelInfo.config)
 	}
 
 	return nil

@@ -22,5 +22,5 @@ const (
 	ModelKey          = "model"
 	CredsRefName      = "credential-ref-name"
 	CredsRefNamespace = "credential-ref-namespace"
-	ProviderConfigKey = "provider-config"
+	ModelConfigKey = "model-config"
 )
