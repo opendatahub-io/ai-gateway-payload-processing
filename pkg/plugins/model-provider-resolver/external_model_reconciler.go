@@ -19,6 +19,7 @@ package model_provider_resolver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -80,7 +81,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	providerInfo, found := r.providerStore.get(providerKey)
 	if !found {
 		logger.Info("ExternalProvider not yet available, requeuing", "provider", providerRefName)
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	info := &externalModelInfo{

@@ -85,7 +85,7 @@ func TestModelReconciler_MissingProvider_Requeues(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
-	assert.True(t, result.Requeue, "should requeue when provider not available")
+	assert.NotZero(t, result.RequeueAfter, "should requeue when provider not available")
 
 	_, found := modelStore.getModelInfo(modelKey)
 	assert.False(t, found, "should not populate model store without provider")
@@ -105,7 +105,7 @@ func TestModelReconciler_EmptyProviderRef_Requeues(t *testing.T) {
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
 	// Empty provider ref name → provider store lookup fails → requeue
-	assert.True(t, result.Requeue, "should requeue when provider not found (empty ref name)")
+	assert.NotZero(t, result.RequeueAfter, "should requeue when provider not found (empty ref name)")
 
 	_, found := modelStore.getModelInfo(modelKey)
 	assert.False(t, found)
