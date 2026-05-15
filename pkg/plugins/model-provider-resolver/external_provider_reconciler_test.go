@@ -101,50 +101,6 @@ func TestProviderReconciler_DeletedCR(t *testing.T) {
 	assert.False(t, found, "store entry should be removed on delete")
 }
 
-func TestProviderReconciler_MissingProvider(t *testing.T) {
-	key := types.NamespacedName{Namespace: "models", Name: "bad"}
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
-		key: newProviderUnstructured("bad", "models", "", "api.openai.com", "key"),
-	}}
-	store := newProviderInfoStore()
-	r := &externalProviderReconciler{Reader: reader, store: store}
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
-	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
-
-	_, found := store.get(key)
-	assert.False(t, found, "should not store provider with empty provider field")
-}
-
-func TestProviderReconciler_MissingEndpoint(t *testing.T) {
-	key := types.NamespacedName{Namespace: "models", Name: "bad"}
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
-		key: newProviderUnstructured("bad", "models", "openai", "", "key"),
-	}}
-	store := newProviderInfoStore()
-	r := &externalProviderReconciler{Reader: reader, store: store}
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
-	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
-
-	_, found := store.get(key)
-	assert.False(t, found, "should not store provider with empty endpoint")
-}
-
-func TestProviderReconciler_MissingSecretName(t *testing.T) {
-	key := types.NamespacedName{Namespace: "models", Name: "bad"}
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
-		key: newProviderUnstructured("bad", "models", "openai", "api.openai.com", ""),
-	}}
-	store := newProviderInfoStore()
-	r := &externalProviderReconciler{Reader: reader, store: store}
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
-	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
-
-	_, found := store.get(key)
-	assert.False(t, found, "should not store provider with empty secretName")
-}
+// TestProviderReconciler_MissingProvider, TestProviderReconciler_MissingEndpoint,
+// TestProviderReconciler_MissingSecretName removed — CRD validation (Required fields)
+// prevents ExternalProvider CRs with empty provider/endpoint/secretRef from being created.

@@ -26,6 +26,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 )
 
 var externalProviderGVK = schema.GroupVersionKind{
@@ -40,8 +41,8 @@ type externalProviderReconciler struct {
 }
 
 func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling ExternalProvider", "name", req.Name, "namespace", req.Namespace)
+	logger := log.FromContext(ctx).V(logutil.DEFAULT)
+	logger.Info("reconciling ExternalProvider", "name", req.Name, "namespace", req.Namespace)
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(externalProviderGVK)
@@ -53,20 +54,13 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
 		r.store.delete(req.NamespacedName)
+		logger.Info("ExternalProvider removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
 
 	providerType, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
 	endpoint, _, _ := unstructured.NestedString(obj.Object, "spec", "endpoint")
 	secretName, _, _ := unstructured.NestedString(obj.Object, "spec", "auth", "secretRef", "name")
-
-	if providerType == "" || endpoint == "" || secretName == "" {
-		r.store.delete(req.NamespacedName)
-		logger.Info("ExternalProvider missing required fields, removing from store",
-			"provider", providerType, "endpoint", endpoint, "secretName", secretName)
-		return ctrl.Result{}, nil
-	}
-
 	configRaw, _, _ := unstructured.NestedStringMap(obj.Object, "spec", "config")
 
 	r.store.addOrUpdate(req.NamespacedName, &providerInfo{
@@ -77,6 +71,6 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		config:          configRaw,
 	})
 
-	logger.Info("Updated provider store", "provider", providerType, "endpoint", endpoint)
+	logger.Info("updated provider store", "provider", providerType, "endpoint", endpoint)
 	return ctrl.Result{}, nil
 }

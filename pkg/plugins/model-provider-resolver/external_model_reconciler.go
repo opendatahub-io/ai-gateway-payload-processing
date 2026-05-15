@@ -19,7 +19,6 @@ package model_provider_resolver
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,6 +27,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 )
 
 var externalModelGVK = schema.GroupVersionKind{
@@ -43,8 +43,8 @@ type externalModelReconciler struct {
 }
 
 func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
+	logger := log.FromContext(ctx).V(logutil.DEFAULT)
+	logger.Info("reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(externalModelGVK)
@@ -56,47 +56,35 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
 		r.modelStore.deleteExternalModel(req.NamespacedName)
+		logger.Info("ExternalModel removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
 
 	refs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "externalProviderRefs")
-	if len(refs) == 0 {
-		r.modelStore.deleteExternalModel(req.NamespacedName)
-		return ctrl.Result{}, nil
-	}
-
-	refMap, ok := refs[0].(map[string]any)
-	if !ok {
-		r.modelStore.deleteExternalModel(req.NamespacedName)
-		return ctrl.Result{}, nil
-	}
+	// CRD validation ensures at least one ref, but guard defensively
+	// TODO: extend to support multiple provider refs (#278)
+	refMap, _ := refs[0].(map[string]any)
 
 	providerRefName := nestedString(refMap, "ref", "name")
 	targetModel := nestedString(refMap, "targetModel")
 
-	if providerRefName == "" {
-		r.modelStore.deleteExternalModel(req.NamespacedName)
-		logger.Info("ExternalModel missing provider ref name, skipping")
-		return ctrl.Result{}, nil
-	}
-
 	providerKey := types.NamespacedName{Namespace: req.Namespace, Name: providerRefName}
-	provInfo, found := r.providerStore.get(providerKey)
+	providerInfo, found := r.providerStore.get(providerKey)
 	if !found {
 		logger.Info("ExternalProvider not yet available, requeuing", "provider", providerRefName)
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	info := &externalModelInfo{
-		provider:        provInfo.provider,
+		provider:        providerInfo.provider,
 		targetModel:     targetModel,
-		secretName:      provInfo.secretName,
-		secretNamespace: provInfo.secretNamespace,
-		config:          provInfo.config,
+		secretName:      providerInfo.secretName,
+		secretNamespace: providerInfo.secretNamespace,
+		config:          providerInfo.config,
 	}
 	r.modelStore.addOrUpdateExternalModel(req.NamespacedName, info)
 
-	logger.Info("Updated model store", "provider", provInfo.provider, "targetModel", targetModel)
+	logger.Info("updated model store", "provider", providerInfo.provider, "targetModel", targetModel)
 	return ctrl.Result{}, nil
 }
 

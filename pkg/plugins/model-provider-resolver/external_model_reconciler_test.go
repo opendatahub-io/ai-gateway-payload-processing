@@ -19,7 +19,6 @@ package model_provider_resolver
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,13 +85,13 @@ func TestModelReconciler_MissingProvider_Requeues(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
-	assert.Equal(t, 2*time.Second, result.RequeueAfter, "should requeue when provider not available")
+	assert.True(t, result.Requeue, "should requeue when provider not available")
 
 	_, found := modelStore.getModelInfo(modelKey)
 	assert.False(t, found, "should not populate model store without provider")
 }
 
-func TestModelReconciler_EmptyProviderRef_NoRequeue(t *testing.T) {
+func TestModelReconciler_EmptyProviderRef_Requeues(t *testing.T) {
 	modelKey := types.NamespacedName{Namespace: "models", Name: "bad"}
 
 	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
@@ -105,8 +104,8 @@ func TestModelReconciler_EmptyProviderRef_NoRequeue(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
 	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result, "should NOT requeue for empty provider ref")
-	assert.Zero(t, result.RequeueAfter)
+	// Empty provider ref name → provider store lookup fails → requeue
+	assert.True(t, result.Requeue, "should requeue when provider not found (empty ref name)")
 
 	_, found := modelStore.getModelInfo(modelKey)
 	assert.False(t, found)
@@ -173,25 +172,5 @@ func TestModelReconciler_ProviderUpdatePropagates(t *testing.T) {
 	assert.Equal(t, "new-key", info.secretName, "model store should reflect updated provider credentials")
 }
 
-func TestModelReconciler_NoProviderRefs(t *testing.T) {
-	modelKey := types.NamespacedName{Namespace: "models", Name: "empty"}
-
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-	obj.SetName("empty")
-	obj.SetNamespace("models")
-	obj.Object["spec"] = map[string]any{}
-
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{modelKey: obj}}
-
-	modelStore := newModelInfoStore()
-	provStore := newProviderInfoStore()
-	r := &externalModelReconciler{Reader: reader, modelStore: modelStore, providerStore: provStore}
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: modelKey})
-	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
-
-	_, found := modelStore.getModelInfo(modelKey)
-	assert.False(t, found)
-}
+// TestModelReconciler_NoProviderRefs is removed — CRD validation (MinItems=1)
+// prevents ExternalModel CRs with empty externalProviderRefs from being created.

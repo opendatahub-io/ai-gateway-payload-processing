@@ -24,6 +24,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,7 +46,7 @@ var _ framework.RequestProcessor = &ModelProviderResolverPlugin{}
 
 // ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin
 func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
-	plugin, err := NewModelProviderResolver(handle)
+	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
@@ -53,9 +54,7 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 	return plugin.WithName(name), nil
 }
 
-func NewModelProviderResolver(handle framework.Handle) (*ModelProviderResolverPlugin, error) {
-	reconcilerBuilder := handle.ReconcilerBuilder
-	k8sClient := handle.Client()
+func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClient client.Client) (*ModelProviderResolverPlugin, error) {
 	providerStore := newProviderInfoStore()
 	modelStore := newModelInfoStore()
 
