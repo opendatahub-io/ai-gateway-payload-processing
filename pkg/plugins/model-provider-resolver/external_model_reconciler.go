@@ -29,13 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-)
 
-var externalModelGVK = schema.GroupVersionKind{
-	Group:   "inference.opendatahub.io",
-	Version: "v1alpha1",
-	Kind:    "ExternalModel",
-}
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+)
 
 // legacyExternalModelGVK is the old MaaS ExternalModel CRD (maas.opendatahub.io).
 // Kept for backward compatibility with existing deployments.
@@ -45,6 +41,8 @@ var legacyExternalModelGVK = schema.GroupVersionKind{
 	Kind:    "ExternalModel",
 }
 
+// externalModelReconciler watches inference.opendatahub.io ExternalModel CRDs
+// using typed clients and resolves provider info from the provider store.
 type externalModelReconciler struct {
 	client.Reader
 	modelStore    *modelInfoStore
@@ -55,50 +53,45 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 	logger.Info("reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
 
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-
-	err := r.Get(ctx, req.NamespacedName, obj)
+	model := &inferencev1alpha1.ExternalModel{}
+	err := r.Get(ctx, req.NamespacedName, model)
 	if err != nil && !errors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("unable to get ExternalModel: %w", err)
 	}
 
-	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
+	if errors.IsNotFound(err) || !model.GetDeletionTimestamp().IsZero() {
 		r.modelStore.deleteExternalModel(req.NamespacedName)
 		logger.Info("ExternalModel removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
 
-	refs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "externalProviderRefs")
-	// CRD validation ensures at least one ref, but guard defensively
+	// CRD validation ensures at least one ref (MinItems=1)
 	// TODO: extend to support multiple provider refs (#278)
-	refMap, _ := refs[0].(map[string]any)
+	ref := model.Spec.ExternalProviderRefs[0]
 
-	providerRefName := nestedString(refMap, "ref", "name")
-	targetModel := nestedString(refMap, "targetModel")
-
-	providerKey := types.NamespacedName{Namespace: req.Namespace, Name: providerRefName}
+	providerKey := types.NamespacedName{Namespace: req.Namespace, Name: ref.Ref.Name}
 	providerInfo, found := r.providerStore.get(providerKey)
 	if !found {
-		logger.Info("ExternalProvider not yet available, requeuing", "provider", providerRefName)
+		logger.Info("ExternalProvider not yet available, requeuing", "provider", ref.Ref.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	info := &externalModelInfo{
 		provider:        providerInfo.provider,
-		targetModel:     targetModel,
+		targetModel:     ref.TargetModel,
 		secretName:      providerInfo.secretName,
 		secretNamespace: providerInfo.secretNamespace,
 		config:          providerInfo.config,
 	}
 	r.modelStore.addOrUpdateExternalModel(req.NamespacedName, info)
 
-	logger.Info("updated model store", "provider", providerInfo.provider, "targetModel", targetModel)
+	logger.Info("updated model store", "provider", providerInfo.provider, "targetModel", ref.TargetModel)
 	return ctrl.Result{}, nil
 }
 
 // legacyExternalModelReconciler handles the flat maas.opendatahub.io ExternalModel
 // CRD structure (spec.provider, spec.targetModel, spec.credentialRef).
+// Uses unstructured client because the types are in a different repo.
 type legacyExternalModelReconciler struct {
 	client.Reader
 	store *modelInfoStore
@@ -136,20 +129,4 @@ func (r *legacyExternalModelReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	logger.Info("updated model store", "provider", provider, "targetModel", targetModel)
 	return ctrl.Result{}, nil
-}
-
-func nestedString(obj map[string]any, fields ...string) string {
-	current := obj
-	for i, f := range fields {
-		if i == len(fields)-1 {
-			s, _ := current[f].(string)
-			return s
-		}
-		next, ok := current[f].(map[string]any)
-		if !ok {
-			return ""
-		}
-		current = next
-	}
-	return ""
 }

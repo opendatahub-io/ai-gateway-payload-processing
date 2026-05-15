@@ -21,19 +21,13 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-)
 
-var externalProviderGVK = schema.GroupVersionKind{
-	Group:   "inference.opendatahub.io",
-	Version: "v1alpha1",
-	Kind:    "ExternalProvider",
-}
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+)
 
 type externalProviderReconciler struct {
 	client.Reader
@@ -44,33 +38,26 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 	logger.Info("reconciling ExternalProvider", "name", req.Name, "namespace", req.Namespace)
 
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalProviderGVK)
-
-	err := r.Get(ctx, req.NamespacedName, obj)
+	provider := &inferencev1alpha1.ExternalProvider{}
+	err := r.Get(ctx, req.NamespacedName, provider)
 	if err != nil && !errors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("unable to get ExternalProvider: %w", err)
 	}
 
-	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
+	if errors.IsNotFound(err) || !provider.GetDeletionTimestamp().IsZero() {
 		r.store.delete(req.NamespacedName)
 		logger.Info("ExternalProvider removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
 
-	providerType, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
-	endpoint, _, _ := unstructured.NestedString(obj.Object, "spec", "endpoint")
-	secretName, _, _ := unstructured.NestedString(obj.Object, "spec", "auth", "secretRef", "name")
-	configRaw, _, _ := unstructured.NestedStringMap(obj.Object, "spec", "config")
-
 	r.store.addOrUpdate(req.NamespacedName, &providerInfo{
-		provider:        providerType,
-		endpoint:        endpoint,
-		secretName:      secretName,
+		provider:        provider.Spec.Provider,
+		endpoint:        provider.Spec.Endpoint,
+		secretName:      provider.Spec.Auth.SecretRef.Name,
 		secretNamespace: req.Namespace,
-		config:          configRaw,
+		config:          provider.Spec.Config,
 	})
 
-	logger.Info("updated provider store", "provider", providerType, "endpoint", endpoint)
+	logger.Info("updated provider store", "provider", provider.Spec.Provider, "endpoint", provider.Spec.Endpoint)
 	return ctrl.Result{}, nil
 }

@@ -23,52 +23,58 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 )
 
-// mockReader implements client.Reader for unit testing reconcilers.
-type mockReader struct {
-	objects map[types.NamespacedName]*unstructured.Unstructured
+// typedMockReader implements client.Reader for typed objects.
+type typedMockReader struct {
+	objects map[types.NamespacedName]client.Object
 }
 
-func (m *mockReader) Get(_ context.Context, key types.NamespacedName, obj client.Object, _ ...client.GetOption) error {
-	u, ok := m.objects[key]
+func (m *typedMockReader) Get(_ context.Context, key types.NamespacedName, obj client.Object, _ ...client.GetOption) error {
+	stored, ok := m.objects[key]
 	if !ok {
-		return apierrors.NewNotFound(schema.GroupResource{Group: "inference.opendatahub.io", Resource: "externalproviders"}, key.Name)
+		return apierrors.NewNotFound(schema.GroupResource{Group: "inference.opendatahub.io"}, key.Name)
 	}
-	u.DeepCopyInto(obj.(*unstructured.Unstructured))
+	stored.(runtime.Object).DeepCopyObject()
+	// Copy into the target
+	switch target := obj.(type) {
+	case *inferencev1alpha1.ExternalProvider:
+		src := stored.(*inferencev1alpha1.ExternalProvider)
+		*target = *src.DeepCopy()
+	case *inferencev1alpha1.ExternalModel:
+		src := stored.(*inferencev1alpha1.ExternalModel)
+		*target = *src.DeepCopy()
+	}
 	return nil
 }
 
-func (m *mockReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+func (m *typedMockReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
 	return nil
 }
 
-func newProviderUnstructured(name, namespace, provider, endpoint, secretName string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalProviderGVK)
-	obj.SetName(name)
-	obj.SetNamespace(namespace)
-	obj.Object["spec"] = map[string]any{
-		"provider": provider,
-		"endpoint": endpoint,
-		"auth": map[string]any{
-			"secretRef": map[string]any{
-				"name": secretName,
-			},
+func newProviderCR(name, namespace, provider, endpoint, secretName string) *inferencev1alpha1.ExternalProvider {
+	return &inferencev1alpha1.ExternalProvider{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: inferencev1alpha1.ExternalProviderSpec{
+			Provider: provider,
+			Endpoint: endpoint,
+			Auth:     inferencev1alpha1.AuthConfig{SecretRef: inferencev1alpha1.NameReference{Name: secretName}},
 		},
 	}
-	return obj
 }
 
 func TestProviderReconciler_ValidCR(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "my-openai"}
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{
-		key: newProviderUnstructured("my-openai", "models", "openai", "api.openai.com", "openai-key"),
+	reader := &typedMockReader{objects: map[types.NamespacedName]client.Object{
+		key: newProviderCR("my-openai", "models", "openai", "api.openai.com", "openai-key"),
 	}}
 	store := newProviderInfoStore()
 	r := &externalProviderReconciler{Reader: reader, store: store}
@@ -87,9 +93,10 @@ func TestProviderReconciler_ValidCR(t *testing.T) {
 
 func TestProviderReconciler_DeletedCR(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "deleted"}
-	reader := &mockReader{objects: map[types.NamespacedName]*unstructured.Unstructured{}} // not found
+	reader := &typedMockReader{objects: map[types.NamespacedName]client.Object{}} // not found
+
 	store := newProviderInfoStore()
-	store.addOrUpdate(key, &providerInfo{provider: "openai"})
+	store.addOrUpdate(key, &providerInfo{provider: "openai", endpoint: "api.openai.com"})
 
 	r := &externalProviderReconciler{Reader: reader, store: store}
 
@@ -104,3 +111,22 @@ func TestProviderReconciler_DeletedCR(t *testing.T) {
 // TestProviderReconciler_MissingProvider, TestProviderReconciler_MissingEndpoint,
 // TestProviderReconciler_MissingSecretName removed — CRD validation (Required fields)
 // prevents ExternalProvider CRs with empty provider/endpoint/secretRef from being created.
+
+func TestProviderReconciler_WithConfig(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "my-vertex"}
+	provider := newProviderCR("my-vertex", "models", "vertex-openai", "us-central1-aiplatform.googleapis.com", "vertex-key")
+	provider.Spec.Config = map[string]string{"project": "my-project", "location": "us-central1"}
+
+	reader := &typedMockReader{objects: map[types.NamespacedName]client.Object{key: provider}}
+	store := newProviderInfoStore()
+	r := &externalProviderReconciler{Reader: reader, store: store}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found := store.get(key)
+	require.True(t, found)
+	assert.Equal(t, "my-project", info.config["project"])
+	assert.Equal(t, "us-central1", info.config["location"])
+}
