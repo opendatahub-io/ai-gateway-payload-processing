@@ -22,18 +22,26 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalmodel"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalprovider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -44,9 +52,25 @@ const (
 // compile-time type validation
 var _ framework.RequestProcessor = &ModelProviderResolverPlugin{}
 
+type resolverConfig struct {
+	GatewayName      string `json:"gatewayName,omitempty"`
+	GatewayNamespace string `json:"gatewayNamespace,omitempty"`
+	RouteTimeout     string `json:"routeTimeout,omitempty"`
+}
+
 // ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin
-func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
-	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
+func ModelProviderResolverFactory(name string, rawConfig json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
+	utilruntime.Must(inferencev1alpha1.AddToScheme(handle.Client().Scheme()))
+	utilruntime.Must(gatewayapiv1.Install(handle.Client().Scheme()))
+
+	var config resolverConfig
+	if len(rawConfig) > 0 {
+		if err := json.Unmarshal(rawConfig, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse model-provider-resolver config: %w", err)
+		}
+	}
+
+	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client(), config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
@@ -54,7 +78,7 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 	return plugin.WithName(name), nil
 }
 
-func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClient client.Client) (*ModelProviderResolverPlugin, error) {
+func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClient client.Client, config resolverConfig) (*ModelProviderResolverPlugin, error) {
 	providerStore := newProviderInfoStore()
 	modelStore := newModelInfoStore()
 
@@ -116,6 +140,43 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 		Watches(providerWatchObj, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
 		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
+	// Controller reconcilers — create Istio networking resources and HTTPRoutes
+	managedByPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
+		MatchLabels: map[string]string{"app.kubernetes.io/managed-by": "ipp-external-provider-reconciler"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create label predicate: %w", err)
+	}
+
+	ctrlProviderReconciler := &externalprovider.Reconciler{
+		Client: k8sClient,
+		Scheme: k8sClient.Scheme(),
+	}
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalProvider{}).
+		Owns(&corev1.Service{}, builder.WithPredicates(managedByPredicate)).
+		Named("external-provider-controller").
+		Complete(ctrlProviderReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalProvider controller: %w", err)
+	}
+
+	ctrlModelReconciler := &externalmodel.Reconciler{
+		Client:           k8sClient,
+		Scheme:           k8sClient.Scheme(),
+		GatewayName:      config.GatewayName,
+		GatewayNamespace: config.GatewayNamespace,
+		RouteTimeout:     config.RouteTimeout,
+	}
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalModel{}).
+		Owns(&gatewayapiv1.HTTPRoute{}).
+		Watches(&inferencev1alpha1.ExternalProvider{},
+			handler.EnqueueRequestsFromMapFunc(ctrlModelReconciler.MapProviderToModels)).
+		Named("external-model-controller").
+		Complete(ctrlModelReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalModel controller: %w", err)
 	}
 
 	return &ModelProviderResolverPlugin{

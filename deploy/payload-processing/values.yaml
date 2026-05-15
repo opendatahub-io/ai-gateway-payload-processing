@@ -18,6 +18,11 @@ upstreamBbr:
     # BBR plugins configuration.
     # Format: type (registered plugin type), name (instance name), json (optional config object)
     plugins:
+      - type: external-model-controller
+        name: external-model-controller
+        json:
+          gatewayName: maas-default-gateway
+          gatewayNamespace: istio-system
       - type: body-field-to-header
         name: model-extractor
         json:
