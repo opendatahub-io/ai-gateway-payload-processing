@@ -43,6 +43,7 @@ WORKDIR /e2e
 COPY --from=builder /e2e-tests.test /e2e/e2e-tests.test
 COPY --from=builder /usr/local/bin/kubectl /usr/local/bin/kubectl
 COPY test/e2e/scripts/entrypoint.sh /e2e/entrypoint.sh
+COPY config/crd/bases/ /e2e/crds/
 
 RUN chmod +x /e2e/entrypoint.sh /e2e/e2e-tests.test && \
     mkdir -p /results

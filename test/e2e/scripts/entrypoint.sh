@@ -41,11 +41,20 @@ echo "Cluster connectivity OK."
 
 # Ensure ExternalModel CRD is installed (required for E2E tests).
 if ! kubectl get crd externalmodels.maas.opendatahub.io >/dev/null 2>&1; then
-    echo "ExternalModel CRD not found, installing..."
+    echo "ExternalModel CRD (maas.opendatahub.io) not found, installing..."
     kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
     echo "ExternalModel CRD installed."
 else
-    echo "ExternalModel CRD already installed."
+    echo "ExternalModel CRD (maas.opendatahub.io) already installed."
+fi
+
+# Ensure inference.opendatahub.io CRDs are installed (ExternalProvider + ExternalModel).
+if ! kubectl get crd externalproviders.inference.opendatahub.io >/dev/null 2>&1; then
+    echo "Installing inference.opendatahub.io CRDs..."
+    kubectl apply -f /e2e/crds/
+    echo "inference.opendatahub.io CRDs installed."
+else
+    echo "inference.opendatahub.io CRDs already installed."
 fi
 
 # Build test arguments.

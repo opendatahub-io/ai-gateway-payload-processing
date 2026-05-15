@@ -113,9 +113,23 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 	providerWatchObj.SetGroupVersionKind(externalProviderGVK)
 	if err := reconcilerBuilder().
 		For(modelObj).
+		Named("inference-externalmodel").
 		Watches(providerWatchObj, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
 		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
+	// Legacy: also watch maas.opendatahub.io ExternalModels for backward compatibility.
+	// The legacy CRD has a flat structure (spec.provider, spec.targetModel, spec.credentialRef)
+	// without ExternalProvider references.
+	legacyModelObj := &unstructured.Unstructured{}
+	legacyModelObj.SetGroupVersionKind(legacyExternalModelGVK)
+	legacyReconciler := &legacyExternalModelReconciler{
+		Reader: k8sClient,
+		store:  modelStore,
+	}
+	if err := reconcilerBuilder().For(legacyModelObj).Named("legacy-externalmodel").Complete(legacyReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register legacy ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{

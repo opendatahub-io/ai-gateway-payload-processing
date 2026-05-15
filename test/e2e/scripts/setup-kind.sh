@@ -82,9 +82,12 @@ install_gateway_api_crds() {
 }
 
 install_external_model_crd() {
-    echo "Installing ExternalModel CRD..."
+    echo "Installing ExternalModel CRD (maas.opendatahub.io)..."
     kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
-    echo "ExternalModel CRD installed"
+
+    echo "Installing ExternalProvider/ExternalModel CRDs (inference.opendatahub.io)..."
+    kubectl apply -f "$PROJECT_ROOT/config/crd/bases/"
+    echo "CRDs installed"
 }
 
 create_gateway() {

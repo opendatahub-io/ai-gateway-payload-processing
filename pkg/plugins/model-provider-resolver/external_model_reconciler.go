@@ -36,6 +36,14 @@ var externalModelGVK = schema.GroupVersionKind{
 	Kind:    "ExternalModel",
 }
 
+// legacyExternalModelGVK is the old MaaS ExternalModel CRD (maas.opendatahub.io).
+// Kept for backward compatibility with existing deployments.
+var legacyExternalModelGVK = schema.GroupVersionKind{
+	Group:   "maas.opendatahub.io",
+	Version: "v1alpha1",
+	Kind:    "ExternalModel",
+}
+
 type externalModelReconciler struct {
 	client.Reader
 	modelStore    *modelInfoStore
@@ -85,6 +93,47 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	r.modelStore.addOrUpdateExternalModel(req.NamespacedName, info)
 
 	logger.Info("updated model store", "provider", providerInfo.provider, "targetModel", targetModel)
+	return ctrl.Result{}, nil
+}
+
+// legacyExternalModelReconciler handles the flat maas.opendatahub.io ExternalModel
+// CRD structure (spec.provider, spec.targetModel, spec.credentialRef).
+type legacyExternalModelReconciler struct {
+	client.Reader
+	store *modelInfoStore
+}
+
+func (r *legacyExternalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).V(logutil.DEFAULT)
+	logger.Info("reconciling legacy ExternalModel", "name", req.Name, "namespace", req.Namespace)
+
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(legacyExternalModelGVK)
+
+	err := r.Get(ctx, req.NamespacedName, obj)
+	if err != nil && !errors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("unable to get ExternalModel: %w", err)
+	}
+
+	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
+		r.store.deleteExternalModel(req.NamespacedName)
+		logger.Info("ExternalModel removed from store", "name", req.Name, "namespace", req.Namespace)
+		return ctrl.Result{}, nil
+	}
+
+	provider, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
+	targetModel, _, _ := unstructured.NestedString(obj.Object, "spec", "targetModel")
+	credsName, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "name")
+
+	info := &externalModelInfo{
+		provider:        provider,
+		targetModel:     targetModel,
+		secretName:      credsName,
+		secretNamespace: req.Namespace,
+	}
+	r.store.addOrUpdateExternalModel(req.NamespacedName, info)
+
+	logger.Info("updated model store", "provider", provider, "targetModel", targetModel)
 	return ctrl.Result{}, nil
 }
 
