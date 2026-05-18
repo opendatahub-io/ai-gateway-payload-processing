@@ -61,14 +61,14 @@ func TestProviderReconciler_ValidCR(t *testing.T) {
 			},
 		},
 	}}
-	store := newProviderInfoStore()
+	store := newInfoStore()
 	r := &externalProviderReconciler{Reader: reader, store: store}
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 
-	info, found := store.get(key)
+	info, found := store.getProvider(key)
 	require.True(t, found)
 	assert.Equal(t, "openai", info.provider)
 	assert.Equal(t, "api.openai.com", info.endpoint)
@@ -80,8 +80,8 @@ func TestProviderReconciler_DeletedCR(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "deleted"}
 	reader := &mockProviderReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalProvider{}}
 
-	store := newProviderInfoStore()
-	store.addOrUpdate(key, &providerInfo{provider: "openai", endpoint: "api.openai.com"})
+	store := newInfoStore()
+	store.addOrUpdateProvider(key, &providerInfo{provider: "openai", endpoint: "api.openai.com"})
 
 	r := &externalProviderReconciler{Reader: reader, store: store}
 
@@ -89,7 +89,7 @@ func TestProviderReconciler_DeletedCR(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 
-	_, found := store.get(key)
+	_, found := store.getProvider(key)
 	assert.False(t, found, "store entry should be removed on delete")
 }
 
@@ -106,14 +106,14 @@ func TestProviderReconciler_WithConfig(t *testing.T) {
 			},
 		},
 	}}
-	store := newProviderInfoStore()
+	store := newInfoStore()
 	r := &externalProviderReconciler{Reader: reader, store: store}
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 
-	info, found := store.get(key)
+	info, found := store.getProvider(key)
 	require.True(t, found)
 	assert.Equal(t, "my-project", info.config["project"])
 	assert.Equal(t, "us-central1", info.config["location"])

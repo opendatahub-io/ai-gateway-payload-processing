@@ -31,7 +31,7 @@ import (
 
 type externalProviderReconciler struct {
 	client.Reader
-	store *providerInfoStore
+	store *infoStore
 }
 
 func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -45,12 +45,12 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	if errors.IsNotFound(err) || !provider.GetDeletionTimestamp().IsZero() {
-		r.store.delete(req.NamespacedName)
+		r.store.deleteProvider(req.NamespacedName)
 		logger.Info("ExternalProvider removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
 
-	r.store.addOrUpdate(req.NamespacedName, &providerInfo{
+	r.store.addOrUpdateProvider(req.NamespacedName, &providerInfo{
 		provider:        provider.Spec.Provider,
 		endpoint:        provider.Spec.Endpoint,
 		secretName:      provider.Spec.Auth.SecretRef.Name,

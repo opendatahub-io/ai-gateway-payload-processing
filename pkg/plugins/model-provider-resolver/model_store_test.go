@@ -26,48 +26,48 @@ import (
 )
 
 func TestModelStore_AddAndGetExternalModel(t *testing.T) {
-	store := newModelInfoStore()
+	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "ns", Name: "external-model"}
 
-	store.addOrUpdateExternalModel(key, &externalModelInfo{provider: provider.Anthropic})
+	store.addOrUpdateModel(key, &externalModelInfo{provider: provider.Anthropic})
 
-	info, found := store.getModelInfo(key)
+	info, found := store.getModel(key)
 	assert.True(t, found)
 	assert.NotNil(t, info)
 	assert.Equal(t, provider.Anthropic, info.provider)
 }
 
 func TestModelStore_GetModelInfo_NotFound(t *testing.T) {
-	store := newModelInfoStore()
-	store.addOrUpdateExternalModel(
+	store := newInfoStore()
+	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "ns", Name: "ext"},
 		&externalModelInfo{provider: provider.OpenAI},
 	)
 
-	_, found := store.getModelInfo(types.NamespacedName{Namespace: "ns", Name: "other"})
+	_, found := store.getModel(types.NamespacedName{Namespace: "ns", Name: "other"})
 	assert.False(t, found)
 }
 
 func TestModelStore_DeleteExternalModel(t *testing.T) {
-	store := newModelInfoStore()
+	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "ns", Name: "ext"}
-	store.addOrUpdateExternalModel(key, &externalModelInfo{provider: provider.OpenAI})
+	store.addOrUpdateModel(key, &externalModelInfo{provider: provider.OpenAI})
 
-	_, foundBefore := store.getModelInfo(key)
+	_, foundBefore := store.getModel(key)
 	assert.True(t, foundBefore)
 
-	store.deleteExternalModel(key)
-	_, foundAfter := store.getModelInfo(key)
+	store.deleteModel(key)
+	_, foundAfter := store.getModel(key)
 	assert.False(t, foundAfter)
 }
 
 func TestModelStore_CrossNamespaceIsolation(t *testing.T) {
-	store := newModelInfoStore()
-	store.addOrUpdateExternalModel(
+	store := newInfoStore()
+	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "ns-a", Name: "shared-model"},
 		&externalModelInfo{provider: provider.OpenAI},
 	)
 
-	_, found := store.getModelInfo(types.NamespacedName{Namespace: "ns-b", Name: "shared-model"})
+	_, found := store.getModel(types.NamespacedName{Namespace: "ns-b", Name: "shared-model"})
 	assert.False(t, found)
 }

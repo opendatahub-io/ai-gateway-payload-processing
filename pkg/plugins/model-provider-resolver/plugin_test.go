@@ -29,14 +29,14 @@ import (
 )
 
 func TestProcessRequest_ModelResolved(t *testing.T) {
-	store := newModelInfoStore()
+	store := newInfoStore()
 	const (
 		extNS       = "llm"
 		extName     = "claude-sonnet"
 		targetModel = "claude-sonnet-1234"
 		credName    = "anthropic-key"
 	)
-	store.addOrUpdateExternalModel(
+	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: extNS, Name: extName},
 		&externalModelInfo{
 			provider:        provider.Anthropic,
@@ -46,7 +46,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 		},
 	)
 
-	plugin := &ModelProviderResolverPlugin{modelInfoStore: store}
+	plugin := &ModelProviderResolverPlugin{store: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
 	req.Headers[":path"] = "/" + extNS + "/" + extName + "/v1/chat/completions"
@@ -74,8 +74,8 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 }
 
 func TestProcessRequest_ModelNotFound(t *testing.T) {
-	store := newModelInfoStore()
-	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	store := newInfoStore()
+	p := &ModelProviderResolverPlugin{store: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
 	req.Headers[":path"] = "/model-ns/model-name/v1/chat/completions"
@@ -89,8 +89,8 @@ func TestProcessRequest_ModelNotFound(t *testing.T) {
 }
 
 func TestProcessRequest_NoModel(t *testing.T) {
-	store := newModelInfoStore()
-	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	store := newInfoStore()
+	p := &ModelProviderResolverPlugin{store: store}
 	cs := framework.NewCycleState()
 
 	err := p.ProcessRequest(context.Background(), cs, framework.NewInferenceRequest())
@@ -104,12 +104,12 @@ func TestProcessRequest_NoModel(t *testing.T) {
 }
 
 func TestProcessRequest_BadPath(t *testing.T) {
-	store := newModelInfoStore()
-	store.addOrUpdateExternalModel(
+	store := newInfoStore()
+	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "ext"},
 		&externalModelInfo{provider: provider.OpenAI, targetModel: "gpt-4o", secretName: "k", secretNamespace: "llm"},
 	)
-	p := &ModelProviderResolverPlugin{modelInfoStore: store}
+	p := &ModelProviderResolverPlugin{store: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
 	req.Headers[":path"] = "/incomplete"

@@ -25,49 +25,49 @@ import (
 )
 
 func TestProviderStore_AddGetDelete(t *testing.T) {
-	store := newProviderInfoStore()
+	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "models", Name: "my-openai"}
 
-	_, found := store.get(key)
+	_, found := store.getProvider(key)
 	assert.False(t, found)
 
-	store.addOrUpdate(key, &providerInfo{
+	store.addOrUpdateProvider(key, &providerInfo{
 		provider: "openai", endpoint: "api.openai.com",
 		secretName: "key", secretNamespace: "models",
 	})
 
-	info, found := store.get(key)
+	info, found := store.getProvider(key)
 	require.True(t, found)
 	assert.Equal(t, "openai", info.provider)
 	assert.Equal(t, "api.openai.com", info.endpoint)
 
-	store.delete(key)
-	_, found = store.get(key)
+	store.deleteProvider(key)
+	_, found = store.getProvider(key)
 	assert.False(t, found)
 }
 
 func TestProviderStore_Update(t *testing.T) {
-	store := newProviderInfoStore()
+	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "models", Name: "my-openai"}
 
-	store.addOrUpdate(key, &providerInfo{provider: "openai", endpoint: "old.com"})
-	store.addOrUpdate(key, &providerInfo{provider: "openai", endpoint: "new.com"})
+	store.addOrUpdateProvider(key, &providerInfo{provider: "openai", endpoint: "old.com"})
+	store.addOrUpdateProvider(key, &providerInfo{provider: "openai", endpoint: "new.com"})
 
-	info, _ := store.get(key)
+	info, _ := store.getProvider(key)
 	assert.Equal(t, "new.com", info.endpoint)
 }
 
 func TestProviderStore_WithConfig(t *testing.T) {
-	store := newProviderInfoStore()
+	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "models", Name: "my-vertex"}
 
-	store.addOrUpdate(key, &providerInfo{
+	store.addOrUpdateProvider(key, &providerInfo{
 		provider: "vertex-openai", endpoint: "aiplatform.googleapis.com",
 		secretName: "key", secretNamespace: "models",
 		config: map[string]string{"project": "my-project", "location": "us-central1"},
 	})
 
-	info, found := store.get(key)
+	info, found := store.getProvider(key)
 	require.True(t, found)
 	assert.Equal(t, "my-project", info.config["project"])
 }

@@ -53,10 +53,10 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 }
 
 func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ModelProviderResolverPlugin, error) {
-	modelInfoStore := newModelInfoStore()
+	store := newInfoStore()
 	reconciler := &externalModelReconciler{
 		Reader: clientReader,
-		store:  modelInfoStore,
+		store:  store,
 	}
 
 	// Watch ExternalModel CRDs directly (no MaaS dependency)
@@ -69,7 +69,7 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientR
 
 	return &ModelProviderResolverPlugin{
 		typedName:      plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
-		modelInfoStore: modelInfoStore,
+		store: store,
 	}, nil
 }
 
@@ -78,7 +78,7 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientR
 // (api-translation, api-key-injection).
 type ModelProviderResolverPlugin struct {
 	typedName      plugin.TypedName
-	modelInfoStore *modelInfoStore
+	store *infoStore
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
@@ -115,7 +115,7 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	modelKey := types.NamespacedName{Namespace: segments[0], Name: segments[1]}
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("exported namespaced name from path", "key", modelKey)
 
-	externalModelInfo, found := p.modelInfoStore.getModelInfo(modelKey)
+	externalModelInfo, found := p.store.getModel(modelKey)
 	if !found { // info is stored only for external models
 		return nil // this is not considered an error, we just need to skip if it's internal model
 	}

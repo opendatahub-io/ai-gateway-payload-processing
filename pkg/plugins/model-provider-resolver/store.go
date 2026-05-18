@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// providerInfo holds cached ExternalProvider state.
 type providerInfo struct {
 	provider        string
 	endpoint        string
@@ -30,94 +31,85 @@ type providerInfo struct {
 	config          map[string]string
 }
 
-type providerInfoStore struct {
+// externalModelInfo holds the provider and secret name/namespace for an external model.
+type externalModelInfo struct {
+	provider        string
+	targetModel     string
+	secretName      string
+	secretNamespace string
+}
+
+// infoStore is a thread-safe in-memory store for both provider and model info.
+// The reconcilers write to it; the plugin reads from it during request processing.
+type infoStore struct {
 	providers map[string]*providerInfo
+	models    map[string]map[string]*externalModelInfo // namespace -> name -> info
 	lock      sync.RWMutex
 }
 
-func newProviderInfoStore() *providerInfoStore {
-	return &providerInfoStore{
+func newInfoStore() *infoStore {
+	return &infoStore{
 		providers: make(map[string]*providerInfo),
+		models:    make(map[string]map[string]*externalModelInfo),
 	}
 }
 
-func (s *providerInfoStore) addOrUpdate(key types.NamespacedName, info *providerInfo) {
+// addOrUpdateProvider stores ExternalProvider information.
+func (s *infoStore) addOrUpdateProvider(key types.NamespacedName, info *providerInfo) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.providers[key.String()] = info
 }
 
-func (s *providerInfoStore) delete(key types.NamespacedName) {
+// deleteProvider removes ExternalProvider information.
+func (s *infoStore) deleteProvider(key types.NamespacedName) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	delete(s.providers, key.String())
 }
 
-func (s *providerInfoStore) get(key types.NamespacedName) (*providerInfo, bool) {
+// getProvider returns provider info if found.
+func (s *infoStore) getProvider(key types.NamespacedName) (*providerInfo, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	info, ok := s.providers[key.String()]
 	return info, ok
 }
 
-// externalModelInfo holds the provider and secret name/namespace for an external model.
-type externalModelInfo struct {
-	provider        string
-	targetModel     string // this is the name of the model that will be used in the request
-	secretName      string
-	secretNamespace string
-}
-
-// modelInfoStore is a thread-safe in-memory store that maps model names to their provider info.
-// The reconciler writes to it; the plugin reads from it during request processing.
-type modelInfoStore struct {
-	// externalModelToModelInfo maps namespace -> external model name -> externalModelInfo.
-	externalModelToModelInfo map[string]map[string]*externalModelInfo
-
-	lock sync.RWMutex
-}
-
-func newModelInfoStore() *modelInfoStore {
-	return &modelInfoStore{
-		externalModelToModelInfo: make(map[string]map[string]*externalModelInfo),
-	}
-}
-
-func (s *modelInfoStore) addOrUpdateExternalModel(externalModelKey types.NamespacedName, modelInfo *externalModelInfo) {
+// addOrUpdateModel stores ExternalModel information.
+func (s *infoStore) addOrUpdateModel(key types.NamespacedName, info *externalModelInfo) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if _, found := s.externalModelToModelInfo[externalModelKey.Namespace]; !found {
-		s.externalModelToModelInfo[externalModelKey.Namespace] = make(map[string]*externalModelInfo)
+	if _, found := s.models[key.Namespace]; !found {
+		s.models[key.Namespace] = make(map[string]*externalModelInfo)
 	}
-	s.externalModelToModelInfo[externalModelKey.Namespace][externalModelKey.Name] = modelInfo
+	s.models[key.Namespace][key.Name] = info
 }
 
-func (s *modelInfoStore) deleteExternalModel(externalModelKey types.NamespacedName) {
+// deleteModel removes ExternalModel information.
+func (s *infoStore) deleteModel(key types.NamespacedName) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	modelsByNamespace, found := s.externalModelToModelInfo[externalModelKey.Namespace]
+	modelsByNamespace, found := s.models[key.Namespace]
 	if !found {
 		return
 	}
-	delete(modelsByNamespace, externalModelKey.Name)
+	delete(modelsByNamespace, key.Name)
 	if len(modelsByNamespace) == 0 {
-		delete(s.externalModelToModelInfo, externalModelKey.Namespace)
+		delete(s.models, key.Namespace)
 	}
 }
 
-func (s *modelInfoStore) getModelInfo(externalModelKey types.NamespacedName) (*externalModelInfo, bool) {
+// getModel returns model info if found.
+func (s *infoStore) getModel(key types.NamespacedName) (*externalModelInfo, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	modelsByNamespace, found := s.externalModelToModelInfo[externalModelKey.Namespace]
+	modelsByNamespace, found := s.models[key.Namespace]
 	if !found {
 		return nil, false
 	}
 
-	externalModelInfo, ok := modelsByNamespace[externalModelKey.Name]
-	if !ok {
-		return nil, false
-	}
-
-	return externalModelInfo, true
+	info, ok := modelsByNamespace[key.Name]
+	return info, ok
 }
