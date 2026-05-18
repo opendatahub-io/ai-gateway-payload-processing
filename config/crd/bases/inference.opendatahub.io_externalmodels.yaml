@@ -58,9 +58,6 @@ spec:
                 description: |-
                   ExternalProviderRefs maps this model to one or more external providers.
                   Each entry specifies the provider, provider-side model name, and API format.
-
-                  Phase 1: limited to a single provider ref. MaxItems will be increased
-                  when traffic splitting is implemented in Phase 2.
                 items:
                   description: ExternalProviderRef binds this model to a specific
                     provider with translation config.
@@ -72,6 +69,35 @@ spec:
                       maxLength: 63
                       minLength: 1
                       type: string
+                    auth:
+                      description: |-
+                        Auth overrides the ExternalProvider authentication for this model-provider binding.
+                        If not set, the ExternalProvider auth is used.
+                      properties:
+                        secretRef:
+                          description: |-
+                            SecretRef references a Kubernetes Secret containing the provider API key.
+                            The Secret must be in the same namespace as the ExternalProvider
+                            and must contain a data key "api-key" with the credential value.
+                          properties:
+                            name:
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - name
+                          type: object
+                      required:
+                      - secretRef
+                      type: object
+                    config:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Config holds model-specific configuration as key-value pairs.
+                        Overrides the ExternalProvider config for this model-provider binding.
+                      type: object
                     ref:
                       description: Ref identifies the ExternalProvider CR (must be
                         in the same namespace).
@@ -96,7 +122,7 @@ spec:
                   - ref
                   - targetModel
                   type: object
-                maxItems: 1
+                maxItems: 64
                 minItems: 1
                 type: array
             required:

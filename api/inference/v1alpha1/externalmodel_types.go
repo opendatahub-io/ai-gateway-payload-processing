@@ -42,11 +42,9 @@ type ExternalModelSpec struct {
 	// ExternalProviderRefs maps this model to one or more external providers.
 	// Each entry specifies the provider, provider-side model name, and API format.
 	//
-	// Phase 1: limited to a single provider ref. MaxItems will be increased
-	// when traffic splitting is implemented in Phase 2.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=1
+	// +kubebuilder:validation:MaxItems=64
 	ExternalProviderRefs []ExternalProviderRef `json:"externalProviderRefs"`
 }
 
@@ -69,6 +67,16 @@ type ExternalProviderRef struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	APIFormat string `json:"apiFormat"`
+
+	// Config holds model-specific configuration as key-value pairs.
+	// Overrides the ExternalProvider config for this model-provider binding.
+	// +optional
+	Config map[string]string `json:"config,omitempty"`
+
+	// Auth overrides the ExternalProvider authentication for this model-provider binding.
+	// If not set, the ExternalProvider auth is used.
+	// +optional
+	Auth *AuthConfig `json:"auth,omitempty"`
 }
 
 // NameReference is a reference to a Kubernetes resource by name.
