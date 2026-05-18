@@ -22,6 +22,44 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+type providerInfo struct {
+	provider        string
+	endpoint        string
+	secretName      string
+	secretNamespace string
+	config          map[string]string
+}
+
+type providerInfoStore struct {
+	providers map[string]*providerInfo
+	lock      sync.RWMutex
+}
+
+func newProviderInfoStore() *providerInfoStore {
+	return &providerInfoStore{
+		providers: make(map[string]*providerInfo),
+	}
+}
+
+func (s *providerInfoStore) addOrUpdate(key types.NamespacedName, info *providerInfo) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.providers[key.String()] = info
+}
+
+func (s *providerInfoStore) delete(key types.NamespacedName) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	delete(s.providers, key.String())
+}
+
+func (s *providerInfoStore) get(key types.NamespacedName) (*providerInfo, bool) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	info, ok := s.providers[key.String()]
+	return info, ok
+}
+
 // externalModelInfo holds the provider and secret name/namespace for an external model.
 type externalModelInfo struct {
 	provider        string
@@ -45,7 +83,6 @@ func newModelInfoStore() *modelInfoStore {
 	}
 }
 
-// addOrUpdateExternalModel stores ExternalModel information.
 func (s *modelInfoStore) addOrUpdateExternalModel(externalModelKey types.NamespacedName, modelInfo *externalModelInfo) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -55,7 +92,6 @@ func (s *modelInfoStore) addOrUpdateExternalModel(externalModelKey types.Namespa
 	s.externalModelToModelInfo[externalModelKey.Namespace][externalModelKey.Name] = modelInfo
 }
 
-// deleteExternalModel deletes ExternalModel information.
 func (s *modelInfoStore) deleteExternalModel(externalModelKey types.NamespacedName) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -69,20 +105,18 @@ func (s *modelInfoStore) deleteExternalModel(externalModelKey types.NamespacedNa
 	}
 }
 
-// getModelInfo returns the modelInfo stored in ExternalModel and bool if found or not.
-// if no externalModelInfo found, nil is returned in the first return value.
 func (s *modelInfoStore) getModelInfo(externalModelKey types.NamespacedName) (*externalModelInfo, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
 	modelsByNamespace, found := s.externalModelToModelInfo[externalModelKey.Namespace]
 	if !found {
-		return nil, false // ExternalModel namespace not found
+		return nil, false
 	}
 
 	externalModelInfo, ok := modelsByNamespace[externalModelKey.Name]
 	if !ok {
-		return nil, false // ExternalModel not found
+		return nil, false
 	}
 
 	return externalModelInfo, true
