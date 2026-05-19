@@ -107,8 +107,12 @@ tidy: ## Run go work sync (if go.work exists) and go mod tidy per module.
 .PHONY: verify
 verify: tidy vet fmt lint  ## Verify the codebase (tidy, vet, fmt, lint).
 
+.PHONY: download-test-crds
+download-test-crds: ## Download Istio and Gateway API CRDs for envtest.
+	./hack/download-test-crds.sh
+
 .PHONY: test-unit
-test-unit: envtest ## Run unit tests. Optional: COVERAGE=true (or 1) for go tool cover summary.
+test-unit: envtest download-test-crds ## Run unit tests. Optional: COVERAGE=true (or 1) for go tool cover summary.
 	@set -e; \
 	kubebuilder_assets_path="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
 	$(GO_ENV) KUBEBUILDER_ASSETS="$$kubebuilder_assets_path" go test ./pkg/... -race -count=1 -coverprofile=cover.out; \
