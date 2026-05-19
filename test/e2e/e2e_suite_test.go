@@ -34,7 +34,7 @@ var (
 	gatewaySvcName string
 	simulatorEP    string
 	curlTimeout    = 30 * time.Second
-	kubectlBin     = envOr("KUBECTL_BIN", "oc")
+	kubectlBin     = envOr("KUBECTL_BIN", "kubectl")
 )
 
 func TestE2E(t *testing.T) {
