@@ -22,8 +22,6 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="TargetModel",type="string",JSONPath=".spec.externalProviderRefs[0].targetModel"
-// +kubebuilder:printcolumn:name="Provider",type="string",JSONPath=".spec.externalProviderRefs[0].ref.name"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
@@ -40,7 +38,7 @@ type ExternalModel struct {
 // ExternalModelSpec defines the desired state of ExternalModel.
 type ExternalModelSpec struct {
 	// ExternalProviderRefs maps this model to one or more external providers.
-	// Each entry specifies the provider, provider-side model name, and API format.
+	// Each entry specifies the provider specific details.
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
@@ -77,16 +75,6 @@ type ExternalProviderRef struct {
 	// If not set, the ExternalProvider auth is used.
 	// +optional
 	Auth *AuthConfig `json:"auth,omitempty"`
-}
-
-// NameReference is a reference to a Kubernetes resource by name.
-// The referenced resource must be in the same namespace.
-type NameReference struct {
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$`
-	Name string `json:"name"`
 }
 
 // ExternalModelStatus defines the observed state of ExternalModel.

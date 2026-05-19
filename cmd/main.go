@@ -27,17 +27,13 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/bbr/runner"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 
-	api_translation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation"
-	apikey_injection "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection"
-	provider_resolver "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/model-provider-resolver"
-	nemo "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/nemo"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins"
 )
 
 func main() {
 	// Register ai-gateway payload processing plugins with pluggable bbr
-	registerPlugins()
+	plugins.RegisterPlugins()
 
 	if err := runner.NewRunner().
 		WithExecutableName("ai-gateway-payload-processing").
@@ -45,12 +41,4 @@ func main() {
 		Run(ctrl.SetupSignalHandler()); err != nil {
 		os.Exit(1)
 	}
-}
-
-func registerPlugins() {
-	framework.Register(provider_resolver.ModelProviderResolverPluginType, provider_resolver.ModelProviderResolverFactory)
-	framework.Register(api_translation.APITranslationPluginType, api_translation.APITranslationFactory)
-	framework.Register(apikey_injection.APIKeyInjectionPluginType, apikey_injection.APIKeyInjectionFactory)
-	framework.Register(nemo.NemoRequestGuardPluginType, nemo.NemoRequestGuardFactory)
-	framework.Register(nemo.NemoResponseGuardPluginType, nemo.NemoResponseGuardFactory)
 }

@@ -15,12 +15,6 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.externalProviderRefs[0].targetModel
-      name: TargetModel
-      type: string
-    - jsonPath: .spec.externalProviderRefs[0].ref.name
-      name: Provider
-      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -57,7 +51,7 @@ spec:
               externalProviderRefs:
                 description: |-
                   ExternalProviderRefs maps this model to one or more external providers.
-                  Each entry specifies the provider, provider-side model name, and API format.
+                  Each entry specifies the provider specific details.
                 items:
                   description: ExternalProviderRef binds this model to a specific
                     provider with translation config.
@@ -88,8 +82,16 @@ spec:
                           required:
                           - name
                           type: object
+                        type:
+                          description: |-
+                            Type identifies the auth type for this provider.
+                            e.g. "simple" (header based), "sigv4", etc.
+                          maxLength: 63
+                          minLength: 1
+                          type: string
                       required:
                       - secretRef
+                      - type
                       type: object
                     config:
                       additionalProperties:

@@ -40,7 +40,7 @@ type ExternalProvider struct {
 // ExternalProviderSpec defines the desired state of ExternalProvider.
 type ExternalProviderSpec struct {
 	// Provider identifies the API type for this provider.
-	// e.g. "openai", "anthropic", "azure-openai", "aws-bedrock", "vertex".
+	// e.g. "openai", "anthropic", "azure", "aws-bedrock", "vertex".
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
@@ -62,15 +62,6 @@ type ExternalProviderSpec struct {
 	// e.g., Vertex AI: {"project": "my-project", "location": "us-central1"}.
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
-}
-
-// AuthConfig defines the authentication method for an ExternalProvider.
-type AuthConfig struct {
-	// SecretRef references a Kubernetes Secret containing the provider API key.
-	// The Secret must be in the same namespace as the ExternalProvider
-	// and must contain a data key "api-key" with the credential value.
-	// +kubebuilder:validation:Required
-	SecretRef NameReference `json:"secretRef"`
 }
 
 // ExternalProviderStatus defines the observed state of ExternalProvider.

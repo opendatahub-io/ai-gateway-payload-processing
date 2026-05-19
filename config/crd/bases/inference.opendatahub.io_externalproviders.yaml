@@ -71,8 +71,16 @@ spec:
                     required:
                     - name
                     type: object
+                  type:
+                    description: |-
+                      Type identifies the auth type for this provider.
+                      e.g. "simple" (header based), "sigv4", etc.
+                    maxLength: 63
+                    minLength: 1
+                    type: string
                 required:
                 - secretRef
+                - type
                 type: object
               config:
                 additionalProperties:
@@ -92,7 +100,7 @@ spec:
               provider:
                 description: |-
                   Provider identifies the API type for this provider.
-                  e.g. "openai", "anthropic", "azure-openai", "aws-bedrock", "vertex".
+                  e.g. "openai", "anthropic", "azure", "aws-bedrock", "vertex".
                 maxLength: 63
                 minLength: 1
                 type: string
