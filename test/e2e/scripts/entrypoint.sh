@@ -33,16 +33,16 @@ if [[ ! -f "$KUBECONFIG" ]]; then
 fi
 
 echo "Verifying cluster connectivity..."
-if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+if ! oc cluster-info --request-timeout=10s >/dev/null 2>&1; then
     echo "ERROR: Cannot connect to the cluster. Check KUBECONFIG."
     exit 1
 fi
 echo "Cluster connectivity OK."
 
 # Ensure ExternalModel CRD is installed (required for E2E tests).
-if ! kubectl get crd externalmodels.maas.opendatahub.io >/dev/null 2>&1; then
+if ! oc get crd externalmodels.maas.opendatahub.io >/dev/null 2>&1; then
     echo "ExternalModel CRD not found, installing..."
-    kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
+    oc apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
     echo "ExternalModel CRD installed."
 else
     echo "ExternalModel CRD already installed."

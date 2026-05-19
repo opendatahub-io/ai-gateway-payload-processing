@@ -11,7 +11,7 @@
 
 ARG GOLANG_VERSION=1.25
 
-## Stage 1: Build the test binary and download kubectl
+## Stage 1: Build the test binary and download oc
 FROM registry.access.redhat.com/ubi9/go-toolset:$GOLANG_VERSION AS builder
 ARG OCP_VERSION=4.21.15
 ARG CGO_ENABLED=1
@@ -33,11 +33,12 @@ RUN CGO_ENABLED=${CGO_ENABLED} GOEXPERIMENT=strictfipsruntime GOOS=${TARGETOS} G
     go test -c -o /e2e-tests.test ./test/e2e/ \
     -ldflags="-s -w"
 
-# Download FIPS-compliant kubectl from the OpenShift client tarball (rhel9, CGO+OpenSSL).
+# Download FIPS-compliant oc and kubectl from the OpenShift client tarball.
 RUN curl -sL "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/${OCP_VERSION}/openshift-client-linux-${TARGETARCH}-rhel9-${OCP_VERSION}.tar.gz" | \
     tar -xz -C /tmp/ oc kubectl && \
+    mv /tmp/oc /usr/local/bin/oc && \
     mv /tmp/kubectl /usr/local/bin/kubectl && \
-    chmod +x /usr/local/bin/kubectl
+    chmod +x /usr/local/bin/oc /usr/local/bin/kubectl
 
 ## Stage 2: Runtime
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:ae09ecc3d754bc1726cbda3e2599cc7839e09fe1cc547ce173cf669b645be3cc
@@ -45,6 +46,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:ae09ecc3d754bc1726cb
 WORKDIR /e2e
 
 COPY --from=builder /e2e-tests.test /e2e/e2e-tests.test
+COPY --from=builder /usr/local/bin/oc /usr/local/bin/oc
 COPY --from=builder /usr/local/bin/kubectl /usr/local/bin/kubectl
 COPY test/e2e/scripts/entrypoint.sh /e2e/entrypoint.sh
 COPY config/crd/bases/ /e2e/crds/
