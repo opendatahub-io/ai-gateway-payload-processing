@@ -57,7 +57,9 @@ func TestProviderReconciler_ValidCR(t *testing.T) {
 			Spec: inferencev1alpha1.ExternalProviderSpec{
 				Provider: "openai",
 				Endpoint: "api.openai.com",
-				Auth:     inferencev1alpha1.AuthConfig{SecretRef: inferencev1alpha1.NameReference{Name: "openai-key"}},
+				Auth: inferencev1alpha1.AuthConfig{
+					Type:      "simple",
+					SecretRef: inferencev1alpha1.NameReference{Name: "openai-key"}},
 			},
 		},
 	}}
@@ -101,8 +103,10 @@ func TestProviderReconciler_WithConfig(t *testing.T) {
 			Spec: inferencev1alpha1.ExternalProviderSpec{
 				Provider: "vertex-openai",
 				Endpoint: "us-central1-aiplatform.googleapis.com",
-				Auth:     inferencev1alpha1.AuthConfig{SecretRef: inferencev1alpha1.NameReference{Name: "vertex-key"}},
-				Config:   map[string]string{"project": "my-project", "location": "us-central1"},
+				Auth: inferencev1alpha1.AuthConfig{
+					Type:      "simple",
+					SecretRef: inferencev1alpha1.NameReference{Name: "vertex-key"}},
+				Config: map[string]string{"project": "my-project", "location": "us-central1"},
 			},
 		},
 	}}
