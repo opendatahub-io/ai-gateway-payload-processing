@@ -48,6 +48,15 @@ else
     echo "ExternalModel CRD already installed."
 fi
 
+# Ensure inference.opendatahub.io CRDs are installed.
+if ! kubectl get crd externalproviders.inference.opendatahub.io >/dev/null 2>&1; then
+    echo "Installing inference.opendatahub.io CRDs..."
+    kubectl apply -f /e2e/crds/
+    echo "inference.opendatahub.io CRDs installed."
+else
+    echo "inference.opendatahub.io CRDs already installed."
+fi
+
 # Build test arguments.
 TEST_ARGS=(
     -test.v
