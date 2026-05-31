@@ -89,12 +89,14 @@ func (p *NemoRequestGuardPlugin) WithName(name string) *NemoRequestGuardPlugin {
 
 // ProcessRequest calls NeMo Guardrails to evaluate input rails on the incoming request.
 // It extracts user-supplied text from either an OpenAI-style chat body (via "messages")
-// or an MCP JSON-RPC body (via "params.arguments"), POSTs to NeMo url, and returns an
-// errcommon.Error with Forbidden (403) if NeMo flags the content.
+// or an MCP JSON-RPC body (via "params.arguments"), POSTs to the configured NeMo
+// endpoint, and returns an errcommon.Error with Forbidden (403) if NeMo blocks the
+// content.
 //
-// NeMo always returns HTTP 200 for both allowed and blocked requests. The block/allow
-// decision is conveyed through the response body "status" field.
-// "success" means the request passed all rails; "blocked" means the request is blocked.
+// NeMo always returns HTTP 200 for both allowed and blocked requests. The decision is
+// conveyed through the response body "status" field: "passed" means the request passed
+// all rails, "modified" means content was redacted (currently passed through as-is),
+// and "blocked" means the request is blocked.
 func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *framework.CycleState, request *framework.InferenceRequest) error {
 	model, ok := request.Body["model"].(string)
 	if !ok {

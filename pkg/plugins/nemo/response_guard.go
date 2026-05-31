@@ -86,13 +86,14 @@ func (p *NemoResponseGuardPlugin) WithName(name string) *NemoResponseGuardPlugin
 }
 
 // ProcessResponse calls NeMo Guardrails to evaluate output rails on the model response.
-// It extracts assistant messages from the OpenAI-style response body, POSTs them to
-// NeMo's /v1/guardrail/checks endpoint, and returns an errcommon.Error with Forbidden (403)
-// if NeMo flags the content.
+// It extracts assistant messages from the OpenAI-style response body, POSTs them to the
+// configured NeMo endpoint, and returns an errcommon.Error with Forbidden (403) if NeMo
+// blocks the content.
 //
-// NeMo always returns HTTP 200 for both allowed and blocked responses. The block/allow
-// decision is conveyed through the response body "status" field.
-// "success" means the response passed all rails; "blocked" means it is blocked.
+// NeMo always returns HTTP 200 for both allowed and blocked responses. The decision is
+// conveyed through the response body "status" field: "passed" means the response passed
+// all rails, "modified" means content was redacted (currently passed through as-is),
+// and "blocked" means the response is blocked.
 func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, _ *framework.CycleState, response *framework.InferenceResponse) error {
 	messages, err := extractAssistantMessages(response.Body)
 	if err != nil {

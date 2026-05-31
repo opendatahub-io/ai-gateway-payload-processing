@@ -33,7 +33,10 @@ import (
 )
 
 const (
-	nemoAllowedStatus    = "success"
+	nemoStatusPassed   = "passed"
+	nemoStatusModified = "modified"
+	nemoStatusBlocked  = "blocked"
+
 	defaultTimeoutSec    = 360
 	maxNemoResponseBytes = 1 << 20 // 1 MiB
 )
@@ -117,17 +120,29 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 		return errcommon.ServiceUnavailable, fmt.Errorf("failed to decode nemo response: %w", err)
 	}
 
-	if strings.EqualFold(strings.TrimSpace(nemoResp.Status), nemoAllowedStatus) {
+	status := strings.TrimSpace(nemoResp.Status)
+
+	switch status {
+	case nemoStatusPassed:
 		logger.Info("allowed by NeMo guardrails")
 		return "", nil
-	}
 
-	railsParts := make([]string, 0, len(nemoResp.RailsStatus))
-	for key, value := range nemoResp.RailsStatus {
-		railsParts = append(railsParts, fmt.Sprintf("%s: %s", key, value.Status))
-	}
-	railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
+	case nemoStatusModified:
+		// TODO: support redaction by applying NeMo's masked content to the request/response body.
+		logger.Info("content modified by NeMo guardrails (redaction not yet applied)")
+		return "", nil
 
-	log.FromContext(ctx).Info("blocked by NeMo guardrails", "railsStatus", railsStatus)
-	return errcommon.Forbidden, fmt.Errorf("blocked by NeMo guardrails")
+	case nemoStatusBlocked:
+		railsParts := make([]string, 0, len(nemoResp.RailsStatus))
+		for key, value := range nemoResp.RailsStatus {
+			railsParts = append(railsParts, fmt.Sprintf("%s: %s", key, value.Status))
+		}
+		railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
+		log.FromContext(ctx).Info("blocked by NeMo guardrails", "railsStatus", railsStatus)
+		return errcommon.Forbidden, fmt.Errorf("blocked by NeMo guardrails")
+
+	default:
+		logger.Error(nil, "unknown NeMo guardrails status (fail-closed)", "status", nemoResp.Status)
+		return errcommon.Internal, fmt.Errorf("unknown NeMo guardrails status %q", nemoResp.Status)
+	}
 }
