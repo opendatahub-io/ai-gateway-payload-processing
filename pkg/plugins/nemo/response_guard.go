@@ -29,6 +29,8 @@ import (
 const (
 	// NemoResponseGuardPluginType is the plugin type identifier.
 	NemoResponseGuardPluginType = "nemo-response-guard"
+
+	phaseResponse = "response"
 )
 
 // compile-time type validation
@@ -92,8 +94,9 @@ func (p *NemoResponseGuardPlugin) WithName(name string) *NemoResponseGuardPlugin
 //
 // NeMo always returns HTTP 200 for both allowed and blocked responses. The decision is
 // conveyed through the response body "status" field: "passed" means the response passed
-// all rails, "modified" means content was redacted (currently passed through as-is),
-// and "blocked" means the response is blocked.
+// all rails, "modified" means content was redacted and the plugin replaces all choice
+// contents with the redacted versions from NeMo, and "blocked" means the response is
+// blocked.
 func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, _ *plugin.CycleState, response *requesthandling.InferenceResponse) error {
 	messages, err := extractAssistantMessages(response.Body)
 	if err != nil {
@@ -114,12 +117,40 @@ func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, _ *plugin
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("marshal request: %v", marshalErr)}
 	}
 
-	code, callErr := p.callNemoGuard(ctx, payload)
+	result, callErr := p.callNemoGuard(ctx, payload, phaseResponse)
 	if callErr != nil {
-		if code == errcommon.Forbidden {
-			return errcommon.Error{Code: code, Msg: "response blocked by NeMo guardrails"}
+		return callErr
+	}
+
+	if result.Action == nemoStatusModified {
+		if err := applyRedactedChoices(response.Body, result.ModifiedTexts); err != nil {
+			return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to apply redacted content: %v", err)}
 		}
-		return errcommon.Error{Code: code, Msg: callErr.Error()}
+		response.SetBody(response.Body)
+	}
+	return nil
+}
+
+// applyRedactedChoices replaces the content of each choice in the response body
+// with the corresponding redacted text from NeMo.
+func applyRedactedChoices(body map[string]any, redactedTexts []string) error {
+	choices, ok := body["choices"].([]any)
+	if !ok {
+		return fmt.Errorf("choices field is not an array")
+	}
+	for i, redacted := range redactedTexts {
+		choice, ok := choices[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		msg, ok := choice["message"].(map[string]any)
+		if !ok {
+			msg, ok = choice["delta"].(map[string]any)
+			if !ok {
+				continue
+			}
+		}
+		msg["content"] = redacted
 	}
 	return nil
 }

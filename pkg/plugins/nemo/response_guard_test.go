@@ -123,7 +123,17 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "allow: NeMo returns status modified — passed through (redaction not yet applied)",
+			name: "redact: NeMo returns modified with redacted content",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(nemoModifiedJSON("The user's email is <EMAIL_ADDRESS>")); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:    validResponseBody("The user's email is test@example.com"),
+			wantErr: false,
+		},
+		{
+			name: "fail-closed: NeMo returns modified but no redacted content in guardrails_data",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewEncoder(w).Encode(map[string]any{
 					"status": "modified",
@@ -134,8 +144,10 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 				}
 			},
-			body:    validResponseBody("The user's email is test@example.com"),
-			wantErr: false,
+			body:            validResponseBody("The user's email is test@example.com"),
+			wantErr:         true,
+			wantErrContains: "no redacted content found",
+			wantErrCode:     errcommon.Internal,
 		},
 		{
 			name: "fail-closed: unknown status — status success is no longer recognized",
@@ -567,6 +579,121 @@ func TestExtractAssistantMessages(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// --- Redaction ---
+
+func TestNemoResponseGuardRedaction(t *testing.T) {
+	tests := []struct {
+		name            string
+		nemoResp        map[string]any
+		body            map[string]any
+		wantErr         bool
+		wantErrContains string
+		wantContents    []string // expected content for each choice after redaction
+	}{
+		{
+			name:     "redacted content replaces assistant message",
+			nemoResp: nemoModifiedJSON("The user's email is <EMAIL_ADDRESS>"),
+			body: map[string]any{
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{"role": "assistant", "content": "The user's email is test@example.com"},
+					},
+				},
+			},
+			wantContents: []string{"The user's email is <EMAIL_ADDRESS>"},
+		},
+		{
+			name:     "redacted content replaces all choices in multi-choice response",
+			nemoResp: nemoModifiedJSON("First choice", "Name is <PERSON>"),
+			body: map[string]any{
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{"role": "assistant", "content": "First choice"},
+					},
+					map[string]any{
+						"message": map[string]any{"role": "assistant", "content": "Name is Rob"},
+					},
+				},
+			},
+			wantContents: []string{"First choice", "Name is <PERSON>"},
+		},
+		{
+			name:     "redacted content replaces streaming delta",
+			nemoResp: nemoModifiedJSON("SSN is <SSN>"),
+			body: map[string]any{
+				"choices": []any{
+					map[string]any{
+						"delta": map[string]any{"role": "assistant", "content": "SSN is 123-45-6789"},
+					},
+				},
+			},
+			wantContents: []string{"SSN is <SSN>"},
+		},
+		{
+			name:     "model field preserved after redaction",
+			nemoResp: nemoModifiedJSON("redacted"),
+			body: map[string]any{
+				"model": "gpt-4",
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{"role": "assistant", "content": "original"},
+					},
+				},
+			},
+			wantContents: []string{"redacted"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(tt.nemoResp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			}))
+			defer srv.Close()
+
+			p, err := NewNemoResponseGuardPlugin(srv.URL, 30)
+			require.NoError(t, err)
+
+			resp := requesthandling.NewInferenceResponse()
+			for k, v := range tt.body {
+				resp.Body[k] = v
+			}
+
+			err = p.ProcessResponse(context.Background(), plugin.NewCycleState(), resp)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrContains != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+			require.NoError(t, err)
+
+			if len(tt.wantContents) > 0 {
+				choices := resp.Body["choices"].([]any)
+				require.Len(t, choices, len(tt.wantContents))
+				for i, want := range tt.wantContents {
+					choice := choices[i].(map[string]any)
+					var content string
+					if msg, ok := choice["message"].(map[string]any); ok {
+						content = msg["content"].(string)
+					} else if delta, ok := choice["delta"].(map[string]any); ok {
+						content = delta["content"].(string)
+					}
+					assert.Equal(t, want, content, "choice[%d] content mismatch", i)
+				}
+			}
+
+			if model, ok := tt.body["model"]; ok {
+				assert.Equal(t, model, resp.Body["model"])
+			}
 		})
 	}
 }

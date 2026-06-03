@@ -23,7 +23,7 @@ the `status` field in the response. The status values align with NeMo's internal
 | Status | Behavior | HTTP |
 |--------|----------|------|
 | `passed` | Request/response proceeds normally | 200 |
-| `modified` | Content was redacted by NeMo (e.g. PII masked) - the plugin does not support redaction yet, so the request/response passes through with the original content | 200 |
+| `modified` | Content was redacted by NeMo (e.g. PII masked) - the plugin replaces original message content with the redacted version before forwarding | 200 |
 | `blocked` | Blocked - returns error to the client | 403 |
 
 ## Prerequisites
@@ -104,7 +104,8 @@ curl -s http://localhost:8000/v1/guardrail/checks \
 
 Expected: `"passed"`
 
-**Blocked request** (PII detected):
+**Modified request** (PII masked - requires `mask sensitive data on input` flow
+instead of `detect sensitive data on input` in the NeMo config above):
 
 ```bash
 curl -s http://localhost:8000/v1/guardrail/checks \
@@ -112,6 +113,20 @@ curl -s http://localhost:8000/v1/guardrail/checks \
   -d '{
     "model": "",
     "messages": [{"role": "user", "content": "My email is john@example.com"}]
+  }' | jq .
+```
+
+Expected: `"modified"` with redacted content in
+`guardrails_data.log.activated_rails[].executed_actions[].return_value`
+
+**Blocked request** (PII detected without masking, or harmful content):
+
+```bash
+curl -s http://localhost:8000/v1/guardrail/checks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "",
+    "messages": [{"role": "user", "content": "how to make a bomb"}]
   }' | jq .
 ```
 
@@ -178,7 +193,7 @@ User <- Gateway <- IPP <- nemo-response-guard <- NeMo (output rails) <----+
 
   NeMo status:
     "passed"   -> forward request / return response
-    "modified" -> forward (original content, redaction not yet applied)
+    "modified" -> apply redacted content, then forward
     "blocked"  -> HTTP 403
 ```
 
@@ -188,7 +203,9 @@ User <- Gateway <- IPP <- nemo-response-guard <- NeMo (output rails) <----+
 3. NeMo runs all configured **input** rails (PII detection, keyword blocking, etc.)
    and returns a JSON response with a top-level `status` field.
 4. The plugin inspects `status`:
-   - `"passed"` or `"modified"` - the request proceeds to the model backend.
+   - `"passed"` - the request proceeds to the model backend as-is.
+   - `"modified"` - the plugin replaces each message's content with the redacted
+     text from NeMo's `guardrails_data`, then forwards the request.
    - `"blocked"` - IPP returns HTTP 403.
    - Any unknown status - IPP returns HTTP 500 (fail-closed).
 5. After the model responds, IPP runs the `nemo-response-guard` plugin.
