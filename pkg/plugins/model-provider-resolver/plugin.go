@@ -22,16 +22,19 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -39,10 +42,9 @@ const (
 	ModelProviderResolverPluginType = "model-provider-resolver"
 )
 
-// compile-time type validation
 var _ framework.RequestProcessor = &ModelProviderResolverPlugin{}
 
-// ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin
+// ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin.
 func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framework.Handle) (framework.BBRPlugin, error) {
 	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
 	if err != nil {
@@ -52,24 +54,52 @@ func ModelProviderResolverFactory(name string, _ json.RawMessage, handle framewo
 	return plugin.WithName(name), nil
 }
 
-func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ModelProviderResolverPlugin, error) {
+// NewModelProviderResolver registers store reconcilers for inference.opendatahub.io
+// ExternalProvider and ExternalModel CRDs.
+func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClient client.Client) (*ModelProviderResolverPlugin, error) {
+	utilruntime.Must(inferencev1alpha1.AddToScheme(k8sClient.Scheme()))
 	store := newInfoStore()
-	reconciler := &externalModelReconciler{
-		Reader: clientReader,
-		store:  store,
+
+	// Watch ExternalProvider CRDs (inference.opendatahub.io) using typed client
+	providerReconciler := &externalProviderReconciler{Reader: k8sClient, store: store}
+	if err := reconcilerBuilder().For(&inferencev1alpha1.ExternalProvider{}).Complete(providerReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalProvider reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
-	// Watch ExternalModel CRDs directly (no MaaS dependency)
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-
-	if err := reconcilerBuilder().For(obj).Complete(reconciler); err != nil {
+	// Watch ExternalModel CRDs (inference.opendatahub.io) using typed client.
+	// Cross-watch ExternalProviders so credential/endpoint changes propagate.
+	modelReconciler := &externalModelReconciler{Reader: k8sClient, store: store}
+	mapProviderToModels := func(ctx context.Context, obj client.Object) []reconcile.Request {
+		provider := obj.(*inferencev1alpha1.ExternalProvider)
+		modelList := &inferencev1alpha1.ExternalModelList{}
+		if err := k8sClient.List(ctx, modelList, client.InNamespace(provider.Namespace)); err != nil {
+			log.FromContext(ctx).Error(err, "failed to list ExternalModels for provider mapping",
+				"provider", provider.Name, "namespace", provider.Namespace)
+			return nil
+		}
+		var requests []reconcile.Request
+		for i := range modelList.Items {
+			for _, ref := range modelList.Items[i].Spec.ExternalProviderRefs {
+				if ref.Ref.Name == provider.Name {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{Name: modelList.Items[i].Name, Namespace: modelList.Items[i].Namespace},
+					})
+				}
+			}
+		}
+		return requests
+	}
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalModel{}).
+		Named("inference-externalmodel").
+		Watches(&inferencev1alpha1.ExternalProvider{}, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
+		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{
-		typedName:      plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
-		store: store,
+		typedName: plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
+		store:     store,
 	}, nil
 }
 
@@ -77,14 +107,12 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, clientR
 // It writes the model, provider and credential reference to CycleState for downstream plugins
 // (api-translation, api-key-injection).
 type ModelProviderResolverPlugin struct {
-	typedName      plugin.TypedName
-	store *infoStore
+	typedName plugin.TypedName
+	store     *infoStore
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
-func (p *ModelProviderResolverPlugin) TypedName() plugin.TypedName {
-	return p.typedName
-}
+func (p *ModelProviderResolverPlugin) TypedName() plugin.TypedName { return p.typedName }
 
 // WithName sets the name of the plugin instance.
 func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolverPlugin {
@@ -93,14 +121,14 @@ func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolv
 }
 
 // ProcessRequest reads the model name from the request body, resolves the provider
-// from the modelInfoStore (populated by ExternalModel reconciler), and writes model, provider
+// from the store (populated by ExternalModel reconciler), and writes model, provider
 // and credential reference info to CycleState.
 func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
 	model, ok := request.Body["model"].(string)
 	if !ok || model == "" {
-		return nil // not an inference request (e.g. API key management, model listing)
+		return nil
 	}
 
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("received incoming request", "path", request.Headers[":path"])
@@ -116,26 +144,27 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("exported namespaced name from path", "key", modelKey)
 
 	externalModelInfo, found := p.store.getModel(modelKey)
-	if !found { // info is stored only for external models
-		return nil // this is not considered an error, we just need to skip if it's internal model
+	if !found {
+		return nil
 	}
 
-	if !strings.HasSuffix(relativePath, "chat/completions") { // no support for other input types
+	if !strings.HasSuffix(relativePath, "chat/completions") {
 		logger.Error(nil, "unsupported route for external model", "model", modelKey.String(), "path", relativePath)
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "only /chat/completions input type is supported"}
 	}
 
-	// if there's a mismatch it's an error, we don't want to proceed
 	if externalModelInfo.targetModel != model {
 		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", externalModelInfo.targetModel)
 		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
 	}
 
-	// info of external model written to cycle state for next plugins
 	cycleState.Write(state.ProviderKey, externalModelInfo.provider)
 	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
 	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
 	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
+	if len(externalModelInfo.config) > 0 {
+		cycleState.Write(state.ModelConfigKey, externalModelInfo.config)
+	}
 
 	logger.Info("external model resolved", "model", modelKey.String(), "provider", externalModelInfo.provider)
 	return nil
@@ -143,10 +172,8 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 func sanitizePath(relativeUrlPath string) string {
 	relativeUrlPath = strings.TrimSpace(relativeUrlPath)
-
 	if index := strings.IndexByte(relativeUrlPath, '?'); index >= 0 {
-		relativeUrlPath = relativeUrlPath[:index] // remove query params
+		relativeUrlPath = relativeUrlPath[:index]
 	}
-
 	return strings.Trim(relativeUrlPath, "/")
 }

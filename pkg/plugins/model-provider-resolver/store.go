@@ -37,6 +37,7 @@ type externalModelInfo struct {
 	targetModel     string
 	secretName      string
 	secretNamespace string
+	config          map[string]string
 }
 
 // infoStore is a thread-safe in-memory store for both provider and model info.

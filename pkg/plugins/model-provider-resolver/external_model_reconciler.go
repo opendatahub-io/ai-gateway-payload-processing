@@ -19,64 +19,97 @@ package model_provider_resolver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+
+	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 )
 
-// externalModelGVK is the GroupVersionKind for ExternalModel CRD.
-var externalModelGVK = schema.GroupVersionKind{
-	Group:   "maas.opendatahub.io",
-	Version: "v1alpha1",
-	Kind:    "ExternalModel",
-}
+const providerRequeueDelay = 5 * time.Second
 
-// externalModelReconciler watches ExternalModel CRDs (via unstructured client)
-// and updates the model store with provider and credential information.
+// externalModelReconciler watches inference.opendatahub.io ExternalModel CRDs
+// and resolves provider info from the provider store.
 type externalModelReconciler struct {
 	client.Reader
 	store *infoStore
 }
 
-// Reconcile handles create/update/delete events for ExternalModel resources.
-// The ExternalModel CR name is used as the model key in the store, matching
-// the model name in inference request bodies.
 func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 	logger.Info("reconciling ExternalModel", "name", req.Name, "namespace", req.Namespace)
 
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(externalModelGVK)
-
-	err := r.Get(ctx, req.NamespacedName, obj)
+	model := &inferencev1alpha1.ExternalModel{}
+	err := r.Get(ctx, req.NamespacedName, model)
 	if err != nil && !errors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("unable to get ExternalModel: %w", err)
 	}
 
-	if errors.IsNotFound(err) || !obj.GetDeletionTimestamp().IsZero() {
+	if errors.IsNotFound(err) || !model.GetDeletionTimestamp().IsZero() {
 		r.store.deleteModel(req.NamespacedName)
 		logger.Info("ExternalModel removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
 
-	provider, _, _ := unstructured.NestedString(obj.Object, "spec", "provider")
-	targetModel, _, _ := unstructured.NestedString(obj.Object, "spec", "targetModel")
-	credsName, _, _ := unstructured.NestedString(obj.Object, "spec", "credentialRef", "name")
-
-	// targetModel is the model that will be used in the request body when getting inference requests.
-	info := &externalModelInfo{
-		provider:        provider,
-		targetModel:     targetModel,
-		secretName:      credsName,
-		secretNamespace: req.Namespace, // secret namespace is always the namespace of the ExternalModel
+	// Use the first ref whose provider is available in the store.
+	for _, ref := range model.Spec.ExternalProviderRefs {
+		info, found := r.resolveRef(req.Namespace, ref)
+		if !found {
+			continue
+		}
+		r.store.addOrUpdateModel(req.NamespacedName, info)
+		logger.Info("updated model store", "provider", info.provider, "targetModel", info.targetModel)
+		return ctrl.Result{}, nil
 	}
-	r.store.addOrUpdateModel(req.NamespacedName, info)
 
-	logger.Info("updated model store", "provider", provider, "targetModel", targetModel)
-	return ctrl.Result{}, nil
+	logger.Info("no ExternalProvider available for any ref, requeuing")
+	return ctrl.Result{RequeueAfter: providerRequeueDelay}, nil
 }
+
+// resolveRef resolves a single ExternalProviderRef to model info.
+// Returns (nil, false) if the provider is not yet available in the store.
+func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1alpha1.ExternalProviderRef) (*externalModelInfo, bool) {
+	providerKey := types.NamespacedName{Namespace: namespace, Name: ref.Ref.Name}
+	providerInfo, found := r.store.getProvider(providerKey)
+	if !found {
+		return nil, false
+	}
+
+	config := providerInfo.config
+	if len(ref.Config) > 0 {
+		config = mergeConfig(providerInfo.config, ref.Config)
+	}
+
+	secretName := providerInfo.secretName
+	secretNamespace := providerInfo.secretNamespace
+	if ref.Auth != nil {
+		secretName = ref.Auth.SecretRef.Name
+		secretNamespace = namespace
+	}
+
+	return &externalModelInfo{
+		provider:        providerInfo.provider,
+		targetModel:     ref.TargetModel,
+		secretName:      secretName,
+		secretNamespace: secretNamespace,
+		config:          config,
+	}, true
+}
+
+// mergeConfig copies provider config and applies model overrides.
+func mergeConfig(providerConfig, modelConfig map[string]string) map[string]string {
+	merged := make(map[string]string, len(providerConfig))
+	for k, v := range providerConfig {
+		merged[k] = v
+	}
+	for k, v := range modelConfig {
+		merged[k] = v
+	}
+	return merged
+}
+
