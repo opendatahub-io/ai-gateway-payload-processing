@@ -56,20 +56,36 @@ stringData:
   api-key: %s
 `, p.Name, nsName, p.SimulatorKey))
 
-	// ExternalModel CR
+	// ExternalProvider CR
 	kubectlApplyLiteral(fmt.Sprintf(`
-apiVersion: maas.opendatahub.io/v1alpha1
-kind: ExternalModel
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
 metadata:
   name: %s
   namespace: %s
 spec:
   provider: %s
-  targetModel: %s
   endpoint: %s
-  credentialRef:
-    name: %s
-`, p.Name, nsName, p.Provider, p.Name, simulatorEP, p.Name))
+  auth:
+    type: simple
+    secretRef:
+      name: %s
+`, p.Name, nsName, p.Provider, simulatorEP, p.Name))
+
+	// ExternalModel CR
+	kubectlApplyLiteral(fmt.Sprintf(`
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  externalProviderRefs:
+    - ref:
+        name: %s
+      targetModel: %s
+      apiFormat: %s
+`, p.Name, nsName, p.Name, p.Name, p.Provider))
 
 	// ExternalName Service pointing to simulator
 	kubectlApplyLiteral(fmt.Sprintf(`
@@ -124,7 +140,8 @@ spec:
 func deleteProviderResources(p Provider) {
 	kubectlDeleteResource("httproute", p.Name, nsName)
 	kubectlDeleteResource("service", p.Name, nsName)
-	kubectlDeleteResource("externalmodel", p.Name, nsName)
+	kubectlDeleteResource("externalmodels.inference.opendatahub.io", p.Name, nsName)
+	kubectlDeleteResource("externalproviders.inference.opendatahub.io", p.Name, nsName)
 	kubectlDeleteResource("secret", p.Name, nsName)
 }
 
