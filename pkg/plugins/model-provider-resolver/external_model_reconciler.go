@@ -92,6 +92,7 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1al
 	return &externalModelInfo{
 		provider:        providerInfo.provider,
 		targetModel:     ref.TargetModel,
+		apiFormat:       ref.APIFormat,
 		secretName:      secretName,
 		secretNamespace: secretNamespace,
 		config:          config,

@@ -35,6 +35,7 @@ type providerInfo struct {
 type externalModelInfo struct {
 	provider        string
 	targetModel     string
+	apiFormat       string
 	secretName      string
 	secretNamespace string
 	config          map[string]string

@@ -50,12 +50,16 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
+	config := provider.Spec.Config
+	if config == nil {
+		config = map[string]string{}
+	}
 	r.store.addOrUpdateProvider(req.NamespacedName, &providerInfo{
 		provider:        provider.Spec.Provider,
 		endpoint:        provider.Spec.Endpoint,
 		secretName:      provider.Spec.Auth.SecretRef.Name,
 		secretNamespace: req.Namespace,
-		config:          provider.Spec.Config,
+		config:          config,
 	})
 
 	logger.Info("updated provider store", "provider", provider.Spec.Provider, "endpoint", provider.Spec.Endpoint)

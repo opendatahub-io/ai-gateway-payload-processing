@@ -162,11 +162,10 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	// write resolved info to CycleState for downstream plugins (api-translation, apikey-injection)
 	cycleState.Write(state.ProviderKey, externalModelInfo.provider)
 	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
+	cycleState.Write(state.APIFormatKey, externalModelInfo.apiFormat)
 	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
 	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
-	if len(externalModelInfo.config) > 0 {
-		cycleState.Write(state.ModelConfigKey, externalModelInfo.config)
-	}
+	cycleState.Write(state.ModelConfigKey, externalModelInfo.config)
 
 	logger.Info("external model resolved", "model", modelKey.String(), "provider", externalModelInfo.provider)
 	return nil
