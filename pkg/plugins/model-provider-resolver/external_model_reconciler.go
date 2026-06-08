@@ -80,10 +80,7 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1al
 		return nil, false
 	}
 
-	config := providerInfo.config
-	if len(ref.Config) > 0 {
-		config = mergeConfig(providerInfo.config, ref.Config)
-	}
+	config := mergeConfig(providerInfo.config, ref.Config)
 
 	secretName := providerInfo.secretName
 	secretNamespace := providerInfo.secretNamespace
