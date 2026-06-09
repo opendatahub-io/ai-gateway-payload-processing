@@ -56,24 +56,30 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// Use the first ref whose provider is available in the store.
+	// Resolve all refs whose providers are available in the store.
+	var resolved []resolvedProviderRef
 	for _, ref := range model.Spec.ExternalProviderRefs {
-		info, found := r.resolveRef(req.Namespace, ref)
+		rr, found := r.resolveRef(req.Namespace, ref)
 		if !found {
+			logger.Info("ExternalProvider not yet available, skipping ref", "provider", ref.Ref.Name)
 			continue
 		}
-		r.store.addOrUpdateModel(req.NamespacedName, info)
-		logger.Info("updated model store", "provider", info.provider, "targetModel", info.targetModel)
-		return ctrl.Result{}, nil
+		resolved = append(resolved, *rr)
 	}
 
-	logger.Info("no ExternalProvider available for any ref, requeuing")
-	return ctrl.Result{RequeueAfter: providerRequeueDelay}, nil
+	if len(resolved) == 0 {
+		logger.Info("no ExternalProvider available for any ref, requeuing")
+		return ctrl.Result{RequeueAfter: providerRequeueDelay}, nil
+	}
+
+	r.store.addOrUpdateModel(req.NamespacedName, &externalModelInfo{refs: resolved})
+	logger.Info("updated model store", "resolvedRefs", len(resolved))
+	return ctrl.Result{}, nil
 }
 
-// resolveRef resolves a single ExternalProviderRef to model info.
+// resolveRef resolves a single ExternalProviderRef to provider info.
 // Returns (nil, false) if the provider is not yet available in the store.
-func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1alpha1.ExternalProviderRef) (*externalModelInfo, bool) {
+func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1alpha1.ExternalProviderRef) (*resolvedProviderRef, bool) {
 	providerKey := types.NamespacedName{Namespace: namespace, Name: ref.Ref.Name}
 	providerInfo, found := r.store.getProvider(providerKey)
 	if !found {
@@ -89,13 +95,19 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1al
 		secretNamespace = namespace
 	}
 
-	return &externalModelInfo{
+	weight := 1
+	if ref.Weight != nil {
+		weight = *ref.Weight
+	}
+
+	return &resolvedProviderRef{
 		provider:        providerInfo.provider,
 		targetModel:     ref.TargetModel,
 		apiFormat:       ref.APIFormat,
 		secretName:      secretName,
 		secretNamespace: secretNamespace,
 		config:          config,
+		weight:          weight,
 	}, true
 }
 

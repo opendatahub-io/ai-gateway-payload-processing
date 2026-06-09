@@ -31,14 +31,21 @@ type providerInfo struct {
 	config          map[string]string
 }
 
-// externalModelInfo holds the provider and secret name/namespace for an external model.
-type externalModelInfo struct {
+// resolvedProviderRef holds resolved provider info for a single ExternalProviderRef.
+type resolvedProviderRef struct {
 	provider        string
 	targetModel     string
 	apiFormat       string
 	secretName      string
 	secretNamespace string
 	config          map[string]string
+	weight          int
+}
+
+// externalModelInfo holds all resolved provider refs for an external model.
+// The plugin selects a provider based on weights at request time.
+type externalModelInfo struct {
+	refs []resolvedProviderRef
 }
 
 // infoStore is a thread-safe in-memory store for both provider and model info.

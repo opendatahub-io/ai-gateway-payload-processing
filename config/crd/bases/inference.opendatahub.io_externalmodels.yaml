@@ -119,6 +119,15 @@ spec:
                       maxLength: 253
                       minLength: 1
                       type: string
+                    weight:
+                      default: 1
+                      description: |-
+                        Weight determines the relative traffic proportion for this provider binding.
+                        Higher weight means more traffic. Used for weighted random selection across
+                        multiple provider refs. Defaults to 1 if not set.
+                      maximum: 100
+                      minimum: 1
+                      type: integer
                   required:
                   - apiFormat
                   - ref

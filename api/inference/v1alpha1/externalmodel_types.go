@@ -75,6 +75,15 @@ type ExternalProviderRef struct {
 	// If not set, the ExternalProvider auth is used.
 	// +optional
 	Auth *AuthConfig `json:"auth,omitempty"`
+
+	// Weight determines the relative traffic proportion for this provider binding.
+	// Higher weight means more traffic. Used for weighted random selection across
+	// multiple provider refs. Defaults to 1 if not set.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:default=1
+	Weight *int `json:"weight,omitempty"`
 }
 
 // ExternalModelStatus defines the observed state of ExternalModel.

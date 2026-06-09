@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -143,7 +144,7 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	modelKey := types.NamespacedName{Namespace: segments[0], Name: segments[1]}
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("exported namespaced name from path", "key", modelKey)
 
-	externalModelInfo, found := p.store.getModel(modelKey)
+	modelInfo, found := p.store.getModel(modelKey)
 	if !found {
 		return nil // not an external model — pass through for internal models
 	}
@@ -153,22 +154,45 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "only /chat/completions input type is supported"}
 	}
 
-	// model in request body must match the ExternalModel's targetModel
-	if externalModelInfo.targetModel != model {
-		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", externalModelInfo.targetModel)
+	// select a provider ref based on weights
+	ref := selectByWeight(modelInfo.refs)
+
+	// model in request body must match the selected ref's targetModel
+	if ref.targetModel != model {
+		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", ref.targetModel)
 		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
 	}
 
 	// write resolved info to CycleState for downstream plugins (api-translation, apikey-injection)
-	cycleState.Write(state.ProviderKey, externalModelInfo.provider)
-	cycleState.Write(state.ModelKey, externalModelInfo.targetModel)
-	cycleState.Write(state.APIFormatKey, externalModelInfo.apiFormat)
-	cycleState.Write(state.CredsRefName, externalModelInfo.secretName)
-	cycleState.Write(state.CredsRefNamespace, externalModelInfo.secretNamespace)
-	cycleState.Write(state.ModelConfigKey, externalModelInfo.config)
+	cycleState.Write(state.ProviderKey, ref.provider)
+	cycleState.Write(state.ModelKey, ref.targetModel)
+	cycleState.Write(state.APIFormatKey, ref.apiFormat)
+	cycleState.Write(state.CredsRefName, ref.secretName)
+	cycleState.Write(state.CredsRefNamespace, ref.secretNamespace)
+	cycleState.Write(state.ModelConfigKey, ref.config)
 
-	logger.Info("external model resolved", "model", modelKey.String(), "provider", externalModelInfo.provider)
+	logger.Info("external model resolved", "model", modelKey.String(), "provider", ref.provider)
 	return nil
+}
+
+// selectByWeight picks a provider ref using weighted random selection.
+// With a single ref, returns it directly (no randomness).
+func selectByWeight(refs []resolvedProviderRef) *resolvedProviderRef {
+	if len(refs) == 1 {
+		return &refs[0]
+	}
+	totalWeight := 0
+	for i := range refs {
+		totalWeight += refs[i].weight
+	}
+	r := rand.IntN(totalWeight)
+	for i := range refs {
+		r -= refs[i].weight
+		if r < 0 {
+			return &refs[i]
+		}
+	}
+	return &refs[len(refs)-1]
 }
 
 func sanitizePath(relativeUrlPath string) string {

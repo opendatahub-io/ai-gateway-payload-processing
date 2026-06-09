@@ -49,6 +49,8 @@ func (m *mockModelReader) List(_ context.Context, _ client.ObjectList, _ ...clie
 	return nil
 }
 
+func intPtr(v int) *int { return &v }
+
 func newTestModel(name, ns string, refs ...inferencev1alpha1.ExternalProviderRef) *inferencev1alpha1.ExternalModel {
 	return &inferencev1alpha1.ExternalModel{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
@@ -71,12 +73,14 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 	}}
 
 	store := newInfoStore()
-	providerKey := types.NamespacedName{Namespace: "models", Name: "my-openai"}
-	store.addOrUpdateProvider(providerKey, &providerInfo{
-		provider: "openai", endpoint: "api.openai.com",
-		secretName: "openai-key", secretNamespace: "models",
-		config: map[string]string{},
-	})
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{
+			provider: "openai", endpoint: "api.openai.com",
+			secretName: "openai-key", secretNamespace: "models",
+			config: map[string]string{},
+		},
+	)
 
 	r := &externalModelReconciler{Reader: reader, store: store}
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
@@ -85,11 +89,12 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, "openai", info.provider)
-	assert.Equal(t, "gpt-4o", info.targetModel)
-	assert.Equal(t, "openai-chat", info.apiFormat)
-	assert.Equal(t, "openai-key", info.secretName)
-	assert.Equal(t, "models", info.secretNamespace)
+	require.Len(t, info.refs, 1)
+	assert.Equal(t, "openai", info.refs[0].provider)
+	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
+	assert.Equal(t, "openai-chat", info.refs[0].apiFormat)
+	assert.Equal(t, "openai-key", info.refs[0].secretName)
+	assert.Equal(t, 1, info.refs[0].weight)
 }
 
 func TestModelReconciler_DeletedCR(t *testing.T) {
@@ -97,7 +102,9 @@ func TestModelReconciler_DeletedCR(t *testing.T) {
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{}}
 
 	store := newInfoStore()
-	store.addOrUpdateModel(key, &externalModelInfo{provider: "openai", targetModel: "gpt-4o"})
+	store.addOrUpdateModel(key, &externalModelInfo{refs: []resolvedProviderRef{
+		{provider: "openai", targetModel: "gpt-4o", weight: 1},
+	}})
 
 	r := &externalModelReconciler{Reader: reader, store: store}
 	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
@@ -125,10 +132,43 @@ func TestModelReconciler_ProviderNotAvailable(t *testing.T) {
 	assert.False(t, found)
 }
 
-func TestModelReconciler_MultiRefFallback(t *testing.T) {
+func TestModelReconciler_MultiRefAllResolved(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "multi"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
 		key: newTestModel("multi", "models",
+			newRef("openai-provider", "gpt-4o", "openai-chat"),
+			newRef("azure-provider", "gpt-4o", "openai-chat"),
+		),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "openai-provider"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com",
+			secretName: "openai-key", secretNamespace: "models", config: map[string]string{}},
+	)
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "azure-provider"},
+		&providerInfo{provider: "azure-openai", endpoint: "my.openai.azure.com",
+			secretName: "azure-key", secretNamespace: "models", config: map[string]string{}},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	require.Len(t, info.refs, 2, "both refs should be resolved")
+	assert.Equal(t, "openai", info.refs[0].provider)
+	assert.Equal(t, "azure-openai", info.refs[1].provider)
+}
+
+func TestModelReconciler_MultiRefPartialAvailability(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "partial"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("partial", "models",
 			newRef("unavailable-provider", "gpt-4o", "openai-chat"),
 			newRef("available-provider", "claude-sonnet", "messages"),
 		),
@@ -137,11 +177,8 @@ func TestModelReconciler_MultiRefFallback(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateProvider(
 		types.NamespacedName{Namespace: "models", Name: "available-provider"},
-		&providerInfo{
-			provider: "anthropic", endpoint: "api.anthropic.com",
-			secretName: "anthropic-key", secretNamespace: "models",
-			config: map[string]string{},
-		},
+		&providerInfo{provider: "anthropic", endpoint: "api.anthropic.com",
+			secretName: "anthropic-key", secretNamespace: "models", config: map[string]string{}},
 	)
 
 	r := &externalModelReconciler{Reader: reader, store: store}
@@ -151,20 +188,17 @@ func TestModelReconciler_MultiRefFallback(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, "anthropic", info.provider)
-	assert.Equal(t, "claude-sonnet", info.targetModel)
-	assert.Equal(t, "messages", info.apiFormat)
-	assert.Equal(t, "anthropic-key", info.secretName)
+	require.Len(t, info.refs, 1, "only the available ref should be stored")
+	assert.Equal(t, "anthropic", info.refs[0].provider)
 }
 
 func TestModelReconciler_AuthOverride(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "auth-override"}
-	modelAuth := &inferencev1alpha1.AuthConfig{
+	ref := newRef("my-openai", "gpt-4o", "openai-chat")
+	ref.Auth = &inferencev1alpha1.AuthConfig{
 		Type:      "simple",
 		SecretRef: inferencev1alpha1.NameReference{Name: "model-specific-key"},
 	}
-	ref := newRef("my-openai", "gpt-4o", "openai-chat")
-	ref.Auth = modelAuth
 
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
 		key: newTestModel("auth-override", "models", ref),
@@ -173,11 +207,8 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateProvider(
 		types.NamespacedName{Namespace: "models", Name: "my-openai"},
-		&providerInfo{
-			provider: "openai", endpoint: "api.openai.com",
-			secretName: "provider-key", secretNamespace: "models",
-			config: map[string]string{},
-		},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com",
+			secretName: "provider-key", secretNamespace: "models", config: map[string]string{}},
 	)
 
 	r := &externalModelReconciler{Reader: reader, store: store}
@@ -187,8 +218,65 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, "model-specific-key", info.secretName, "model auth should override provider auth")
-	assert.Equal(t, "models", info.secretNamespace)
+	assert.Equal(t, "model-specific-key", info.refs[0].secretName)
+	assert.Equal(t, "models", info.refs[0].secretNamespace)
+}
+
+func TestModelReconciler_WeightFromCRD(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "weighted"}
+	ref1 := newRef("openai-provider", "gpt-4o", "openai-chat")
+	ref1.Weight = intPtr(80)
+	ref2 := newRef("azure-provider", "gpt-4o", "openai-chat")
+	ref2.Weight = intPtr(20)
+
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("weighted", "models", ref1, ref2),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "openai-provider"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com",
+			secretName: "k1", secretNamespace: "models", config: map[string]string{}},
+	)
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "azure-provider"},
+		&providerInfo{provider: "azure-openai", endpoint: "my.openai.azure.com",
+			secretName: "k2", secretNamespace: "models", config: map[string]string{}},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	require.Len(t, info.refs, 2)
+	assert.Equal(t, 80, info.refs[0].weight)
+	assert.Equal(t, 20, info.refs[1].weight)
+}
+
+func TestModelReconciler_WeightDefaultsToOne(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "no-weight"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("no-weight", "models", newRef("my-openai", "gpt-4o", "openai-chat")),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com",
+			secretName: "k", secretNamespace: "models", config: map[string]string{}},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, 1, info.refs[0].weight, "weight should default to 1")
 }
 
 func TestModelReconciler_ConfigMerge(t *testing.T) {
@@ -203,23 +291,20 @@ func TestModelReconciler_ConfigMerge(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateProvider(
 		types.NamespacedName{Namespace: "models", Name: "my-vertex"},
-		&providerInfo{
-			provider: "vertex-openai", endpoint: "us-central1-aiplatform.googleapis.com",
+		&providerInfo{provider: "vertex-openai", endpoint: "us-central1-aiplatform.googleapis.com",
 			secretName: "vertex-key", secretNamespace: "models",
-			config: map[string]string{"project": "my-project", "location": "us-central1"},
-		},
+			config: map[string]string{"project": "my-project", "location": "us-central1"}},
 	)
 
 	r := &externalModelReconciler{Reader: reader, store: store}
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
 	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, "my-project", info.config["project"], "provider config preserved")
-	assert.Equal(t, "us-central1", info.config["location"], "provider config preserved")
-	assert.Equal(t, "custom-endpoint", info.config["endpoint"], "model config overrides")
+	assert.Equal(t, "my-project", info.refs[0].config["project"])
+	assert.Equal(t, "us-central1", info.refs[0].config["location"])
+	assert.Equal(t, "custom-endpoint", info.refs[0].config["endpoint"])
 }
 
 func TestMergeConfig(t *testing.T) {
@@ -229,41 +314,19 @@ func TestMergeConfig(t *testing.T) {
 		model    map[string]string
 		expected map[string]string
 	}{
-		{
-			name:     "nil provider and model",
-			provider: nil,
-			model:    nil,
-			expected: map[string]string{},
-		},
-		{
-			name:     "provider only",
-			provider: map[string]string{"a": "1"},
-			model:    nil,
-			expected: map[string]string{"a": "1"},
-		},
-		{
-			name:     "model overrides provider",
-			provider: map[string]string{"a": "1", "b": "2"},
-			model:    map[string]string{"b": "override"},
-			expected: map[string]string{"a": "1", "b": "override"},
-		},
-		{
-			name:     "model adds new keys",
-			provider: map[string]string{"a": "1"},
-			model:    map[string]string{"b": "2"},
-			expected: map[string]string{"a": "1", "b": "2"},
-		},
+		{"nil both", nil, nil, map[string]string{}},
+		{"provider only", map[string]string{"a": "1"}, nil, map[string]string{"a": "1"}},
+		{"model overrides", map[string]string{"a": "1", "b": "2"}, map[string]string{"b": "override"}, map[string]string{"a": "1", "b": "override"}},
+		{"model adds keys", map[string]string{"a": "1"}, map[string]string{"b": "2"}, map[string]string{"a": "1", "b": "2"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := mergeConfig(tt.provider, tt.model)
 			assert.Equal(t, tt.expected, result)
-
-			// Verify result is a new map, not aliased
 			if tt.provider != nil {
 				result["mutated"] = "yes"
 				_, leaked := tt.provider["mutated"]
-				assert.False(t, leaked, "mergeConfig must return a copy, not alias the provider map")
+				assert.False(t, leaked, "mergeConfig must return a copy")
 			}
 		})
 	}

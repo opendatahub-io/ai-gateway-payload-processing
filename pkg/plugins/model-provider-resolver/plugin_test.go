@@ -38,19 +38,21 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	)
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: extNS, Name: extName},
-		&externalModelInfo{
+		&externalModelInfo{refs: []resolvedProviderRef{{
 			provider:        provider.Anthropic,
 			targetModel:     targetModel,
+			apiFormat:       "messages",
 			secretName:      credName,
 			secretNamespace: extNS,
-		},
+			config:          map[string]string{},
+			weight:          1,
+		}}},
 	)
 
 	plugin := &ModelProviderResolverPlugin{store: store}
 	cs := framework.NewCycleState()
 	req := framework.NewInferenceRequest()
 	req.Headers[":path"] = "/" + extNS + "/" + extName + "/v1/chat/completions"
-	// Body "model" must match targetModel on the ExternalModel (ProcessRequest validates this).
 	req.Body["model"] = targetModel
 
 	err := plugin.ProcessRequest(context.Background(), cs, req)
@@ -71,6 +73,10 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	actualCredsNamespace, err := framework.ReadCycleStateKey[string](cs, state.CredsRefNamespace)
 	require.NoError(t, err)
 	require.Equal(t, extNS, actualCredsNamespace)
+
+	actualAPIFormat, err := framework.ReadCycleStateKey[string](cs, state.APIFormatKey)
+	require.NoError(t, err)
+	require.Equal(t, "messages", actualAPIFormat)
 }
 
 func TestProcessRequest_ModelNotFound(t *testing.T) {
@@ -85,7 +91,7 @@ func TestProcessRequest_ModelNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = framework.ReadCycleStateKey[string](cs, state.ProviderKey)
-	require.Error(t, err) // not found in CycleState
+	require.Error(t, err)
 }
 
 func TestProcessRequest_NoModel(t *testing.T) {
@@ -96,7 +102,6 @@ func TestProcessRequest_NoModel(t *testing.T) {
 	err := p.ProcessRequest(context.Background(), cs, framework.NewInferenceRequest())
 	require.NoError(t, err)
 
-	// CycleState should remain empty — request passes through unmodified
 	_, err = framework.ReadCycleStateKey[string](cs, state.ProviderKey)
 	require.Error(t, err)
 	_, err = framework.ReadCycleStateKey[string](cs, state.ModelKey)
@@ -107,7 +112,11 @@ func TestProcessRequest_BadPath(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "ext"},
-		&externalModelInfo{provider: provider.OpenAI, targetModel: "gpt-4o", secretName: "k", secretNamespace: "llm"},
+		&externalModelInfo{refs: []resolvedProviderRef{{
+			provider: provider.OpenAI, targetModel: "gpt-4o",
+			secretName: "k", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
 	)
 	p := &ModelProviderResolverPlugin{store: store}
 	cs := framework.NewCycleState()
@@ -120,4 +129,48 @@ func TestProcessRequest_BadPath(t *testing.T) {
 
 	_, err = framework.ReadCycleStateKey[string](cs, state.ProviderKey)
 	require.Error(t, err)
+}
+
+func TestSelectByWeight_SingleRef(t *testing.T) {
+	refs := []resolvedProviderRef{
+		{provider: "openai", weight: 1},
+	}
+	selected := selectByWeight(refs)
+	require.Equal(t, "openai", selected.provider)
+}
+
+func TestSelectByWeight_Distribution(t *testing.T) {
+	refs := []resolvedProviderRef{
+		{provider: "openai", weight: 80},
+		{provider: "anthropic", weight: 20},
+	}
+
+	counts := map[string]int{}
+	for range 1000 {
+		selected := selectByWeight(refs)
+		counts[selected.provider]++
+	}
+
+	// With 80/20 weights over 1000 iterations, openai should get ~800 (+/- ~50)
+	require.Greater(t, counts["openai"], 700, "openai should get majority of traffic")
+	require.Greater(t, counts["anthropic"], 100, "anthropic should get some traffic")
+}
+
+func TestSelectByWeight_EqualWeights(t *testing.T) {
+	refs := []resolvedProviderRef{
+		{provider: "a", weight: 1},
+		{provider: "b", weight: 1},
+		{provider: "c", weight: 1},
+	}
+
+	counts := map[string]int{}
+	for range 900 {
+		selected := selectByWeight(refs)
+		counts[selected.provider]++
+	}
+
+	// Each should get ~300 (+/- ~50)
+	for _, p := range []string{"a", "b", "c"} {
+		require.Greater(t, counts[p], 200, "%s should get roughly equal traffic", p)
+	}
 }
