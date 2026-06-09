@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vertex-credentials
+  labels:
+    inference.llm-d.ai/ipp-managed: "true"
+type: Opaque
+stringData:
+  api-key: <your-vertex-api-key>
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: vertex-openai
+spec:
+  provider: vertex-openai
+  endpoint: us-central1-aiplatform.googleapis.com
+  auth:
+    type: simple # TODO: replace with oauth2 once merged
+    secretRef:
+      name: vertex-credentials
+  config:
+    project: my-gcp-project
+    location: us-central1
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gemini
+spec:
+  externalProviderRefs:
+    - ref:
+        name: vertex-openai
+      targetModel: gemini-2.5-pro
+      apiFormat: openai-chat
+      config:
+        endpoint: openapi # Vertex AI endpoint name (not network endpoint — that's on the provider)

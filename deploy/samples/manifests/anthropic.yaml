@@ -3,7 +3,7 @@ kind: Secret
 metadata:
   name: anthropic-credentials
   labels:
-    inference.networking.k8s.io/bbr-managed: "true" # TODO: will change to inference.llm-d.ai/ipp-managed
+    inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: <your-anthropic-api-key>
@@ -16,6 +16,7 @@ spec:
   provider: anthropic
   endpoint: api.anthropic.com
   auth:
+    type: simple
     secretRef:
       name: anthropic-credentials
 ---

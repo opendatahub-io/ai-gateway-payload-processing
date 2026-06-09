@@ -60,7 +60,9 @@ type ExternalProviderRef struct {
 	TargetModel string `json:"targetModel"`
 
 	// APIFormat determines how requests/responses are translated for this provider.
-	// e.g. "openai", "anthropic", "bedrock-openai", "azure-openai", "vertex-openai".
+	// Supported values:
+	//   - "openai-chat": OpenAI Chat Completions API (/v1/chat/completions)
+	//   - "messages": Anthropic Messages API (/v1/messages)
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63

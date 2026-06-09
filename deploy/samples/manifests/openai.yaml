@@ -3,7 +3,7 @@ kind: Secret
 metadata:
   name: openai-credentials
   labels:
-    inference.networking.k8s.io/bbr-managed: "true" # TODO: will change to inference.llm-d.ai/ipp-managed
+    inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: <your-openai-api-key>
@@ -16,6 +16,7 @@ spec:
   provider: openai
   endpoint: api.openai.com
   auth:
+    type: simple
     secretRef:
       name: openai-credentials
 ---
@@ -28,4 +29,4 @@ spec:
     - ref:
         name: openai
       targetModel: gpt-4o
-      apiFormat: chat-completions
+      apiFormat: openai-chat

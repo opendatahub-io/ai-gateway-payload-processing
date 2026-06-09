@@ -1,0 +1,62 @@
+# Multi-provider with weighted traffic splitting.
+# 80% of requests go to OpenAI, 20% to Azure OpenAI.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-credentials
+  labels:
+    inference.llm-d.ai/ipp-managed: "true"
+type: Opaque
+stringData:
+  api-key: <your-openai-api-key>
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-credentials
+  labels:
+    inference.llm-d.ai/ipp-managed: "true"
+type: Opaque
+stringData:
+  api-key: <your-azure-api-key>
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: openai
+spec:
+  provider: openai
+  endpoint: api.openai.com
+  auth:
+    type: simple
+    secretRef:
+      name: openai-credentials
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: azure
+spec:
+  provider: azure-openai
+  endpoint: my-resource.openai.azure.com
+  auth:
+    type: simple
+    secretRef:
+      name: azure-credentials
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gpt4-weighted
+spec:
+  externalProviderRefs:
+    - ref:
+        name: openai
+      targetModel: gpt-4o
+      apiFormat: openai-chat
+      weight: 80
+    - ref:
+        name: azure
+      targetModel: gpt-4o
+      apiFormat: openai-chat
+      weight: 20
