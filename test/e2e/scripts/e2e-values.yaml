@@ -8,6 +8,9 @@ upstreamBbr:
           headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
         name: model-provider-resolver
+        json:
+          gatewayName: "e2e-gateway"
+          gatewayNamespace: "default"
       - type: api-translation
         name: api-translation
         json:
