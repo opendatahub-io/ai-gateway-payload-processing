@@ -168,13 +168,14 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("unsupported API path: %s", relativePath)}
 	}
 
-	ref := selectByWeight(modelInfo.refs)
-
-	if ref.targetModel != model {
-		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", ref.targetModel)
+	// model in request body must match the ExternalModel CR name (client-facing name)
+	if modelKey.Name != model {
+		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", modelKey.Name)
 		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
 	}
 
+	// select a provider ref based on weights
+	ref := selectByWeight(modelInfo.refs)
 	cycleState.Write(state.ProviderKey, ref.provider)
 	cycleState.Write(state.ModelKey, ref.targetModel)
 	cycleState.Write(state.APIFormatKey, ref.apiFormat)
@@ -203,22 +204,22 @@ func detectInputAPIFormat(path string) apiformat.APIFormat {
 
 // selectByWeight picks a provider ref using weighted random selection.
 // With a single ref, returns it directly (no randomness).
-func selectByWeight(refs []resolvedProviderRef) *resolvedProviderRef {
+func selectByWeight(refs []*resolvedProviderRef) *resolvedProviderRef {
 	if len(refs) == 1 {
-		return &refs[0]
+		return refs[0]
 	}
 	totalWeight := 0
-	for i := range refs {
-		totalWeight += refs[i].weight
+	for _, ref := range refs {
+		totalWeight += ref.weight
 	}
 	r := rand.IntN(totalWeight)
-	for i := range refs {
-		r -= refs[i].weight
+	for _, ref := range refs {
+		r -= ref.weight
 		if r < 0 {
-			return &refs[i]
+			return ref
 		}
 	}
-	return &refs[len(refs)-1]
+	return refs[len(refs)-1]
 }
 
 func sanitizePath(relativeUrlPath string) string {

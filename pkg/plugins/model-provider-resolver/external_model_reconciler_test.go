@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -49,8 +50,6 @@ func (m *mockModelReader) Get(_ context.Context, key types.NamespacedName, obj c
 func (m *mockModelReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
 	return nil
 }
-
-func intPtr(v int) *int { return &v }
 
 func newTestModel(name, ns string, refs ...inferencev1alpha1.ExternalProviderRef) *inferencev1alpha1.ExternalModel {
 	return &inferencev1alpha1.ExternalModel{
@@ -95,6 +94,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
 	assert.Equal(t, apiformat.OpenAIChatCompletions, info.refs[0].apiFormat)
 	assert.Equal(t, "openai-key", info.refs[0].secretName)
+	assert.Equal(t, "models", info.refs[0].secretNamespace)
 	assert.Equal(t, 1, info.refs[0].weight)
 }
 
@@ -103,7 +103,7 @@ func TestModelReconciler_DeletedCR(t *testing.T) {
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{}}
 
 	store := newInfoStore()
-	store.addOrUpdateModel(key, &externalModelInfo{refs: []resolvedProviderRef{
+	store.addOrUpdateModel(key, &externalModelInfo{refs: []*resolvedProviderRef{
 		{provider: "openai", targetModel: "gpt-4o", weight: 1},
 	}})
 
@@ -191,6 +191,9 @@ func TestModelReconciler_MultiRefPartialAvailability(t *testing.T) {
 	require.True(t, found)
 	require.Len(t, info.refs, 1, "only the available ref should be stored")
 	assert.Equal(t, "anthropic", info.refs[0].provider)
+	assert.Equal(t, "claude-sonnet", info.refs[0].targetModel)
+	assert.Equal(t, apiformat.Messages, info.refs[0].apiFormat)
+	assert.Equal(t, "anthropic-key", info.refs[0].secretName)
 }
 
 func TestModelReconciler_AuthOverride(t *testing.T) {
@@ -219,16 +222,16 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, "model-specific-key", info.refs[0].secretName)
+	assert.Equal(t, "model-specific-key", info.refs[0].secretName, "model auth should override provider auth")
 	assert.Equal(t, "models", info.refs[0].secretNamespace)
 }
 
 func TestModelReconciler_WeightFromCRD(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "weighted"}
 	ref1 := newRef("openai-provider", "gpt-4o", "openai-chat")
-	ref1.Weight = intPtr(80)
+	ref1.Weight = ptr.To(80)
 	ref2 := newRef("azure-provider", "gpt-4o", "openai-chat")
-	ref2.Weight = intPtr(20)
+	ref2.Weight = ptr.To(20)
 
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
 		key: newTestModel("weighted", "models", ref1, ref2),

@@ -46,7 +46,7 @@ type resolvedProviderRef struct {
 // externalModelInfo holds all resolved provider refs for an external model.
 // The plugin selects a provider based on weights at request time.
 type externalModelInfo struct {
-	refs []resolvedProviderRef
+	refs []*resolvedProviderRef
 }
 
 // infoStore is a thread-safe in-memory store for both provider and model info.
