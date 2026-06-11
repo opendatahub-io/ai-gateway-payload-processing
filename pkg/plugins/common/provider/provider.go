@@ -17,8 +17,12 @@ limitations under the License.
 package provider
 
 const (
-	OpenAI        = "openai"
-	Anthropic     = "anthropic"
+	OpenAI    = "openai"
+	Anthropic = "anthropic"
+	Azure     = "azure"
+	Vertex    = "vertex"
+	Bedrock   = "bedrock"
+	// to be removed after migrating the api translation + apikey injection plugins mapping
 	AzureOpenAI   = "azure-openai"
 	VertexOpenAI  = "vertex-openai"
 	BedrockOpenAI = "bedrock-openai"
