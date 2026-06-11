@@ -19,6 +19,7 @@ package model_provider_resolver
 import (
 	"sync"
 
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -35,7 +36,7 @@ type providerInfo struct {
 type resolvedProviderRef struct {
 	provider        string
 	targetModel     string
-	apiFormat       string
+	apiFormat       apiformat.APIFormat
 	secretName      string
 	secretNamespace string
 	config          map[string]string

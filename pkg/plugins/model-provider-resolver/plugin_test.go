@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -41,7 +42,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 		&externalModelInfo{refs: []resolvedProviderRef{{
 			provider:        provider.Anthropic,
 			targetModel:     targetModel,
-			apiFormat:       "messages",
+			apiFormat:       apiformat.Messages,
 			secretName:      credName,
 			secretNamespace: extNS,
 			config:          map[string]string{},
@@ -74,9 +75,9 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, extNS, actualCredsNamespace)
 
-	actualAPIFormat, err := framework.ReadCycleStateKey[string](cs, state.APIFormatKey)
+	actualAPIFormat, err := framework.ReadCycleStateKey[apiformat.APIFormat](cs, state.APIFormatKey)
 	require.NoError(t, err)
-	require.Equal(t, "messages", actualAPIFormat)
+	require.Equal(t, apiformat.Messages, actualAPIFormat)
 }
 
 func TestProcessRequest_ModelNotFound(t *testing.T) {
@@ -193,13 +194,13 @@ func TestProcessRequest_AnthropicMessages(t *testing.T) {
 	err := p.ProcessRequest(context.Background(), cs, req)
 	require.NoError(t, err)
 
-	inputFmt, err := framework.ReadCycleStateKey[string](cs, state.InputAPIFormatKey)
+	inputFmt, err := framework.ReadCycleStateKey[apiformat.APIFormat](cs, state.InputAPIFormatKey)
 	require.NoError(t, err)
-	require.Equal(t, "messages", inputFmt)
+	require.Equal(t, apiformat.Messages, inputFmt)
 
-	apiFormat, err := framework.ReadCycleStateKey[string](cs, state.APIFormatKey)
+	apiFormat, err := framework.ReadCycleStateKey[apiformat.APIFormat](cs, state.APIFormatKey)
 	require.NoError(t, err)
-	require.Equal(t, "messages", apiFormat)
+	require.Equal(t, apiformat.Messages, apiFormat)
 }
 
 func TestProcessRequest_OpenAIResponses(t *testing.T) {
@@ -222,9 +223,9 @@ func TestProcessRequest_OpenAIResponses(t *testing.T) {
 	err := p.ProcessRequest(context.Background(), cs, req)
 	require.NoError(t, err)
 
-	inputFmt, err := framework.ReadCycleStateKey[string](cs, state.InputAPIFormatKey)
+	inputFmt, err := framework.ReadCycleStateKey[apiformat.APIFormat](cs, state.InputAPIFormatKey)
 	require.NoError(t, err)
-	require.Equal(t, "openai-responses", inputFmt)
+	require.Equal(t, apiformat.OpenAIResponses, inputFmt)
 }
 
 func TestProcessRequest_UnsupportedPath(t *testing.T) {
@@ -252,11 +253,11 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 func TestDetectInputAPIFormat(t *testing.T) {
 	tests := []struct {
 		path     string
-		expected string
+		expected apiformat.APIFormat
 	}{
-		{"llm/model/v1/chat/completions", "openai-chat"},
-		{"llm/model/v1/messages", "messages"},
-		{"llm/model/v1/responses", "openai-responses"},
+		{"llm/model/v1/chat/completions", apiformat.OpenAIChatCompletions},
+		{"llm/model/v1/messages", apiformat.Messages},
+		{"llm/model/v1/responses", apiformat.OpenAIResponses},
 		{"llm/model/v1/unknown", ""},
 		{"llm/model/v1/models", ""},
 	}

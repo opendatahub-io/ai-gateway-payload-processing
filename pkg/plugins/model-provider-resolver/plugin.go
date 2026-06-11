@@ -38,6 +38,7 @@ import (
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/legacymigration"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -187,14 +188,14 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 }
 
 // detectInputAPIFormat determines the client's API format from the request path suffix.
-func detectInputAPIFormat(path string) string {
+func detectInputAPIFormat(path string) apiformat.APIFormat {
 	switch {
 	case strings.HasSuffix(path, "/v1/chat/completions"):
-		return "openai-chat"
+		return apiformat.OpenAIChatCompletions
 	case strings.HasSuffix(path, "/v1/messages"):
-		return "messages"
+		return apiformat.Messages
 	case strings.HasSuffix(path, "/v1/responses"):
-		return "openai-responses"
+		return apiformat.OpenAIResponses
 	default:
 		return ""
 	}

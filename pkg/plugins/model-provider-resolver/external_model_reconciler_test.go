@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 )
 
 type mockModelReader struct {
@@ -92,7 +93,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 	require.Len(t, info.refs, 1)
 	assert.Equal(t, "openai", info.refs[0].provider)
 	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
-	assert.Equal(t, "openai-chat", info.refs[0].apiFormat)
+	assert.Equal(t, apiformat.OpenAIChatCompletions, info.refs[0].apiFormat)
 	assert.Equal(t, "openai-key", info.refs[0].secretName)
 	assert.Equal(t, 1, info.refs[0].weight)
 }

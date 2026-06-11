@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -378,16 +379,16 @@ func TestFactory_Success(t *testing.T) {
 func TestIsPassthrough(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    string
-		output   string
+		input    apiformat.APIFormat
+		output   apiformat.APIFormat
 		expected bool
 	}{
-		{"anthropic messages match → passthrough", "messages", "messages", true},
-		{"openai-responses match → passthrough", "openai-responses", "openai-responses", true},
-		{"format mismatch → translate", "openai-chat", "messages", false},
-		{"openai-chat excluded even when matching → translate", "openai-chat", "openai-chat", false},
-		{"empty input → translate", "", "messages", false},
-		{"empty output → translate", "messages", "", false},
+		{"anthropic messages match → passthrough", apiformat.Messages, apiformat.Messages, true},
+		{"openai-responses match → passthrough", apiformat.OpenAIResponses, apiformat.OpenAIResponses, true},
+		{"format mismatch → translate", apiformat.OpenAIChatCompletions, apiformat.Messages, false},
+		{"openai-chat excluded even when matching → translate", apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, false},
+		{"empty input → translate", "", apiformat.Messages, false},
+		{"empty output → translate", apiformat.Messages, "", false},
 		{"both empty → translate", "", "", false},
 	}
 
@@ -409,8 +410,8 @@ func TestPassthrough_SkipsRequestTranslation(t *testing.T) {
 	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
 	cs := framework.NewCycleState()
 	cs.Write(state.ProviderKey, "anthropic")
-	cs.Write(state.InputAPIFormatKey, "messages")
-	cs.Write(state.APIFormatKey, "messages")
+	cs.Write(state.InputAPIFormatKey, apiformat.Messages)
+	cs.Write(state.APIFormatKey, apiformat.Messages)
 
 	req := framework.NewInferenceRequest()
 	req.Body["model"] = "claude-opus-4-6"
@@ -433,8 +434,8 @@ func TestPassthrough_SkipsResponseTranslation(t *testing.T) {
 	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
 	cs := framework.NewCycleState()
 	cs.Write(state.ProviderKey, "anthropic")
-	cs.Write(state.InputAPIFormatKey, "messages")
-	cs.Write(state.APIFormatKey, "messages")
+	cs.Write(state.InputAPIFormatKey, apiformat.Messages)
+	cs.Write(state.APIFormatKey, apiformat.Messages)
 
 	resp := framework.NewInferenceResponse()
 	resp.Body["type"] = "message"

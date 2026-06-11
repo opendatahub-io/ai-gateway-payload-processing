@@ -35,6 +35,7 @@ import (
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/bedrock"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/openai"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/vertex"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -244,8 +245,8 @@ func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *
 // (embeddings, audio, images) requires only adding a path mapping in
 // detectInputAPIFormat — no changes needed here.
 func isPassthrough(cycleState *framework.CycleState) bool {
-	inputFormat, _ := framework.ReadCycleStateKey[string](cycleState, state.InputAPIFormatKey)
-	outputFormat, _ := framework.ReadCycleStateKey[string](cycleState, state.APIFormatKey)
+	inputFormat, _ := framework.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.InputAPIFormatKey)
+	outputFormat, _ := framework.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.APIFormatKey)
 	if inputFormat == "" || outputFormat == "" {
 		return false
 	}
@@ -253,5 +254,5 @@ func isPassthrough(cycleState *framework.CycleState) bool {
 		return false
 	}
 	// OpenAI chat is excluded because the translator rewrites :path to strip the model prefix.
-	return inputFormat != "openai-chat"
+	return inputFormat != apiformat.OpenAIChatCompletions
 }
