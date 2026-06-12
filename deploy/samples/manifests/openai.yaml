@@ -25,6 +25,7 @@ kind: ExternalModel
 metadata:
   name: gpt4
 spec:
+  modelName: gpt-4o  # client-facing name (defaults to metadata.name if omitted)
   externalProviderRefs:
     - ref:
         name: openai

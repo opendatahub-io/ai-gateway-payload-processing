@@ -73,8 +73,13 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{RequeueAfter: providerRequeueDelay}, nil
 	}
 
-	r.store.addOrUpdateModel(req.NamespacedName, &externalModelInfo{refs: resolved})
-	logger.Info("updated model store", "resolvedRefs", len(resolved))
+	modelName := model.Spec.ModelName
+	if modelName == "" {
+		modelName = req.Name
+	}
+
+	r.store.addOrUpdateModel(req.NamespacedName, &externalModelInfo{modelName: modelName, refs: resolved})
+	logger.Info("updated model store", "modelName", modelName, "resolvedRefs", len(resolved))
 	return ctrl.Result{}, nil
 }
 

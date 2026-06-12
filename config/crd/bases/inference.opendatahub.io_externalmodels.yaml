@@ -25,8 +25,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          ExternalModel defines a client-facing model name that maps to one or more
-          external providers. metadata.name is the model name clients use in requests.
+          ExternalModel defines a client-facing model that maps to one or more
+          external providers. The model name clients use in requests is determined
+          by spec.modelName (if set) or metadata.name (default).
         properties:
           apiVersion:
             description: |-
@@ -140,6 +141,15 @@ spec:
                 maxItems: 64
                 minItems: 1
                 type: array
+              modelName:
+                description: |-
+                  ModelName is the client-facing model name used in inference request bodies.
+                  Clients send this value in the "model" field of chat completion requests.
+                  Defaults to metadata.name if not set. Use this field when the desired
+                  model name contains characters not allowed in Kubernetes resource names
+                  (dots, colons, slashes, uppercase).
+                maxLength: 253
+                type: string
             required:
             - externalProviderRefs
             type: object

@@ -25,8 +25,9 @@ import (
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// ExternalModel defines a client-facing model name that maps to one or more
-// external providers. metadata.name is the model name clients use in requests.
+// ExternalModel defines a client-facing model that maps to one or more
+// external providers. The model name clients use in requests is determined
+// by spec.modelName (if set) or metadata.name (default).
 type ExternalModel struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -37,6 +38,15 @@ type ExternalModel struct {
 
 // ExternalModelSpec defines the desired state of ExternalModel.
 type ExternalModelSpec struct {
+	// ModelName is the client-facing model name used in inference request bodies.
+	// Clients send this value in the "model" field of chat completion requests.
+	// Defaults to metadata.name if not set. Use this field when the desired
+	// model name contains characters not allowed in Kubernetes resource names
+	// (dots, colons, slashes, uppercase).
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	ModelName string `json:"modelName,omitempty"`
+
 	// ExternalProviderRefs maps this model to one or more external providers.
 	// Each entry specifies the provider specific details.
 	//

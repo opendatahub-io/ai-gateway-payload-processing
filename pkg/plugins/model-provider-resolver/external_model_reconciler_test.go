@@ -90,12 +90,41 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
+	assert.Equal(t, "gpt4", info.modelName, "modelName defaults to metadata.name")
 	require.Len(t, info.refs, 1)
 	assert.Equal(t, "openai", info.refs[0].provider)
 	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
 	assert.Equal(t, apiformat.OpenAIChatCompletions, info.refs[0].apiFormat)
 	assert.Equal(t, "openai-key", info.refs[0].secretName)
 	assert.Equal(t, 1, info.refs[0].weight)
+}
+
+func TestModelReconciler_ModelNameOverride(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "gpt4"}
+	model := newTestModel("gpt4", "models", newRef("my-openai", "gpt-4o", "openai-chat"))
+	model.Spec.ModelName = "gpt-4o"
+
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: model,
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{
+			provider: "openai", endpoint: "api.openai.com",
+			secretName: "openai-key", secretNamespace: "models",
+			config: map[string]string{},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, "gpt-4o", info.modelName, "spec.modelName should override metadata.name")
 }
 
 func TestModelReconciler_DeletedCR(t *testing.T) {

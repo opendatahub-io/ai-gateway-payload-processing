@@ -168,12 +168,13 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("unsupported API path: %s", relativePath)}
 	}
 
-	ref := selectByWeight(modelInfo.refs)
-
-	if ref.targetModel != model {
-		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", ref.targetModel)
+	// model in request body must match the ExternalModel's client-facing name
+	if modelInfo.modelName != model {
+		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", modelInfo.modelName)
 		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
 	}
+
+	ref := selectByWeight(modelInfo.refs)
 
 	cycleState.Write(state.ProviderKey, ref.provider)
 	cycleState.Write(state.ModelKey, ref.targetModel)
