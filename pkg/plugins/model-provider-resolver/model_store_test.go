@@ -29,7 +29,7 @@ func TestModelStore_AddAndGetExternalModel(t *testing.T) {
 	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "ns", Name: "external-model"}
 
-	store.addOrUpdateModel(key, &externalModelInfo{refs: []resolvedProviderRef{
+	store.addOrUpdateModel(key, &externalModelInfo{refs: []*resolvedProviderRef{
 		{provider: provider.Anthropic, weight: 1},
 	}})
 
@@ -43,7 +43,7 @@ func TestModelStore_GetModelInfo_NotFound(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "ns", Name: "ext"},
-		&externalModelInfo{refs: []resolvedProviderRef{{provider: provider.OpenAI, weight: 1}}},
+		&externalModelInfo{refs: []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}}},
 	)
 
 	_, found := store.getModel(types.NamespacedName{Namespace: "ns", Name: "other"})
@@ -53,7 +53,7 @@ func TestModelStore_GetModelInfo_NotFound(t *testing.T) {
 func TestModelStore_DeleteExternalModel(t *testing.T) {
 	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "ns", Name: "ext"}
-	store.addOrUpdateModel(key, &externalModelInfo{refs: []resolvedProviderRef{
+	store.addOrUpdateModel(key, &externalModelInfo{refs: []*resolvedProviderRef{
 		{provider: provider.OpenAI, weight: 1},
 	}})
 
@@ -69,7 +69,7 @@ func TestModelStore_CrossNamespaceIsolation(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "ns-a", Name: "shared-model"},
-		&externalModelInfo{refs: []resolvedProviderRef{{provider: provider.OpenAI, weight: 1}}},
+		&externalModelInfo{refs: []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}}},
 	)
 
 	_, found := store.getModel(types.NamespacedName{Namespace: "ns-b", Name: "shared-model"})

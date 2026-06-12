@@ -39,7 +39,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	)
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: extNS, Name: extName},
-		&externalModelInfo{modelName: extName, refs: []resolvedProviderRef{{
+		&externalModelInfo{modelName: extName, refs: []*resolvedProviderRef{{
 			provider:        provider.Anthropic,
 			targetModel:     targetModel,
 			apiFormat:       apiformat.Messages,
@@ -80,6 +80,27 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	require.Equal(t, apiformat.Messages, actualAPIFormat)
 }
 
+func TestProcessRequest_ModelMismatch(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
+		&externalModelInfo{modelName: "gpt4", refs: []*resolvedProviderRef{{
+			provider: provider.OpenAI, targetModel: "gpt-4o",
+			apiFormat: apiformat.OpenAIChatCompletions,
+			secretName: "k", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+	p := &ModelProviderResolverPlugin{store: store}
+	cs := framework.NewCycleState()
+	req := framework.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
+	req.Body["model"] = "wrong-name"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.Error(t, err, "should error when body model doesn't match modelName")
+}
+
 func TestProcessRequest_ModelNotFound(t *testing.T) {
 	store := newInfoStore()
 	p := &ModelProviderResolverPlugin{store: store}
@@ -113,7 +134,7 @@ func TestProcessRequest_BadPath(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "ext"},
-		&externalModelInfo{modelName: "ext", refs: []resolvedProviderRef{{
+		&externalModelInfo{modelName: "ext", refs: []*resolvedProviderRef{{
 			provider: provider.OpenAI, targetModel: "gpt-4o",
 			secretName: "k", secretNamespace: "llm",
 			config: map[string]string{}, weight: 1,
@@ -133,7 +154,7 @@ func TestProcessRequest_BadPath(t *testing.T) {
 }
 
 func TestSelectByWeight_SingleRef(t *testing.T) {
-	refs := []resolvedProviderRef{
+	refs := []*resolvedProviderRef{
 		{provider: "openai", weight: 1},
 	}
 	selected := selectByWeight(refs)
@@ -141,7 +162,7 @@ func TestSelectByWeight_SingleRef(t *testing.T) {
 }
 
 func TestSelectByWeight_Distribution(t *testing.T) {
-	refs := []resolvedProviderRef{
+	refs := []*resolvedProviderRef{
 		{provider: "openai", weight: 80},
 		{provider: "anthropic", weight: 20},
 	}
@@ -157,7 +178,7 @@ func TestSelectByWeight_Distribution(t *testing.T) {
 }
 
 func TestSelectByWeight_EqualWeights(t *testing.T) {
-	refs := []resolvedProviderRef{
+	refs := []*resolvedProviderRef{
 		{provider: "a", weight: 1},
 		{provider: "b", weight: 1},
 		{provider: "c", weight: 1},
@@ -178,7 +199,7 @@ func TestProcessRequest_AnthropicMessages(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "claude"},
-		&externalModelInfo{modelName: "claude", refs: []resolvedProviderRef{{
+		&externalModelInfo{modelName: "claude", refs: []*resolvedProviderRef{{
 			provider: provider.Anthropic, targetModel: "claude-opus-4-6",
 			apiFormat: "messages", secretName: "key", secretNamespace: "llm",
 			config: map[string]string{}, weight: 1,
@@ -207,7 +228,7 @@ func TestProcessRequest_OpenAIResponses(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "gpt"},
-		&externalModelInfo{modelName: "gpt", refs: []resolvedProviderRef{{
+		&externalModelInfo{modelName: "gpt", refs: []*resolvedProviderRef{{
 			provider: provider.OpenAI, targetModel: "gpt-5.5",
 			apiFormat: "openai-chat", secretName: "key", secretNamespace: "llm",
 			config: map[string]string{}, weight: 1,
@@ -232,7 +253,7 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "model"},
-		&externalModelInfo{modelName: "model", refs: []resolvedProviderRef{{
+		&externalModelInfo{modelName: "model", refs: []*resolvedProviderRef{{
 			provider: provider.OpenAI, targetModel: "gpt-4o",
 			apiFormat: "openai-chat", secretName: "key", secretNamespace: "llm",
 			config: map[string]string{}, weight: 1,

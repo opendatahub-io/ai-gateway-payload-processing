@@ -58,14 +58,14 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Resolve all refs whose providers are available in the store.
-	var resolved []resolvedProviderRef
-	for _, ref := range model.Spec.ExternalProviderRefs {
-		rr, found := r.resolveRef(req.Namespace, ref)
+	var resolved []*resolvedProviderRef
+	for i := range model.Spec.ExternalProviderRefs {
+		resolvedRef, found := r.resolveRef(req.Namespace, &model.Spec.ExternalProviderRefs[i])
 		if !found {
-			logger.Info("ExternalProvider not yet available, skipping ref", "provider", ref.Ref.Name)
+			logger.Info("ExternalProvider not yet available, skipping ref", "provider", model.Spec.ExternalProviderRefs[i].Ref.Name)
 			continue
 		}
-		resolved = append(resolved, *rr)
+		resolved = append(resolved, resolvedRef)
 	}
 
 	if len(resolved) == 0 {
@@ -85,7 +85,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 // resolveRef resolves a single ExternalProviderRef to provider info.
 // Returns (nil, false) if the provider is not yet available in the store.
-func (r *externalModelReconciler) resolveRef(namespace string, ref inferencev1alpha1.ExternalProviderRef) (*resolvedProviderRef, bool) {
+func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1alpha1.ExternalProviderRef) (*resolvedProviderRef, bool) {
 	providerKey := types.NamespacedName{Namespace: namespace, Name: ref.Ref.Name}
 	providerInfo, found := r.store.getProvider(providerKey)
 	if !found {

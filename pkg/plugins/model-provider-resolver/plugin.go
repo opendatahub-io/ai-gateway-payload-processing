@@ -204,22 +204,22 @@ func detectInputAPIFormat(path string) apiformat.APIFormat {
 
 // selectByWeight picks a provider ref using weighted random selection.
 // With a single ref, returns it directly (no randomness).
-func selectByWeight(refs []resolvedProviderRef) *resolvedProviderRef {
+func selectByWeight(refs []*resolvedProviderRef) *resolvedProviderRef {
 	if len(refs) == 1 {
-		return &refs[0]
+		return refs[0]
 	}
 	totalWeight := 0
-	for i := range refs {
-		totalWeight += refs[i].weight
+	for _, ref := range refs {
+		totalWeight += ref.weight
 	}
 	r := rand.IntN(totalWeight)
-	for i := range refs {
-		r -= refs[i].weight
+	for _, ref := range refs {
+		r -= ref.weight
 		if r < 0 {
-			return &refs[i]
+			return ref
 		}
 	}
-	return &refs[len(refs)-1]
+	return refs[len(refs)-1]
 }
 
 func sanitizePath(relativeUrlPath string) string {

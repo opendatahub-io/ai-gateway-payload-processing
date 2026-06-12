@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -50,7 +51,7 @@ func (m *mockModelReader) List(_ context.Context, _ client.ObjectList, _ ...clie
 	return nil
 }
 
-func intPtr(v int) *int { return &v }
+
 
 func newTestModel(name, ns string, refs ...inferencev1alpha1.ExternalProviderRef) *inferencev1alpha1.ExternalModel {
 	return &inferencev1alpha1.ExternalModel{
@@ -132,7 +133,7 @@ func TestModelReconciler_DeletedCR(t *testing.T) {
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{}}
 
 	store := newInfoStore()
-	store.addOrUpdateModel(key, &externalModelInfo{refs: []resolvedProviderRef{
+	store.addOrUpdateModel(key, &externalModelInfo{refs: []*resolvedProviderRef{
 		{provider: "openai", targetModel: "gpt-4o", weight: 1},
 	}})
 
@@ -255,9 +256,9 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 func TestModelReconciler_WeightFromCRD(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "weighted"}
 	ref1 := newRef("openai-provider", "gpt-4o", "openai-chat")
-	ref1.Weight = intPtr(80)
+	ref1.Weight = ptr.To(80)
 	ref2 := newRef("azure-provider", "gpt-4o", "openai-chat")
-	ref2.Weight = intPtr(20)
+	ref2.Weight = ptr.To(20)
 
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
 		key: newTestModel("weighted", "models", ref1, ref2),
