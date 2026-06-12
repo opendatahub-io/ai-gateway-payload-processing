@@ -75,8 +75,10 @@ spec:
                     description: |-
                       Type identifies the auth type for this provider.
                       e.g. "simple" (header based), "sigv4", etc.
-                    maxLength: 63
-                    minLength: 1
+                    enum:
+                    - simple
+                    - sigv4
+                    - oauth2
                     type: string
                 required:
                 - secretRef

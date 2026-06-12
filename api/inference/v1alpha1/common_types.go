@@ -21,8 +21,7 @@ type AuthConfig struct {
 	// Type identifies the auth type for this provider.
 	// e.g. "simple" (header based), "sigv4", etc.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Enum=simple;sigv4;oauth2
 	Type string `json:"type"`
 
 	// SecretRef references a Kubernetes Secret containing the provider API key.

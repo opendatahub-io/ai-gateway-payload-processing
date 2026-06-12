@@ -30,7 +30,7 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth"
+	authgenerator "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generator"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -70,14 +70,14 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Type: APIKeyInjectionPluginType,
 			Name: APIKeyInjectionPluginType,
 		},
-		authHeadersGenerators: map[string]auth.AuthHeadersGenerator{
-			provider.OpenAI:      &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.Anthropic:   &auth.SimpleAuthGenerator{HeaderName: "x-api-key"},
-			provider.AzureOpenAI: &auth.SimpleAuthGenerator{HeaderName: "api-key"},
+		authHeadersGenerators: map[string]authgenerator.AuthHeadersGenerator{
+			provider.OpenAI:      &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.Anthropic:   &authgenerator.SimpleAuthGenerator{HeaderName: "x-api-key"},
+			provider.AzureOpenAI: &authgenerator.SimpleAuthGenerator{HeaderName: "api-key"},
 			// provider.Vertex uses the native GenerateContent API — not used in 3.4 ExternalModel flow.
 			// provider.Vertex:     &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.VertexOpenAI:  &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.BedrockOpenAI: &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.VertexOpenAI:  &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
+			provider.BedrockOpenAI: &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
 		},
 		store: store,
 	}), nil
@@ -88,7 +88,7 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 // determines which header name and value format are used.
 type ApiKeyInjectionPlugin struct {
 	typedName             plugin.TypedName
-	authHeadersGenerators map[string]auth.AuthHeadersGenerator
+	authHeadersGenerators map[string]authgenerator.AuthHeadersGenerator
 	store                 *secretStore
 }
 
