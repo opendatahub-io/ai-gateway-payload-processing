@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -44,6 +45,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 			provider:        provider.Anthropic,
 			targetModel:     targetModel,
 			apiFormat:       apiformat.Messages,
+			auth:            auth.Simple,
 			endpoint:        endpoint,
 			secretName:      credName,
 			secretNamespace: extNS,
@@ -80,6 +82,10 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	actualAPIFormat, err := framework.ReadCycleStateKey[apiformat.APIFormat](cs, state.APIFormatKey)
 	require.NoError(t, err)
 	require.Equal(t, apiformat.Messages, actualAPIFormat)
+
+	actualAuthType, err := framework.ReadCycleStateKey[auth.Auth](cs, state.AuthTypeKey)
+	require.NoError(t, err)
+	require.Equal(t, auth.Simple, actualAuthType)
 
 	actualEndpoint, err := framework.ReadCycleStateKey[string](cs, state.EndpointKey)
 	require.NoError(t, err)

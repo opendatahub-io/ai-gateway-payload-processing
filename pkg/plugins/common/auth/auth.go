@@ -20,6 +20,11 @@ type Auth string
 
 const (
 	Simple Auth = "simple"
-	SigV4  Auth = "sigv4"  // not used yet
+	SigV4  Auth = "sigv4"
 	OAuth2 Auth = "oauth2" // not used yet
+)
+
+const (
+	SimpleAuthHeaderName  = "authHeaderName"
+	SimpleAuthValuePrefix = "authValuePrefix"
 )

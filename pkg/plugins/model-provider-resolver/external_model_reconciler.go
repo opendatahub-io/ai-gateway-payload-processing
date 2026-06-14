@@ -30,6 +30,7 @@ import (
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 )
 
 const providerRequeueDelay = 5 * time.Second
@@ -96,9 +97,11 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1a
 
 	secretName := providerInfo.secretName
 	secretNamespace := providerInfo.secretNamespace
+	authType := providerInfo.auth
 	if ref.Auth != nil {
 		secretName = ref.Auth.SecretRef.Name
 		secretNamespace = namespace
+		authType = auth.Auth(ref.Auth.Type)
 	}
 
 	weight := 1
@@ -110,6 +113,7 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1a
 		provider:        providerInfo.provider,
 		targetModel:     ref.TargetModel,
 		apiFormat:       apiformat.APIFormat(ref.APIFormat),
+		auth:            authType,
 		endpoint:        providerInfo.endpoint,
 		secretName:      secretName,
 		secretNamespace: secretNamespace,

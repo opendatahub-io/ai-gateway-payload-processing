@@ -47,6 +47,10 @@ const (
 // compile-time interface check
 var _ AuthHeadersGenerator = &SigV4AuthGenerator{}
 
+func NewSigV4AuthGenerator() *SigV4AuthGenerator {
+	return &SigV4AuthGenerator{}
+}
+
 // SigV4AuthGenerator generates AWS Signature Version 4 authentication headers.
 type SigV4AuthGenerator struct{}
 

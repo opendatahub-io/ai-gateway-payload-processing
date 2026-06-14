@@ -24,6 +24,7 @@ const (
 	CredsRefNamespace = "credential-ref-namespace"
 	ModelConfigKey    = "model-config"
 	APIFormatKey      = "api-format"
+	AuthTypeKey       = "auth"
 	InputAPIFormatKey = "input-api-format"
 	EndpointKey       = "endpoint"
 )

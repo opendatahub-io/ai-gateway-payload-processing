@@ -27,6 +27,8 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 )
 
 type externalProviderReconciler struct {
@@ -54,9 +56,11 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if config == nil {
 		config = map[string]string{}
 	}
+	applyAuthDefaults(config, provider.Spec.Provider)
 	r.store.addOrUpdateProvider(req.NamespacedName, &providerInfo{
 		provider:        provider.Spec.Provider,
 		endpoint:        provider.Spec.Endpoint,
+		auth:            auth.Auth(provider.Spec.Auth.Type),
 		secretName:      provider.Spec.Auth.SecretRef.Name,
 		secretNamespace: req.Namespace,
 		config:          config,
@@ -64,4 +68,25 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	logger.Info("updated provider store", "provider", provider.Spec.Provider, "endpoint", provider.Spec.Endpoint)
 	return ctrl.Result{}, nil
+}
+
+// defaultAuthHeaders maps providers that use a non-standard auth header name.
+// Providers not listed here fall back to "Authorization" with "Bearer " prefix
+// in the auth generator.
+var defaultAuthHeaders = map[string]string{
+	provider.Anthropic:   "x-api-key",
+	provider.Azure:       "api-key",
+	provider.AzureOpenAI: "api-key", // TODO to be removed
+}
+
+// applyAuthDefaults injects provider-specific auth header defaults into the
+// config map when they are not already set by the user.
+func applyAuthDefaults(config map[string]string, providerName string) {
+	headerName, ok := defaultAuthHeaders[providerName]
+	if !ok {
+		return
+	}
+	if _, exists := config[auth.SimpleAuthHeaderName]; !exists {
+		config[auth.SimpleAuthHeaderName] = headerName
+	}
 }

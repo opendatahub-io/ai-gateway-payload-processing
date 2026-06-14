@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	authgenerator "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generator"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -70,28 +70,20 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Type: APIKeyInjectionPluginType,
 			Name: APIKeyInjectionPluginType,
 		},
-		// TODO(#310): Replace static provider→generator mapping with dynamic selection
-		// based on ExternalProvider.spec.auth.type once reconciler wiring lands.
-		authHeadersGenerators: map[string]authgenerator.AuthHeadersGenerator{
-			provider.OpenAI:      &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.Anthropic:   &authgenerator.SimpleAuthGenerator{HeaderName: "x-api-key"},
-			provider.AzureOpenAI: &authgenerator.SimpleAuthGenerator{HeaderName: "api-key"},
-			// provider.Vertex uses the native GenerateContent API — not used in 3.4 ExternalModel flow.
-			// provider.Vertex:     &auth.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.VertexOpenAI:  &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.BedrockOpenAI: &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "Bearer "},
-			provider.AWSBedrock:    &authgenerator.SigV4AuthGenerator{},
+		authHeadersGenerators: map[auth.Auth]authgenerator.AuthHeadersGenerator{
+			auth.Simple: authgenerator.NewSimpleAuthGenerator(),
+			auth.SigV4:  authgenerator.NewSigV4AuthGenerator(),
 		},
 		store: store,
 	}), nil
 }
 
 // ApiKeyInjectionPlugin injects an API key from a Kubernetes Secret into the request headers.
-// The Secret is identified by its namespaced name from CycleState. The provider (e.g., openai, anthropic)
-// determines which header name and value format are used.
+// The Secret is identified by its namespaced name from CycleState. The Auth.Type (from the CR)
+// determines which header(s) and value(s) format are used.
 type ApiKeyInjectionPlugin struct {
 	typedName             plugin.TypedName
-	authHeadersGenerators map[string]authgenerator.AuthHeadersGenerator
+	authHeadersGenerators map[auth.Auth]authgenerator.AuthHeadersGenerator
 	store                 *secretStore
 }
 
@@ -106,66 +98,66 @@ func (p *ApiKeyInjectionPlugin) WithName(name string) *ApiKeyInjectionPlugin {
 	return p
 }
 
-// ProcessRequest reads the credential Secret reference and provider from CycleState (written by model-provider-resolver),
-// looks up the API key in the store, and injects provider-specific auth headers into the request.
+// ProcessRequest reads the credential Secret reference and authType from CycleState (written by model-provider-resolver),
+// looks up the API key in the store, and injects auth headers into the request.
 func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
-	// Check if this is an external model (provider set by model-provider-resolver).
-	// Internal models have no provider in CycleState and don't need API key injection.
-	providerName, err := framework.ReadCycleStateKey[string](cycleState, state.ProviderKey)
-	if err != nil || providerName == "" {
+	// Check if this is an external model (authType set by model-provider-resolver).
+	// Internal models have no authType in CycleState and don't need API key injection.
+	authType, err := framework.ReadCycleStateKey[auth.Auth](cycleState, state.AuthTypeKey)
+	if err != nil || authType == "" {
 		return nil
 	}
 
 	credsName, err := framework.ReadCycleStateKey[string](cycleState, state.CredsRefName)
 	if err != nil || credsName == "" {
-		logger.Error(err, "credentialRef name missing", "provider", providerName)
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' is missing credentialRef", providerName)}
+		logger.Error(err, "credentialRef name missing", "authType", authType)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("authType '%s' is missing credentialRef", authType)}
 	}
 	credsNamespace, err := framework.ReadCycleStateKey[string](cycleState, state.CredsRefNamespace)
 	if err != nil || credsNamespace == "" {
-		logger.Error(err, "credentialRef namespace missing", "provider", providerName)
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' is missing credentialRef namespace", providerName)}
+		logger.Error(err, "credentialRef namespace missing", "authType", authType)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("authType '%s' is missing credentialRef namespace", authType)}
 	}
 
-	credentials, found := p.store.get(credsNamespace, credsName)
+	credentialsData, found := p.store.get(credsNamespace, credsName)
 	if !found {
-		logger.Error(nil, "credentials not found in store", "provider", providerName)
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("provider '%s' credentials not found", providerName)}
+		logger.Error(nil, "credentials not found in store", "authType", authType)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("authType '%s' credentials not found", authType)}
 	}
 
-	generator, ok := p.authHeadersGenerators[providerName]
+	generator, ok := p.authHeadersGenerators[authType]
 	if !ok {
-		logger.Error(nil, "unsupported provider for auth generation", "provider", providerName)
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("unsupported provider - '%s'", providerName)}
+		logger.Error(nil, "unsupported auth type for auth generation", "authType", authType)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("unsupported authType - '%s'", authType)}
 	}
 
 	extraData, err := generator.ExtractRequestData(cycleState, request)
 	if err != nil {
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to extract request data for provider '%s': %v", providerName, err)}
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to extract request data for authType '%s': %v", authType, err)}
 	}
 	if len(extraData) > 0 {
-		merged := make(map[string]string, len(credentials)+len(extraData))
-		for k, v := range credentials {
+		merged := make(map[string]string, len(credentialsData)+len(extraData))
+		for k, v := range credentialsData {
 			merged[k] = v
 		}
 		for k, v := range extraData {
 			merged[k] = v
 		}
-		credentials = merged
+		credentialsData = merged
 	}
 
-	authHeaders, err := generator.GenerateAuthHeaders(credentials)
+	authHeaders, err := generator.GenerateAuthHeaders(credentialsData)
 	if err != nil {
-		logger.Error(err, "auth header generation failed", "provider", providerName)
-		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to generate auth headers for provider '%s': %v", providerName, err)}
+		logger.Error(err, "auth header generation failed", "authType", authType)
+		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to generate auth headers for authType '%s': %v", authType, err)}
 	}
 
 	for headerKey, headerValue := range authHeaders {
 		request.SetHeader(headerKey, headerValue)
 	}
 
-	logger.Info("auth headers injected", "provider", providerName)
+	logger.Info("auth headers injected", "authType", authType)
 	return nil
 }

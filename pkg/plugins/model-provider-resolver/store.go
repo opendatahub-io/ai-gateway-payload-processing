@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -27,6 +28,7 @@ import (
 type providerInfo struct {
 	provider        string
 	endpoint        string
+	auth            auth.Auth
 	secretName      string
 	secretNamespace string
 	config          map[string]string
@@ -37,6 +39,7 @@ type resolvedProviderRef struct {
 	provider        string
 	targetModel     string
 	apiFormat       apiformat.APIFormat
+	auth            auth.Auth
 	endpoint        string
 	secretName      string
 	secretNamespace string

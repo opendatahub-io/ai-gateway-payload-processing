@@ -32,6 +32,7 @@ import (
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 )
 
 type mockModelReader struct {
@@ -79,6 +80,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 		types.NamespacedName{Namespace: "models", Name: "my-openai"},
 		&providerInfo{
 			provider: "openai", endpoint: "api.openai.com",
+			auth:            auth.Simple,
 			secretName: "openai-key", secretNamespace: "models",
 			config: map[string]string{},
 		},
@@ -96,6 +98,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 	assert.Equal(t, "openai", info.refs[0].provider)
 	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
 	assert.Equal(t, apiformat.OpenAIChatCompletions, info.refs[0].apiFormat)
+	assert.Equal(t, auth.Simple, info.refs[0].auth)
 	assert.Equal(t, "openai-key", info.refs[0].secretName)
 	assert.Equal(t, 1, info.refs[0].weight)
 }
@@ -239,7 +242,7 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 	store.addOrUpdateProvider(
 		types.NamespacedName{Namespace: "models", Name: "my-openai"},
 		&providerInfo{provider: "openai", endpoint: "api.openai.com",
-			secretName: "provider-key", secretNamespace: "models", config: map[string]string{}},
+			auth: auth.SigV4, secretName: "provider-key", secretNamespace: "models", config: map[string]string{}},
 	)
 
 	r := &externalModelReconciler{Reader: reader, store: store}
@@ -249,6 +252,7 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
+	assert.Equal(t, auth.Simple, info.refs[0].auth, "model-level auth overrides provider-level auth")
 	assert.Equal(t, "model-specific-key", info.refs[0].secretName)
 	assert.Equal(t, "models", info.refs[0].secretNamespace)
 }

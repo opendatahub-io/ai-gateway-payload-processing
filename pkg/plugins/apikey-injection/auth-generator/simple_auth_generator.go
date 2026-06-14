@@ -19,38 +19,78 @@ package authgenerator
 import (
 	"fmt"
 
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/bbr/framework"
 )
 
 // apiKeyField is the field name in the credentials map that holds the API key.
-const apiKeyField = "api-key"
+const (
+	apiKeyField            = "api-key"
+	defaultAuthHeader      = "Authorization"
+	defaultAuthValuePrefix = "Bearer "
+)
 
 // compile-time interface check
 var _ AuthHeadersGenerator = &SimpleAuthGenerator{}
 
+func NewSimpleAuthGenerator() *SimpleAuthGenerator {
+	return &SimpleAuthGenerator{}
+}
+
 // SimpleAuthGenerator generates a single auth header from an API key.
-// HeaderName is the HTTP header (e.g. "Authorization", "x-api-key").
-// HeaderValuePrefix is prepended to the key (e.g. "Bearer "); use "" for raw keys.
+// ExtractRequestData resolves the header name and value prefix from the model
+// config in CycleState (defaults are injected by the provider reconciler).
+// GenerateAuthHeaders reads those values from the merged credentials map.
 // Requires the credentials map to contain an "api-key" field.
-type SimpleAuthGenerator struct {
-	HeaderName        string
-	HeaderValuePrefix string
+type SimpleAuthGenerator struct{}
+
+// ExtractRequestData resolves the auth header name and value prefix from the
+// model config in CycleState. Provider-specific defaults (e.g. "x-api-key" for
+// Anthropic) are injected into the config by the provider reconciler. If not
+// set, falls back to "Authorization" with "Bearer " prefix.
+func (g *SimpleAuthGenerator) ExtractRequestData(cycleState *framework.CycleState, _ *framework.InferenceRequest) (map[string]string, error) {
+	config, err := framework.ReadCycleStateKey[map[string]string](cycleState, state.ModelConfigKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract config from cycle state - %w", err)
+	}
+
+	authHeader := defaultAuthHeader
+	authValuePrefix := defaultAuthValuePrefix
+
+	if headerName, ok := config[auth.SimpleAuthHeaderName]; ok {
+		authHeader = headerName
+		authValuePrefix = "" // non-default header implies no prefix unless explicitly set
+	}
+	if valuePrefix, ok := config[auth.SimpleAuthValuePrefix]; ok {
+		authValuePrefix = valuePrefix
+	}
+
+	return map[string]string{
+		auth.SimpleAuthHeaderName:  authHeader,
+		auth.SimpleAuthValuePrefix: authValuePrefix,
+	}, nil
 }
 
-// ExtractRequestData is a no-op for SimpleAuthGenerator — API key auth doesn't need request data.
-func (g *SimpleAuthGenerator) ExtractRequestData(_ *framework.CycleState, _ *framework.InferenceRequest) (map[string]string, error) {
-	return nil, nil
-}
-
-// GenerateAuthHeaders extracts the "api-key" field from credentials and returns
+// GenerateAuthHeaders extracts the relevant fields from credentialsData and returns
 // the header name and formatted value. Returns an error if the field is missing.
-func (g *SimpleAuthGenerator) GenerateAuthHeaders(credentials map[string]string) (map[string]string, error) {
-	apiKey, ok := credentials[apiKeyField]
+func (g *SimpleAuthGenerator) GenerateAuthHeaders(credentialsData map[string]string) (map[string]string, error) {
+	apiKey, ok := credentialsData[apiKeyField]
 	if !ok {
 		return nil, fmt.Errorf("credentials missing required field %s", apiKeyField)
 	}
 
+	headerName, ok := credentialsData[auth.SimpleAuthHeaderName]
+	if !ok {
+		return nil, fmt.Errorf("credentials missing required field %s", auth.SimpleAuthHeaderName)
+	}
+
+	valuePrefix, ok := credentialsData[auth.SimpleAuthValuePrefix]
+	if !ok {
+		return nil, fmt.Errorf("credentials missing required field %s", auth.SimpleAuthValuePrefix)
+	}
+
 	return map[string]string{
-		g.HeaderName: fmt.Sprintf("%s%s", g.HeaderValuePrefix, apiKey),
+		headerName: fmt.Sprintf("%s%s", valuePrefix, apiKey),
 	}, nil
 }

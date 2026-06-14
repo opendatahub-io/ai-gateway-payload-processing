@@ -29,14 +29,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
 	authgenerator "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection/auth-generator"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
-)
-
-const (
-	// Synthetic provider names for unit tests.
-	testProviderWithPrefix    = "provider-with-prefix"
-	testProviderWithoutPrefix = "provider-without-prefix"
-	testProviderSigV4         = "provider-sigv4"
 )
 
 // newTestPlugin creates an apiKeyInjectionPlugin for unit tests, bypassing the
@@ -44,10 +38,9 @@ const (
 func newTestPlugin(store *secretStore) *ApiKeyInjectionPlugin {
 	return &ApiKeyInjectionPlugin{
 		typedName: plugin.TypedName{Type: APIKeyInjectionPluginType, Name: APIKeyInjectionPluginType},
-		authHeadersGenerators: map[string]authgenerator.AuthHeadersGenerator{
-			testProviderWithPrefix:    &authgenerator.SimpleAuthGenerator{HeaderName: "Authorization", HeaderValuePrefix: "prefix "},
-			testProviderWithoutPrefix: &authgenerator.SimpleAuthGenerator{HeaderName: "x-api-key"},
-			testProviderSigV4:         &authgenerator.SigV4AuthGenerator{},
+		authHeadersGenerators: map[auth.Auth]authgenerator.AuthHeadersGenerator{
+			auth.Simple: authgenerator.NewSimpleAuthGenerator(),
+			auth.SigV4:  authgenerator.NewSigV4AuthGenerator(),
 		},
 		store: store,
 	}
@@ -63,21 +56,30 @@ func newBedrockRequest() *framework.InferenceRequest {
 	return req
 }
 
-// newSigV4CycleState builds a CycleState with credential ref, sigv4 test provider, endpoint, and config.
+// newSigV4CycleState builds a CycleState with credential ref, sigv4 auth type, endpoint, and config.
 func newSigV4CycleState(credsNamespace, credsName string) *framework.CycleState {
-	cs := newCycleState(credsNamespace, credsName, testProviderSigV4)
+	cs := newCycleState(credsNamespace, credsName, auth.SigV4)
 	cs.Write(state.EndpointKey, "bedrock-runtime.us-east-1.amazonaws.com")
 	cs.Write(state.ModelConfigKey, map[string]string{"service": "bedrock"})
 	return cs
 }
 
-// newCycleState builds a CycleState with credential ref and optional provider.
-func newCycleState(credsNamespace, credsName, providerName string) *framework.CycleState {
+// newSimpleCycleState builds a CycleState with credential ref, simple auth type,
+// and config. The config simulates what the provider reconciler would inject
+// (e.g. authHeaderName for providers like Anthropic/Azure).
+func newSimpleCycleState(credsNamespace, credsName string, config map[string]string) *framework.CycleState {
+	cs := newCycleState(credsNamespace, credsName, auth.Simple)
+	cs.Write(state.ModelConfigKey, config)
+	return cs
+}
+
+// newCycleState builds a CycleState with credential ref and auth type.
+func newCycleState(credsNamespace, credsName string, authType auth.Auth) *framework.CycleState {
 	cs := framework.NewCycleState()
 	cs.Write(state.CredsRefName, credsName)
 	cs.Write(state.CredsRefNamespace, credsNamespace)
-	if providerName != "" {
-		cs.Write(state.ProviderKey, providerName)
+	if authType != "" {
+		cs.Write(state.AuthTypeKey, authType)
 	}
 	return cs
 }
@@ -92,46 +94,48 @@ func TestProcessRequest(t *testing.T) {
 		errorContains     string
 	}{
 		{
-			name:              "provider that has simple generator with prefix",
-			secrets:           []*corev1.Secret{testSecret("default", "openai-key", map[string]string{"api-key": "sk-test-key"})},
-			request:           framework.NewInferenceRequest(),
-			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "openai-key", testProviderWithPrefix) },
+			name:    "simple auth with default Bearer prefix (OpenAI style)",
+			secrets: []*corev1.Secret{testSecret("default", "openai-key", map[string]string{"api-key": "sk-test-key"})},
+			request: framework.NewInferenceRequest(),
+			prepareCycleState: func() *framework.CycleState {
+				return newSimpleCycleState("default", "openai-key", map[string]string{})
+			},
 			wantHeaders: map[string]string{
-				"Authorization": "prefix sk-test-key",
+				"Authorization": "Bearer sk-test-key",
 			},
 		},
 		{
-			name:    "provider that has simple generator without prefix",
+			name:    "simple auth with config-injected header (Anthropic style)",
 			secrets: []*corev1.Secret{testSecret("default", "anthropic-key", map[string]string{"api-key": "ant-key-123"})},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
-				return newCycleState("default", "anthropic-key", testProviderWithoutPrefix)
+				return newSimpleCycleState("default", "anthropic-key", map[string]string{auth.SimpleAuthHeaderName: "x-api-key"})
 			},
 			wantHeaders: map[string]string{
 				"x-api-key": "ant-key-123",
 			},
 		},
 		{
-			name:              "unknown provider — request fails",
-			secrets:           []*corev1.Secret{testSecret("default", "no-provider", map[string]string{"api-key": "sk-key"})},
+			name:              "unknown auth type — request fails",
+			secrets:           []*corev1.Secret{testSecret("default", "no-auth", map[string]string{"api-key": "sk-key"})},
 			request:           framework.NewInferenceRequest(),
-			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "no-provider", "some-unknown-provider") },
-			errorContains:     "unsupported provider",
+			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "no-auth", "unknown-auth-type") },
+			errorContains:     "unsupported authType",
 		},
 		{
-			name:              "internal model no provider - skip gracefully",
-			secrets:           []*corev1.Secret{testSecret("default", "no-provider", map[string]string{"api-key": "sk-key"})},
+			name:              "internal model no auth type - skip gracefully",
+			secrets:           []*corev1.Secret{testSecret("default", "no-auth", map[string]string{"api-key": "sk-key"})},
 			request:           framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
 			wantHeaders:       map[string]string{},
 		},
 		{
 			name:    "missing credentials ref results in error",
-			secrets: []*corev1.Secret{testSecret("default", "no-provider", map[string]string{"api-key": "sk-key"})},
+			secrets: []*corev1.Secret{testSecret("default", "no-creds", map[string]string{"api-key": "sk-key"})},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				cs := framework.NewCycleState()
-				cs.Write(state.ProviderKey, testProviderWithPrefix) // external model has provider but no creds
+				cs.Write(state.AuthTypeKey, auth.Simple) // external model has auth type but no creds
 				return cs
 			},
 			errorContains: "missing credentialRef",
@@ -141,7 +145,7 @@ func TestProcessRequest(t *testing.T) {
 			secrets: []*corev1.Secret{},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
-				return newCycleState("default", "unknown", testProviderWithPrefix)
+				return newSimpleCycleState("default", "unknown", map[string]string{})
 			},
 			errorContains: "credentials not found",
 		},
@@ -150,7 +154,7 @@ func TestProcessRequest(t *testing.T) {
 			secrets: []*corev1.Secret{testSecret("default", "wrong-fields", map[string]string{"wrong-field": "value"})},
 			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
-				return newCycleState("default", "wrong-fields", testProviderWithPrefix)
+				return newSimpleCycleState("default", "wrong-fields", map[string]string{})
 			},
 			errorContains: "failed to generate auth headers",
 		},
@@ -221,7 +225,7 @@ func TestProcessRequest_AWSBedrock(t *testing.T) {
 				"aws-access-key-id":     "AKIAIOSFODNN7EXAMPLE",
 				"aws-secret-access-key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 			})},
-			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "bedrock-creds", testProviderSigV4) },
+			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "bedrock-creds", auth.SigV4) },
 			errorContains:     "failed to extract request data",
 		},
 		{
