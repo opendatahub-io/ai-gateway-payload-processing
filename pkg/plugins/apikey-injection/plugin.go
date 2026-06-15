@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -138,13 +139,9 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to extract request data for authType '%s': %v", authType, err)}
 	}
 	if len(extraData) > 0 {
-		merged := make(map[string]string, len(credentialsData)+len(extraData))
-		for k, v := range credentialsData {
-			merged[k] = v
-		}
-		for k, v := range extraData {
-			merged[k] = v
-		}
+		merged := make(map[string]string, len(credentialsData))
+		maps.Copy(merged, credentialsData)
+		maps.Copy(merged, extraData)
 		credentialsData = merged
 	}
 

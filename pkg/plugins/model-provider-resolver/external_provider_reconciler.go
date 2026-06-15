@@ -19,6 +19,7 @@ package model_provider_resolver
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,6 +31,16 @@ import (
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/auth"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 )
+
+// defaultAuthHeaders maps providers that use a non-standard auth header name.
+// Providers not listed here fall back to "Authorization" with "Bearer " prefix
+// in the auth generator.
+var defaultAuthHeaders = map[string]string{
+	provider.Anthropic: "x-api-key",
+	provider.Azure:     "api-key",
+	// TODO to be removed
+	provider.AzureOpenAI: "api-key",
+}
 
 type externalProviderReconciler struct {
 	client.Reader
@@ -52,11 +63,7 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	config := provider.Spec.Config
-	if config == nil {
-		config = map[string]string{}
-	}
-	applyAuthDefaults(config, provider.Spec.Provider)
+	config := buildConfigWithDefaults(provider.Spec.Provider, provider.Spec.Config)
 	r.store.addOrUpdateProvider(req.NamespacedName, &providerInfo{
 		provider:        provider.Spec.Provider,
 		endpoint:        provider.Spec.Endpoint,
@@ -70,23 +77,13 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return ctrl.Result{}, nil
 }
 
-// defaultAuthHeaders maps providers that use a non-standard auth header name.
-// Providers not listed here fall back to "Authorization" with "Bearer " prefix
-// in the auth generator.
-var defaultAuthHeaders = map[string]string{
-	provider.Anthropic:   "x-api-key",
-	provider.Azure:       "api-key",
-	provider.AzureOpenAI: "api-key", // TODO to be removed
-}
-
-// applyAuthDefaults injects provider-specific auth header defaults into the
-// config map when they are not already set by the user.
-func applyAuthDefaults(config map[string]string, providerName string) {
-	headerName, ok := defaultAuthHeaders[providerName]
-	if !ok {
-		return
-	}
-	if _, exists := config[auth.SimpleAuthHeaderName]; !exists {
+// buildConfigWithDefaults returns a config map that starts from provider-specific
+// defaults and then applies any user-supplied values from the CR on top.
+func buildConfigWithDefaults(providerName string, userConfig map[string]string) map[string]string {
+	config := map[string]string{}
+	if headerName, ok := defaultAuthHeaders[providerName]; ok {
 		config[auth.SimpleAuthHeaderName] = headerName
 	}
+	maps.Copy(config, userConfig)
+	return config
 }

@@ -182,54 +182,61 @@ func TestProviderReconciler_AuthDefaultsNotOverridden(t *testing.T) {
 		"user-specified config should not be overridden by defaults")
 }
 
-func TestApplyAuthDefaults(t *testing.T) {
+func TestBuildConfigWithDefaults(t *testing.T) {
 	tests := []struct {
 		name           string
 		providerName   string
-		config         map[string]string
+		userConfig     map[string]string
 		wantHeaderName string
 		wantInConfig   bool
 	}{
 		{
 			name:           "anthropic gets x-api-key",
 			providerName:   "anthropic",
-			config:         map[string]string{},
+			userConfig:     map[string]string{},
 			wantHeaderName: "x-api-key",
 			wantInConfig:   true,
 		},
 		{
 			name:           "azure gets api-key",
 			providerName:   "azure",
-			config:         map[string]string{},
+			userConfig:     map[string]string{},
 			wantHeaderName: "api-key",
 			wantInConfig:   true,
 		},
 		{
 			name:           "azure-openai gets api-key",
 			providerName:   "azure-openai",
-			config:         map[string]string{},
+			userConfig:     map[string]string{},
 			wantHeaderName: "api-key",
 			wantInConfig:   true,
 		},
 		{
 			name:         "openai gets no default",
 			providerName: "openai",
-			config:       map[string]string{},
+			userConfig:   map[string]string{},
 			wantInConfig: false,
 		},
 		{
-			name:           "user config not overridden",
+			name:           "user config overrides default",
 			providerName:   "anthropic",
-			config:         map[string]string{auth.SimpleAuthHeaderName: "custom"},
+			userConfig:     map[string]string{auth.SimpleAuthHeaderName: "custom"},
 			wantHeaderName: "custom",
 			wantInConfig:   true,
+		},
+		{
+			name:         "nil user config uses defaults",
+			providerName: "anthropic",
+			userConfig:   nil,
+			wantHeaderName: "x-api-key",
+			wantInConfig: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			applyAuthDefaults(test.config, test.providerName)
-			headerName, exists := test.config[auth.SimpleAuthHeaderName]
+			config := buildConfigWithDefaults(test.providerName, test.userConfig)
+			headerName, exists := config[auth.SimpleAuthHeaderName]
 			assert.Equal(t, test.wantInConfig, exists)
 			if test.wantInConfig {
 				assert.Equal(t, test.wantHeaderName, headerName)

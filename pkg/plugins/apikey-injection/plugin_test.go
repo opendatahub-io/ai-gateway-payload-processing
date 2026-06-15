@@ -78,9 +78,7 @@ func newCycleState(credsNamespace, credsName string, authType auth.Auth) *framew
 	cs := framework.NewCycleState()
 	cs.Write(state.CredsRefName, credsName)
 	cs.Write(state.CredsRefNamespace, credsNamespace)
-	if authType != "" {
-		cs.Write(state.AuthTypeKey, authType)
-	}
+	cs.Write(state.AuthTypeKey, authType)
 	return cs
 }
 
@@ -88,7 +86,6 @@ func TestProcessRequest(t *testing.T) {
 	tests := []struct {
 		name              string
 		secrets           []*corev1.Secret
-		request           *framework.InferenceRequest
 		prepareCycleState func() *framework.CycleState
 		wantHeaders       map[string]string
 		errorContains     string
@@ -96,7 +93,6 @@ func TestProcessRequest(t *testing.T) {
 		{
 			name:    "simple auth with default Bearer prefix (OpenAI style)",
 			secrets: []*corev1.Secret{testSecret("default", "openai-key", map[string]string{"api-key": "sk-test-key"})},
-			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				return newSimpleCycleState("default", "openai-key", map[string]string{})
 			},
@@ -107,7 +103,6 @@ func TestProcessRequest(t *testing.T) {
 		{
 			name:    "simple auth with config-injected header (Anthropic style)",
 			secrets: []*corev1.Secret{testSecret("default", "anthropic-key", map[string]string{"api-key": "ant-key-123"})},
-			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				return newSimpleCycleState("default", "anthropic-key", map[string]string{auth.SimpleAuthHeaderName: "x-api-key"})
 			},
@@ -118,21 +113,18 @@ func TestProcessRequest(t *testing.T) {
 		{
 			name:              "unknown auth type — request fails",
 			secrets:           []*corev1.Secret{testSecret("default", "no-auth", map[string]string{"api-key": "sk-key"})},
-			request:           framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState { return newCycleState("default", "no-auth", "unknown-auth-type") },
 			errorContains:     "unsupported authType",
 		},
 		{
 			name:              "internal model no auth type - skip gracefully",
 			secrets:           []*corev1.Secret{testSecret("default", "no-auth", map[string]string{"api-key": "sk-key"})},
-			request:           framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState { return framework.NewCycleState() },
 			wantHeaders:       map[string]string{},
 		},
 		{
 			name:    "missing credentials ref results in error",
 			secrets: []*corev1.Secret{testSecret("default", "no-creds", map[string]string{"api-key": "sk-key"})},
-			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				cs := framework.NewCycleState()
 				cs.Write(state.AuthTypeKey, auth.Simple) // external model has auth type but no creds
@@ -143,7 +135,6 @@ func TestProcessRequest(t *testing.T) {
 		{
 			name:    "credentials not found results in error",
 			secrets: []*corev1.Secret{},
-			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				return newSimpleCycleState("default", "unknown", map[string]string{})
 			},
@@ -152,7 +143,6 @@ func TestProcessRequest(t *testing.T) {
 		{
 			name:    "missing api-key field in credentials results in error",
 			secrets: []*corev1.Secret{testSecret("default", "wrong-fields", map[string]string{"wrong-field": "value"})},
-			request: framework.NewInferenceRequest(),
 			prepareCycleState: func() *framework.CycleState {
 				return newSimpleCycleState("default", "wrong-fields", map[string]string{})
 			},
@@ -168,13 +158,14 @@ func TestProcessRequest(t *testing.T) {
 			}
 
 			plugin := newTestPlugin(store)
-			err := plugin.ProcessRequest(context.Background(), test.prepareCycleState(), test.request)
+			request := framework.NewInferenceRequest()
+			err := plugin.ProcessRequest(context.Background(), test.prepareCycleState(), request)
 			if test.errorContains != "" {
 				require.ErrorContains(t, err, test.errorContains)
 				return
 			}
 			require.NoError(t, err)
-			if diff := cmp.Diff(test.wantHeaders, test.request.Headers, cmpopts.SortMaps(func(a, b string) bool { return a < b }), cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(test.wantHeaders, request.Headers, cmpopts.SortMaps(func(a, b string) bool { return a < b }), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("headers mismatch (-want +got):\n%s", diff)
 			}
 		})
