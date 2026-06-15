@@ -60,10 +60,10 @@ func (g *SimpleAuthGenerator) ExtractRequestData(cycleState *framework.CycleStat
 
 	if headerName, ok := config[auth.SimpleAuthHeaderName]; ok {
 		authHeader = headerName
-		authValuePrefix = "" // non-default header implies no prefix unless explicitly set
-	}
-	if valuePrefix, ok := config[auth.SimpleAuthValuePrefix]; ok {
-		authValuePrefix = valuePrefix
+		authValuePrefix = ""                                           // non-default header implies no prefix unless explicitly set
+		if valuePrefix, ok := config[auth.SimpleAuthValuePrefix]; ok { // valuePrefix can be set only if header name is set
+			authValuePrefix = valuePrefix
+		}
 	}
 
 	return map[string]string{

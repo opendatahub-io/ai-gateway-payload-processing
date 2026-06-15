@@ -38,8 +38,9 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 		{
 			name: "Bearer prefix (OpenAI style)",
 			credentials: map[string]string{
-				"api-key":                 "sk-test-key",
-				auth.SimpleAuthHeaderName: "Authorization", auth.SimpleAuthValuePrefix: "Bearer ",
+				"api-key":                  "sk-test-key",
+				auth.SimpleAuthHeaderName:  "Authorization",
+				auth.SimpleAuthValuePrefix: "Bearer ",
 			},
 			wantHeaders: map[string]string{
 				"Authorization": "Bearer sk-test-key",
@@ -48,8 +49,9 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 		{
 			name: "raw key without prefix (Anthropic style)",
 			credentials: map[string]string{
-				"api-key":                 "ant-key-123",
-				auth.SimpleAuthHeaderName: "x-api-key", auth.SimpleAuthValuePrefix: "",
+				"api-key":                  "ant-key-123",
+				auth.SimpleAuthHeaderName:  "x-api-key",
+				auth.SimpleAuthValuePrefix: "",
 			},
 			wantHeaders: map[string]string{
 				"x-api-key": "ant-key-123",
@@ -58,8 +60,9 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 		{
 			name: "missing api-key field returns error",
 			credentials: map[string]string{
-				"wrong-field":             "some-value",
-				auth.SimpleAuthHeaderName: "Authorization", auth.SimpleAuthValuePrefix: "Bearer ",
+				"wrong-field":              "some-value",
+				auth.SimpleAuthHeaderName:  "Authorization",
+				auth.SimpleAuthValuePrefix: "Bearer ",
 			},
 			wantErr: true,
 		},
@@ -124,7 +127,7 @@ func TestSimpleExtractRequestData(t *testing.T) {
 			wantValuePrefix: "Bearer ",
 		},
 		{
-			name:            "config with custom header name clears prefix",
+			name:            "config with custom header name clears value prefix",
 			config:          map[string]string{auth.SimpleAuthHeaderName: "x-api-key"},
 			wantHeaderName:  "x-api-key",
 			wantValuePrefix: "",
@@ -136,10 +139,10 @@ func TestSimpleExtractRequestData(t *testing.T) {
 			wantValuePrefix: "Key ",
 		},
 		{
-			name:            "config with value prefix only keeps default header",
+			name:            "config with value prefix only is ignored without header name",
 			config:          map[string]string{auth.SimpleAuthValuePrefix: "Token "},
 			wantHeaderName:  "Authorization",
-			wantValuePrefix: "Token ",
+			wantValuePrefix: "Bearer ",
 		},
 	}
 
@@ -159,10 +162,8 @@ func TestSimpleExtractRequestData(t *testing.T) {
 }
 
 func TestSimpleExtractRequestData_MissingModelConfigKey(t *testing.T) {
-	cs := framework.NewCycleState()
-
 	generator := NewSimpleAuthGenerator()
-	_, err := generator.ExtractRequestData(cs, framework.NewInferenceRequest())
+	_, err := generator.ExtractRequestData(framework.NewCycleState(), framework.NewInferenceRequest())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to extract config from cycle state")
 }
