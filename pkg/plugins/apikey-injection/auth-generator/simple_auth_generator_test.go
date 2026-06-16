@@ -139,6 +139,12 @@ func TestSimpleExtractRequestData(t *testing.T) {
 			wantValuePrefix: "Key ",
 		},
 		{
+			name:            "config with empty header name defaults to Authorization Bearer",
+			config:          map[string]string{auth.SimpleAuthHeaderName: ""},
+			wantHeaderName:  "Authorization",
+			wantValuePrefix: "Bearer ",
+		},
+		{
 			name:            "config with value prefix only is ignored without header name",
 			config:          map[string]string{auth.SimpleAuthValuePrefix: "Token "},
 			wantHeaderName:  "Authorization",

@@ -139,7 +139,7 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to extract request data for authType '%s': %v", authType, err)}
 	}
 	if len(extraData) > 0 {
-		merged := make(map[string]string, len(credentialsData))
+		merged := make(map[string]string, len(credentialsData)+len(extraData))
 		maps.Copy(merged, credentialsData)
 		maps.Copy(merged, extraData)
 		credentialsData = merged
