@@ -14,9 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package main
 
 import (
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,12 +27,12 @@ import (
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalmodel"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalprovider"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/legacymigration"
 )
 
-// ProviderController returns a setup function that registers the ExternalProvider
+// providerController returns a setup function that registers the ExternalProvider
 // controller. It creates Service, ServiceEntry, and DestinationRule resources.
-// Does not use Owns() to avoid cluster-wide Service informers that delay startup.
-func ProviderController() func(client.Client, *ctrlbuilder.Builder) error {
+func providerController() func(client.Client, *ctrlbuilder.Builder) error {
 	return func(c client.Client, b *ctrlbuilder.Builder) error {
 		utilruntime.Must(inferencev1alpha1.AddToScheme(c.Scheme()))
 
@@ -42,10 +43,9 @@ func ProviderController() func(client.Client, *ctrlbuilder.Builder) error {
 	}
 }
 
-// ModelController returns a setup function that registers the ExternalModel
+// modelController returns a setup function that registers the ExternalModel
 // controller. It creates HTTPRoute resources with the specified gateway parent ref.
-// Does not use Owns() to avoid cluster-wide HTTPRoute informers that delay startup.
-func ModelController(gatewayName, gatewayNamespace string) func(client.Client, *ctrlbuilder.Builder) error {
+func modelController(gatewayName, gatewayNamespace string) func(client.Client, *ctrlbuilder.Builder) error {
 	return func(c client.Client, b *ctrlbuilder.Builder) error {
 		utilruntime.Must(inferencev1alpha1.AddToScheme(c.Scheme()))
 		utilruntime.Must(gatewayapiv1.Install(c.Scheme()))
@@ -63,5 +63,20 @@ func ModelController(gatewayName, gatewayNamespace string) func(client.Client, *
 			Watches(&inferencev1alpha1.ExternalProvider{},
 				handler.EnqueueRequestsFromMapFunc(reconciler.MapProviderToModels)).
 			Complete(reconciler)
+	}
+}
+
+// legacyMigrationController returns a setup function that registers the legacy
+// migration controller. It watches maas.opendatahub.io ExternalModel CRs and
+// creates corresponding inference.opendatahub.io ExternalProvider + ExternalModel CRs.
+func legacyMigrationController() func(client.Client, *ctrlbuilder.Builder) error {
+	return func(c client.Client, b *ctrlbuilder.Builder) error {
+		legacyObj := &unstructured.Unstructured{}
+		legacyObj.SetGroupVersionKind(legacymigration.LegacyExternalModelGVK)
+
+		return b.
+			For(legacyObj).
+			Named("legacy-migration").
+			Complete(&legacymigration.Reconciler{Client: c})
 	}
 }

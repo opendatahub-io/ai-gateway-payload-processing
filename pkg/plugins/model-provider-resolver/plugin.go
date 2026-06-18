@@ -23,7 +23,6 @@ import (
 	"math/rand/v2"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -37,7 +36,6 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/legacymigration"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -99,16 +97,6 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 		Watches(&inferencev1alpha1.ExternalProvider{}, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
 		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
-	}
-
-	// Legacy: watch maas.opendatahub.io ExternalModels and migrate to new CRs
-	legacyObj := &unstructured.Unstructured{}
-	legacyObj.SetGroupVersionKind(legacymigration.LegacyExternalModelGVK)
-	if err := reconcilerBuilder().
-		For(legacyObj).
-		Named("legacy-migration").
-		Complete(&legacymigration.Reconciler{Client: k8sClient}); err != nil {
-		return nil, fmt.Errorf("failed to register legacy migration reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{
