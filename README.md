@@ -38,6 +38,7 @@ kubectl apply -f config/crd/bases/
     --namespace ${GATEWAY_NAMESPACE} \
     --dependency-update \
     --set upstreamIpp.inferenceGateway.name=${GATEWAY_NAME} \
+    --set upstreamIpp.provider.istio.envoyFilter.operation=INSERT_AFTER \
     --set upstreamIpp.provider.istio.envoyFilter.anchorSubFilter=extensions.istio.io/wasmplugin/${GATEWAY_NAMESPACE}.kuadrant-${GATEWAY_NAME} \
     --set upstreamIpp.payloadProcessor.env[0].name=GATEWAY_NAME \
     --set upstreamIpp.payloadProcessor.env[0].value=${GATEWAY_NAME} \
