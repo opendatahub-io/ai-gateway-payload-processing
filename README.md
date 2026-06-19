@@ -7,8 +7,6 @@ IPP plugins enable custom request/response mutations of both headers and body, a
 ## Pre-Requisites
 
 The target cluster must have `ExternalModel` and `ExternalProvider` CRDs deployed.  
-If you're running this deployment after `model-as-a-service`, the CRDs are already included.
-If you're running this repo as a standalone, deploy the CRDs before running the helm chart:
 
 ```bash
 kubectl apply -f config/crd/bases/
