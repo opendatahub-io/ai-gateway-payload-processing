@@ -35,6 +35,7 @@ var (
 	simulatorEP   string
 	simulatorFQDN string
 	curlTimeout   = 30 * time.Second
+	kubectlBin    = envOr("KUBECTL_BIN", "kubectl")
 )
 
 func TestE2E(t *testing.T) {
@@ -125,17 +126,17 @@ func createNamespace(name string) {
 }
 
 func kubectlApplyLiteral(yamlContent string) {
-	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd := exec.Command(kubectlBin, "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(yamlContent)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "kubectl apply failed: %s\n%s\n", err, string(out))
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "%s apply failed: %s\n%s\n", kubectlBin, err, string(out))
 	}
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), string(out))
 }
 
 func kubectlDeleteResource(kind, name, namespace string) {
-	cmd := exec.Command("kubectl", "delete", kind, name, "-n", namespace, "--ignore-not-found", "--timeout=30s")
+	cmd := exec.Command(kubectlBin, "delete", kind, name, "-n", namespace, "--ignore-not-found", "--timeout=30s")
 	_, _ = cmd.CombinedOutput()
 }
 
