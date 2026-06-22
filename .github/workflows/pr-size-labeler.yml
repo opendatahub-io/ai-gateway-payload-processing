@@ -32,20 +32,3 @@ jobs:
               "500": "XL",
               "1000": "XXL"
             }
-
-      - name: Hold large PRs
-        if: contains(steps.size.outputs.sizeLabel, 'XL')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr edit ${{ github.event.pull_request.number }} \
-            --repo ${{ github.repository }} \
-            --add-label "do-not-merge/hold"
-          
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --repo ${{ github.repository }} \
-            --body "⚠️ **Large PR detected**
-
-          Your PR is large. Please consider breaking it into multiple PRs.
-
-          The \`do-not-merge/hold\` label has been added and can be removed by the reviewers based on their judgement."
