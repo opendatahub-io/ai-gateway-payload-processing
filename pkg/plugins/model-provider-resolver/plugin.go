@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -37,11 +38,20 @@ import (
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 const (
 	ModelProviderResolverPluginType = "model-provider-resolver"
+
+	// OriginClusterHeader is injected into outgoing cross-cluster requests and
+	// checked on incoming requests to detect routing loops (A → B → A).
+	OriginClusterHeader = "x-origin-cluster"
+
+	// ClusterNameEnvVar is the environment variable that provides this cluster's
+	// identity for loop detection. When unset, loop detection is disabled.
+	ClusterNameEnvVar = "CLUSTER_NAME"
 )
 
 var _ requesthandling.RequestProcessor = &ModelProviderResolverPlugin{}
@@ -99,18 +109,26 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
+	clusterName := os.Getenv(ClusterNameEnvVar)
+
 	return &ModelProviderResolverPlugin{
-		typedName: plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
-		store:     store,
+		typedName:   plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
+		store:       store,
+		clusterName: clusterName,
 	}, nil
 }
 
 // ModelProviderResolverPlugin resolves model names to provider info by watching ExternalModel CRDs.
 // It writes the model, provider and credential reference to CycleState for downstream plugins
 // (api-translation, api-key-injection).
+//
+// When clusterName is set (via CLUSTER_NAME env var), the plugin also performs routing loop
+// detection for cross-cluster requests: it rejects incoming requests whose X-Origin-Cluster
+// header matches this cluster, and injects the header on outgoing remote-maas requests.
 type ModelProviderResolverPlugin struct {
-	typedName plugin.TypedName
-	store     *infoStore
+	typedName   plugin.TypedName
+	store       *infoStore
+	clusterName string
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
@@ -125,8 +143,17 @@ func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolv
 // ProcessRequest reads the model name from the request body, resolves the provider
 // from the store (populated by ExternalModel reconciler), and writes model, provider
 // and credential reference info to CycleState.
+//
+// When clusterName is configured, the method also:
+//   - Rejects incoming requests whose X-Origin-Cluster header matches this cluster
+//     (routing loop detection).
+//   - Injects X-Origin-Cluster on outgoing requests routed to a remote-maas provider.
 func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
+
+	if err := p.checkRoutingLoop(ctx, request); err != nil {
+		return err
+	}
 
 	model, ok := request.Body["model"].(string)
 	if !ok || model == "" {
@@ -175,8 +202,52 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.ModelConfigKey, ref.config)
 	cycleState.Write(state.InputAPIFormatKey, inputFormat)
 
+	p.injectOriginCluster(ctx, request, ref.provider)
+
 	logger.Info("external model resolved", "model", modelKey.String(), "provider", ref.provider, "inputFormat", inputFormat, "apiFormat", ref.apiFormat)
 	return nil
+}
+
+// checkRoutingLoop detects cross-cluster routing loops by comparing the incoming
+// X-Origin-Cluster header against this cluster's identity. Returns an error if
+// the request originated from this cluster (A → B → A loop).
+// When clusterName is empty (CLUSTER_NAME not set), the check is skipped.
+func (p *ModelProviderResolverPlugin) checkRoutingLoop(ctx context.Context, request *requesthandling.InferenceRequest) error {
+	if p.clusterName == "" {
+		return nil
+	}
+
+	origin := request.Headers[OriginClusterHeader]
+	if origin == "" {
+		return nil
+	}
+
+	if origin == p.clusterName {
+		log.FromContext(ctx).V(logutil.DEFAULT).Error(nil, "routing loop detected",
+			"originCluster", origin, "thisCluster", p.clusterName)
+		return errcommon.Error{
+			Code: errcommon.Forbidden,
+			Msg:  fmt.Sprintf("routing loop detected: request originated from this cluster (%s)", p.clusterName),
+		}
+	}
+
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("cross-cluster request accepted",
+		"originCluster", origin, "thisCluster", p.clusterName)
+	return nil
+}
+
+// injectOriginCluster adds the X-Origin-Cluster header to outgoing requests
+// routed to a remote-maas provider. This allows the receiving cluster to
+// detect routing loops.
+// When clusterName is empty or the provider is not remote-maas, no header is injected.
+func (p *ModelProviderResolverPlugin) injectOriginCluster(ctx context.Context, request *requesthandling.InferenceRequest, resolvedProvider string) {
+	if p.clusterName == "" || resolvedProvider != provider.RemoteMaaS {
+		return
+	}
+
+	request.SetHeader(OriginClusterHeader, p.clusterName)
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("injected origin cluster header for cross-cluster request",
+		"header", OriginClusterHeader, "cluster", p.clusterName)
 }
 
 // detectInputAPIFormat determines the client's API format from the request path suffix.

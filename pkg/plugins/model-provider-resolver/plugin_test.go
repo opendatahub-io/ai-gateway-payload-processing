@@ -356,6 +356,179 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported API path")
 }
 
+// --- Loop detection tests ---
+
+func TestProcessRequest_LoopDetected_SameCluster(t *testing.T) {
+	store := newInfoStore()
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: "cluster-a"}
+
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/model/v1/chat/completions"
+	req.Headers[OriginClusterHeader] = "cluster-a"
+	req.Body["model"] = "model"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "routing loop detected")
+}
+
+func TestProcessRequest_CrossCluster_DifferentOrigin(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "remote-llama"},
+		&externalModelInfo{modelName: "remote-llama", refs: []*resolvedProviderRef{{
+			provider: provider.RemoteMaaS, targetModel: "llama-4-scout",
+			apiFormat: apiformat.OpenAIChatCompletions, auth: auth.Simple,
+			endpoint: "maas.cluster-b.example.com", path: "/maas/v1/chat/completions",
+			secretName: "key", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: "cluster-b"}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/remote-llama/v1/chat/completions"
+	req.Headers[OriginClusterHeader] = "cluster-a"
+	req.Body["model"] = "remote-llama"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err, "different origin cluster should be allowed")
+
+	actualProvider, err := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.NoError(t, err)
+	require.Equal(t, provider.RemoteMaaS, actualProvider)
+}
+
+func TestProcessRequest_NoOriginHeader_Passes(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
+		&externalModelInfo{modelName: "gpt4", refs: []*resolvedProviderRef{{
+			provider: provider.OpenAI, targetModel: "gpt-4o",
+			apiFormat: apiformat.OpenAIChatCompletions, auth: auth.Simple,
+			endpoint: "api.openai.com",
+			secretName: "key", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: "cluster-a"}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
+	req.Body["model"] = "gpt4"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err, "request without origin header should pass")
+
+	actualProvider, err := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.NoError(t, err)
+	require.Equal(t, provider.OpenAI, actualProvider)
+}
+
+func TestProcessRequest_RemoteMaaS_InjectsOriginHeader(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "remote-llama"},
+		&externalModelInfo{modelName: "remote-llama", refs: []*resolvedProviderRef{{
+			provider: provider.RemoteMaaS, targetModel: "llama-4-scout",
+			apiFormat: apiformat.OpenAIChatCompletions, auth: auth.Simple,
+			endpoint: "maas.cluster-b.example.com", path: "/maas/v1/chat/completions",
+			secretName: "key", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: "cluster-a"}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/remote-llama/v1/chat/completions"
+	req.Body["model"] = "remote-llama"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	mutated := req.MutatedHeaders()
+	require.Equal(t, "cluster-a", mutated[OriginClusterHeader],
+		"outgoing remote-maas request should have x-origin-cluster header")
+}
+
+func TestProcessRequest_LocalProvider_NoOriginHeaderInjected(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
+		&externalModelInfo{modelName: "gpt4", refs: []*resolvedProviderRef{{
+			provider: provider.OpenAI, targetModel: "gpt-4o",
+			apiFormat: apiformat.OpenAIChatCompletions, auth: auth.Simple,
+			endpoint: "api.openai.com",
+			secretName: "key", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: "cluster-a"}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
+	req.Body["model"] = "gpt4"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	mutated := req.MutatedHeaders()
+	_, hasOrigin := mutated[OriginClusterHeader]
+	require.False(t, hasOrigin,
+		"non-remote-maas providers should not get x-origin-cluster header")
+}
+
+func TestProcessRequest_ClusterNameEmpty_LoopDetectionDisabled(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "remote-llama"},
+		&externalModelInfo{modelName: "remote-llama", refs: []*resolvedProviderRef{{
+			provider: provider.RemoteMaaS, targetModel: "llama-4-scout",
+			apiFormat: apiformat.OpenAIChatCompletions, auth: auth.Simple,
+			endpoint: "maas.cluster-b.example.com", path: "/maas/v1/chat/completions",
+			secretName: "key", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: ""}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/remote-llama/v1/chat/completions"
+	req.Headers[OriginClusterHeader] = "cluster-a"
+	req.Body["model"] = "remote-llama"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err, "loop detection should be disabled when CLUSTER_NAME is empty")
+
+	mutated := req.MutatedHeaders()
+	_, hasOrigin := mutated[OriginClusterHeader]
+	require.False(t, hasOrigin,
+		"should not inject origin header when CLUSTER_NAME is empty")
+}
+
+func TestProcessRequest_LoopDetected_BeforeModelResolution(t *testing.T) {
+	store := newInfoStore()
+	instance := &ModelProviderResolverPlugin{store: store, clusterName: "cluster-a"}
+
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/model/v1/chat/completions"
+	req.Headers[OriginClusterHeader] = "cluster-a"
+	req.Body["model"] = "model"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.Error(t, err)
+
+	_, csErr := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.Error(t, csErr, "CycleState should be empty — loop rejected before model resolution")
+}
+
 func TestDetectInputAPIFormat(t *testing.T) {
 	tests := []struct {
 		path     string
