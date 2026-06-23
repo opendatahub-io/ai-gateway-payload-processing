@@ -19,6 +19,7 @@ package main
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -69,10 +70,19 @@ func modelController(gatewayName, gatewayNamespace string) func(client.Client, *
 // legacyMigrationController returns a setup function that registers the legacy
 // migration controller. It watches maas.opendatahub.io ExternalModel CRs and
 // creates corresponding inference.opendatahub.io ExternalProvider + ExternalModel CRs.
+// Skips registration if the legacy CRD is not installed on the cluster.
 func legacyMigrationController() func(client.Client, *ctrlbuilder.Builder) error {
 	return func(c client.Client, b *ctrlbuilder.Builder) error {
+		gvk := legacymigration.LegacyExternalModelGVK
+		_, err := c.RESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			ctrl.Log.WithName("setup").Info("legacy ExternalModel CRD not found, skipping migration controller",
+				"group", gvk.Group, "version", gvk.Version, "kind", gvk.Kind)
+			return nil
+		}
+
 		legacyObj := &unstructured.Unstructured{}
-		legacyObj.SetGroupVersionKind(legacymigration.LegacyExternalModelGVK)
+		legacyObj.SetGroupVersionKind(gvk)
 
 		return b.
 			For(legacyObj).
