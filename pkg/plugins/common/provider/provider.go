@@ -26,4 +26,6 @@ const (
 	AzureOpenAI   = "azure-openai"
 	VertexOpenAI  = "vertex-openai"
 	BedrockOpenAI = "bedrock-openai"
+
+	RemoteMaaS = "remote-maas"
 )

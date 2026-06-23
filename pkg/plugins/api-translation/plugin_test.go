@@ -383,6 +383,28 @@ func TestFactory_Success(t *testing.T) {
 	assert.Equal(t, APITranslationPluginType, p.TypedName().Type)
 }
 
+func TestProcessRequest_RemoteMaaSProvider(t *testing.T) {
+	p := newTestPlugin()
+
+	cs := newCycleStateWithProvider("remote-maas")
+	cs.Write(state.PathKey, "/maas-default-gateway/v1/chat/completions")
+
+	req := requesthandling.NewInferenceRequest()
+	req.Body["model"] = "llama-4-scout"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
+	req.Headers["authorization"] = "Bearer sk-test"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err, "remote-maas provider must be supported without error")
+
+	mutated := req.MutatedHeaders()
+	assert.Equal(t, "/maas-default-gateway/v1/chat/completions", mutated[":path"],
+		"remote-maas with path override should use the override path")
+
+	removed := req.RemovedHeaders()
+	assert.Contains(t, removed, "authorization")
+}
+
 func TestIsPassthrough(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -411,6 +433,75 @@ func TestIsPassthrough(t *testing.T) {
 			assert.Equal(t, tt.expected, isPassthrough(cs))
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Path override from CycleState
+// ---------------------------------------------------------------------------
+
+func TestProcessRequest_PathOverrideFromCycleState(t *testing.T) {
+	mock := &mockTranslator{
+		reqHeaders: map[string]string{":path": "/v1/chat/completions"},
+	}
+	p := newPluginWithMock("remote-maas", mock)
+
+	cs := newCycleStateWithProvider("remote-maas")
+	cs.Write(state.PathKey, "/maas-default-gateway/v1/chat/completions")
+
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["authorization"] = "Bearer sk-test"
+	req.Body["model"] = "llama-4-scout"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	mutated := req.MutatedHeaders()
+	assert.Equal(t, "/maas-default-gateway/v1/chat/completions", mutated[":path"],
+		"path override from CycleState must replace translator's :path")
+}
+
+func TestProcessRequest_NoPathOverride_KeepsTranslatorDefault(t *testing.T) {
+	mock := &mockTranslator{
+		reqHeaders: map[string]string{":path": "/v1/chat/completions"},
+	}
+	p := newPluginWithMock("openai", mock)
+
+	cs := newCycleStateWithProvider("openai")
+	cs.Write(state.PathKey, "")
+
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["authorization"] = "Bearer sk-test"
+	req.Body["model"] = "gpt-4o"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	mutated := req.MutatedHeaders()
+	assert.Equal(t, "/v1/chat/completions", mutated[":path"],
+		"empty PathKey means translator's default :path is kept")
+}
+
+func TestProcessRequest_PathOverrideInPassthrough(t *testing.T) {
+	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
+	cs := plugin.NewCycleState()
+	cs.Write(state.ProviderKey, "anthropic")
+	cs.Write(state.InputAPIFormatKey, apiformat.Messages)
+	cs.Write(state.APIFormatKey, apiformat.Messages)
+	cs.Write(state.PathKey, "/custom-passthrough-path")
+
+	req := requesthandling.NewInferenceRequest()
+	req.Body["model"] = "claude-opus-4-6"
+	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "hi"}}
+	req.Headers["authorization"] = "Bearer sk-test"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	mutated := req.MutatedHeaders()
+	assert.Equal(t, "/custom-passthrough-path", mutated[":path"],
+		"path override must apply even in passthrough mode")
 }
 
 func TestPassthrough_SkipsRequestTranslation(t *testing.T) {

@@ -109,12 +109,18 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1a
 		weight = *ref.Weight
 	}
 
+	path := providerInfo.path
+	if ref.Path != "" {
+		path = ref.Path
+	}
+
 	return &resolvedProviderRef{
 		provider:        providerInfo.provider,
 		targetModel:     ref.TargetModel,
 		apiFormat:       apiformat.APIFormat(ref.APIFormat),
 		auth:            authType,
 		endpoint:        providerInfo.endpoint,
+		path:            path,
 		secretName:      secretName,
 		secretNamespace: secretNamespace,
 		config:          config,

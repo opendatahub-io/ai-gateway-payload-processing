@@ -87,6 +87,7 @@ func NewAPITranslationPlugin(ctx context.Context, config apiTranslationConfig) (
 		provider.Anthropic:     anthropic.NewAnthropicTranslator(),
 		provider.AzureOpenAI:   azure.NewAzureOpenAITranslator(),
 		provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(),
+		provider.RemoteMaaS:    openai.NewOpenAITranslator(),
 	}
 
 	if config.VertexOpenAI != nil {
@@ -150,6 +151,10 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *p
 		logger.Info("passthrough mode — skipping request translation")
 		// Remove client auth header; apikey-injection plugin adds the provider credential downstream.
 		request.RemoveHeader("authorization")
+		// Override :path if a custom path is configured in CycleState (cross-cluster routing).
+		if pathOverride, err := plugin.ReadCycleStateKey[string](cycleState, state.PathKey); err == nil && pathOverride != "" {
+			request.SetHeader(":path", pathOverride)
+		}
 		return nil
 	}
 
@@ -183,6 +188,11 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *p
 	// authorization is a special header removed by the plugin, no matter which provider is used.
 	// The api-key is expected to be set by the the api-key injection plugin.
 	request.RemoveHeader("authorization")
+
+	// Override :path if a custom path is configured in CycleState (cross-cluster routing).
+	if pathOverride, err := plugin.ReadCycleStateKey[string](cycleState, state.PathKey); err == nil && pathOverride != "" {
+		request.SetHeader(":path", pathOverride)
+	}
 
 	// content-length is another special header that will be set automatically by the pluggable framework when the body is mutated.
 

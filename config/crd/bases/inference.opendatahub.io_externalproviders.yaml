@@ -99,6 +99,15 @@ spec:
                 minLength: 1
                 pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)+$
                 type: string
+              path:
+                description: |-
+                  Path overrides the outgoing request path for this provider.
+                  When set, the `:path` pseudo-header is set to this value instead of
+                  the translator's default. Must be a valid absolute path.
+                  e.g. "/maas-default-gateway/v1/chat/completions".
+                maxLength: 512
+                pattern: ^/.*
+                type: string
               provider:
                 description: |-
                   Provider identifies the API type for this provider.

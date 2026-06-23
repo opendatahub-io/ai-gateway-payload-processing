@@ -58,6 +58,15 @@ type ExternalProviderSpec struct {
 	// +kubebuilder:validation:Required
 	Auth AuthConfig `json:"auth"`
 
+	// Path overrides the outgoing request path for this provider.
+	// When set, the `:path` pseudo-header is set to this value instead of
+	// the translator's default. Must be a valid absolute path.
+	// e.g. "/maas-default-gateway/v1/chat/completions".
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`^/.*`
+	Path string `json:"path,omitempty"`
+
 	// Config holds provider-specific configuration as key-value pairs.
 	// e.g., Vertex AI: {"project": "my-project", "location": "us-central1"}.
 	// +optional

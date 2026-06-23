@@ -105,6 +105,13 @@ spec:
                         Config holds model-specific configuration as key-value pairs.
                         Overrides the ExternalProvider config for this model-provider binding.
                       type: object
+                    path:
+                      description: |-
+                        Path overrides the ExternalProvider's path for this model-provider binding.
+                        When set, takes precedence over the provider-level path.
+                      maxLength: 512
+                      pattern: ^/.*
+                      type: string
                     ref:
                       description: Ref identifies the ExternalProvider CR (must be
                         in the same namespace).

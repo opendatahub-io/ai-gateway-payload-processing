@@ -100,6 +100,60 @@ func TestProviderReconciler_DeletedCR(t *testing.T) {
 	assert.False(t, found, "store entry should be removed on delete")
 }
 
+func TestProviderReconciler_WithPath(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "cluster-b"}
+	reader := &mockProviderReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalProvider{
+		key: {
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster-b", Namespace: "models"},
+			Spec: inferencev1alpha1.ExternalProviderSpec{
+				Provider: "remote-maas",
+				Endpoint: "maas.cluster-b.example.com",
+				Path:     "/maas-default-gateway/v1/chat/completions",
+				Auth: inferencev1alpha1.AuthConfig{
+					Type:      "simple",
+					SecretRef: inferencev1alpha1.NameReference{Name: "cluster-b-key"}},
+			},
+		},
+	}}
+	store := newInfoStore()
+	r := &externalProviderReconciler{Reader: reader, store: store}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	info, found := store.getProvider(key)
+	require.True(t, found)
+	assert.Equal(t, "remote-maas", info.provider)
+	assert.Equal(t, "maas.cluster-b.example.com", info.endpoint)
+	assert.Equal(t, "/maas-default-gateway/v1/chat/completions", info.path)
+}
+
+func TestProviderReconciler_EmptyPath(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "my-openai"}
+	reader := &mockProviderReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalProvider{
+		key: {
+			ObjectMeta: metav1.ObjectMeta{Name: "my-openai", Namespace: "models"},
+			Spec: inferencev1alpha1.ExternalProviderSpec{
+				Provider: "openai",
+				Endpoint: "api.openai.com",
+				Auth: inferencev1alpha1.AuthConfig{
+					Type:      "simple",
+					SecretRef: inferencev1alpha1.NameReference{Name: "openai-key"}},
+			},
+		},
+	}}
+	store := newInfoStore()
+	r := &externalProviderReconciler{Reader: reader, store: store}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getProvider(key)
+	require.True(t, found)
+	assert.Equal(t, "", info.path, "path should be empty when not set")
+}
+
 func TestProviderReconciler_WithConfig(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "my-vertex"}
 	reader := &mockProviderReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalProvider{

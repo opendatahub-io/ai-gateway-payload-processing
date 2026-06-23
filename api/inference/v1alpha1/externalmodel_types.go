@@ -78,6 +78,13 @@ type ExternalProviderRef struct {
 	// +kubebuilder:validation:MaxLength=63
 	APIFormat string `json:"apiFormat"`
 
+	// Path overrides the ExternalProvider's path for this model-provider binding.
+	// When set, takes precedence over the provider-level path.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`^/.*`
+	Path string `json:"path,omitempty"`
+
 	// Config holds model-specific configuration as key-value pairs.
 	// Overrides the ExternalProvider config for this model-provider binding.
 	// +optional

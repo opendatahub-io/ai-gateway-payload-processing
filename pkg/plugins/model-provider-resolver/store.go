@@ -28,6 +28,7 @@ import (
 type providerInfo struct {
 	provider        string
 	endpoint        string
+	path            string
 	auth            auth.Auth
 	secretName      string
 	secretNamespace string
@@ -41,6 +42,7 @@ type resolvedProviderRef struct {
 	apiFormat       apiformat.APIFormat
 	auth            auth.Auth
 	endpoint        string
+	path            string
 	secretName      string
 	secretNamespace string
 	config          map[string]string

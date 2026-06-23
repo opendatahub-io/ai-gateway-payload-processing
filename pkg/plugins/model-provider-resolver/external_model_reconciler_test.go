@@ -340,6 +340,92 @@ func TestModelReconciler_ConfigMerge(t *testing.T) {
 	assert.Equal(t, "custom-endpoint", info.refs[0].config["endpoint"])
 }
 
+func TestModelReconciler_PathFromProvider(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "remote-llama"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("remote-llama", "models", newRef("cluster-b", "llama-4-scout", "openai-chat")),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "cluster-b"},
+		&providerInfo{
+			provider: "remote-maas", endpoint: "maas.cluster-b.example.com",
+			path:       "/maas-default-gateway/v1/chat/completions",
+			auth:       auth.Simple,
+			secretName: "cluster-b-key", secretNamespace: "models",
+			config: map[string]string{},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, "/maas-default-gateway/v1/chat/completions", info.refs[0].path,
+		"resolved path should come from provider when model ref has no path")
+}
+
+func TestModelReconciler_PathModelOverridesProvider(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "remote-llama"}
+	ref := newRef("cluster-b", "llama-4-scout", "openai-chat")
+	ref.Path = "/custom-model-path/v1/chat/completions"
+
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("remote-llama", "models", ref),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "cluster-b"},
+		&providerInfo{
+			provider: "remote-maas", endpoint: "maas.cluster-b.example.com",
+			path:       "/maas-default-gateway/v1/chat/completions",
+			auth:       auth.Simple,
+			secretName: "cluster-b-key", secretNamespace: "models",
+			config: map[string]string{},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, "/custom-model-path/v1/chat/completions", info.refs[0].path,
+		"model-level path must override provider-level path")
+}
+
+func TestModelReconciler_PathBothEmpty(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "gpt4"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("gpt4", "models", newRef("my-openai", "gpt-4o", "openai-chat")),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{
+			provider: "openai", endpoint: "api.openai.com",
+			auth:       auth.Simple,
+			secretName: "openai-key", secretNamespace: "models",
+			config: map[string]string{},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, "", info.refs[0].path,
+		"path should be empty when neither provider nor model sets it")
+}
+
 func TestMergeConfig(t *testing.T) {
 	tests := []struct {
 		name     string

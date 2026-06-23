@@ -93,6 +93,78 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 	require.Equal(t, endpoint, actualEndpoint)
 }
 
+func TestProcessRequest_PathWrittenToCycleState(t *testing.T) {
+	store := newInfoStore()
+	const (
+		extNS       = "llm"
+		extName     = "remote-llama"
+		targetModel = "llama-4-scout"
+		credName    = "cluster-b-key"
+		endpoint    = "maas.cluster-b.example.com"
+		path        = "/maas-default-gateway/v1/chat/completions"
+	)
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: extNS, Name: extName},
+		&externalModelInfo{modelName: extName, refs: []*resolvedProviderRef{{
+			provider:        provider.RemoteMaaS,
+			targetModel:     targetModel,
+			apiFormat:       apiformat.OpenAIChatCompletions,
+			auth:            auth.Simple,
+			endpoint:        endpoint,
+			path:            path,
+			secretName:      credName,
+			secretNamespace: extNS,
+			config:          map[string]string{},
+			weight:          1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/" + extNS + "/" + extName + "/v1/chat/completions"
+	req.Body["model"] = extName
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	actualPath, err := plugin.ReadCycleStateKey[string](cs, state.PathKey)
+	require.NoError(t, err)
+	require.Equal(t, path, actualPath)
+}
+
+func TestProcessRequest_EmptyPathWrittenToCycleState(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
+		&externalModelInfo{modelName: "gpt4", refs: []*resolvedProviderRef{{
+			provider:        provider.OpenAI,
+			targetModel:     "gpt-4o",
+			apiFormat:       apiformat.OpenAIChatCompletions,
+			auth:            auth.Simple,
+			endpoint:        "api.openai.com",
+			path:            "",
+			secretName:      "key",
+			secretNamespace: "llm",
+			config:          map[string]string{},
+			weight:          1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
+	req.Body["model"] = "gpt4"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	actualPath, err := plugin.ReadCycleStateKey[string](cs, state.PathKey)
+	require.NoError(t, err)
+	require.Equal(t, "", actualPath, "empty path should still be written to CycleState")
+}
+
 func TestProcessRequest_ModelMismatch(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(

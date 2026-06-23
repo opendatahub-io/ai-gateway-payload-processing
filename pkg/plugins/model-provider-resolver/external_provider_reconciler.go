@@ -67,6 +67,7 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	r.store.addOrUpdateProvider(req.NamespacedName, &providerInfo{
 		provider:        provider.Spec.Provider,
 		endpoint:        provider.Spec.Endpoint,
+		path:            provider.Spec.Path,
 		auth:            auth.Auth(provider.Spec.Auth.Type),
 		secretName:      provider.Spec.Auth.SecretRef.Name,
 		secretNamespace: req.Namespace,
