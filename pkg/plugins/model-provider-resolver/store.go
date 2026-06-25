@@ -129,3 +129,18 @@ func (s *infoStore) getModel(key types.NamespacedName) (*externalModelInfo, bool
 	info, ok := modelsByNamespace[key.Name]
 	return info, ok
 }
+
+// getModelByName finds an ExternalModel by its client-facing modelName across all namespaces.
+func (s *infoStore) getModelByName(modelName string) (*externalModelInfo, types.NamespacedName, bool) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	for ns, models := range s.models {
+		for name, info := range models {
+			if info.modelName == modelName {
+				return info, types.NamespacedName{Namespace: ns, Name: name}, true
+			}
+		}
+	}
+	return nil, types.NamespacedName{}, false
+}

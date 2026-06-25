@@ -136,30 +136,24 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("received incoming request", "path", request.Headers[":path"])
 	relativePath := sanitizePath(request.Headers[":path"])
 
-	segments := strings.Split(relativePath, "/")
-	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
-		log.FromContext(ctx).V(logutil.VERBOSE).Info("wasn't able to parse namespaced name from path", "path", relativePath)
-		return nil
+	// Resolve by model name: prefer X-Gateway-Model-Name header (set by body-field-to-header),
+	// fall back to request body model field. This supports both single-URL and per-model-URL patterns.
+	modelName := request.Headers["x-gateway-model-name"]
+	if modelName == "" {
+		modelName = model
 	}
 
-	modelKey := types.NamespacedName{Namespace: segments[0], Name: segments[1]}
-	log.FromContext(ctx).V(logutil.VERBOSE).Info("exported namespaced name from path", "key", modelKey)
-
-	modelInfo, found := p.store.getModel(modelKey)
+	modelInfo, modelKey, found := p.store.getModelByName(modelName)
 	if !found {
 		return nil // not an external model — pass through for internal models
 	}
 
+	logger.Info("resolved model by name", "modelName", modelName, "key", modelKey.String())
+
 	inputFormat := detectInputAPIFormat(relativePath)
 	if inputFormat == "" {
 		logger.Error(nil, "unsupported API path for external model", "model", modelKey.String(), "path", relativePath)
-		return errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("unsupported API path: %s", relativePath)}
-	}
-
-	// model in request body must match the ExternalModel's client-facing name
-	if modelInfo.modelName != model {
-		logger.Error(nil, "model mismatch between request body and ExternalModel", "requestModel", model, "externalModel", modelInfo.modelName)
-		return errcommon.Error{Code: errcommon.NotFound, Msg: fmt.Sprintf("model in request body '%s' doesn't match ExternalModel", model)}
+		return errcommon.Error{Code: errcommon.BadRequest, Msg: "unsupported API endpoint"}
 	}
 
 	ref := selectByWeight(modelInfo.refs)
@@ -182,11 +176,11 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 // detectInputAPIFormat determines the client's API format from the request path suffix.
 func detectInputAPIFormat(path string) apiformat.APIFormat {
 	switch {
-	case strings.HasSuffix(path, "/v1/chat/completions"):
+	case strings.HasSuffix(path, "/v1/chat/completions"), path == "v1/chat/completions":
 		return apiformat.OpenAIChatCompletions
-	case strings.HasSuffix(path, "/v1/messages"):
+	case strings.HasSuffix(path, "/v1/messages"), path == "v1/messages":
 		return apiformat.Messages
-	case strings.HasSuffix(path, "/v1/responses"):
+	case strings.HasSuffix(path, "/v1/responses"), path == "v1/responses":
 		return apiformat.OpenAIResponses
 	default:
 		return ""
