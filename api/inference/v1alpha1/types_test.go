@@ -71,6 +71,7 @@ func TestExternalModelDeepCopy(t *testing.T) {
 					Ref:         NameReference{Name: "my-openai"},
 					TargetModel: "gpt-4o",
 					APIFormat:   "openai-chat",
+					Path:        "/v1/chat/completions",
 				},
 			},
 		},

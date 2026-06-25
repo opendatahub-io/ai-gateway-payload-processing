@@ -59,18 +59,19 @@ func newTestModel(name, ns string, refs ...inferencev1alpha1.ExternalProviderRef
 	}
 }
 
-func newRef(providerName, targetModel, apiFormat string) inferencev1alpha1.ExternalProviderRef {
+func newRef(providerName, targetModel, apiFormat, path string) inferencev1alpha1.ExternalProviderRef {
 	return inferencev1alpha1.ExternalProviderRef{
 		Ref:         inferencev1alpha1.NameReference{Name: providerName},
 		TargetModel: targetModel,
 		APIFormat:   apiFormat,
+		Path:        path,
 	}
 }
 
 func TestModelReconciler_HappyPath(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "gpt4"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
-		key: newTestModel("gpt4", "models", newRef("my-openai", "gpt-4o", "openai-chat")),
+		key: newTestModel("gpt4", "models", newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")),
 	}}
 
 	store := newInfoStore()
@@ -103,7 +104,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 
 func TestModelReconciler_ModelNameOverride(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "gpt4"}
-	model := newTestModel("gpt4", "models", newRef("my-openai", "gpt-4o", "openai-chat"))
+	model := newTestModel("gpt4", "models", newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions"))
 	model.Spec.ModelName = "gpt-4o"
 
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
@@ -150,7 +151,7 @@ func TestModelReconciler_DeletedCR(t *testing.T) {
 func TestModelReconciler_ProviderNotAvailable(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "orphan"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
-		key: newTestModel("orphan", "models", newRef("missing-provider", "gpt-4o", "openai-chat")),
+		key: newTestModel("orphan", "models", newRef("missing-provider", "gpt-4o", "openai-chat", "/v1/chat/completions")),
 	}}
 
 	store := newInfoStore()
@@ -168,8 +169,8 @@ func TestModelReconciler_MultiRefAllResolved(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "multi"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
 		key: newTestModel("multi", "models",
-			newRef("openai-provider", "gpt-4o", "openai-chat"),
-			newRef("azure-provider", "gpt-4o", "openai-chat"),
+			newRef("openai-provider", "gpt-4o", "openai-chat", "/v1/chat/completions"),
+			newRef("azure-provider", "gpt-4o", "openai-chat", "/v1/chat/completions"),
 		),
 	}}
 
@@ -201,8 +202,8 @@ func TestModelReconciler_MultiRefPartialAvailability(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "partial"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
 		key: newTestModel("partial", "models",
-			newRef("unavailable-provider", "gpt-4o", "openai-chat"),
-			newRef("available-provider", "claude-sonnet", "messages"),
+			newRef("unavailable-provider", "gpt-4o", "openai-chat", "/v1/chat/completions"),
+			newRef("available-provider", "claude-sonnet", "messages", "/v1/messages"),
 		),
 	}}
 
@@ -226,7 +227,7 @@ func TestModelReconciler_MultiRefPartialAvailability(t *testing.T) {
 
 func TestModelReconciler_AuthOverride(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "auth-override"}
-	ref := newRef("my-openai", "gpt-4o", "openai-chat")
+	ref := newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")
 	ref.Auth = &inferencev1alpha1.AuthConfig{
 		Type:      "simple",
 		SecretRef: inferencev1alpha1.NameReference{Name: "model-specific-key"},
@@ -257,9 +258,9 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 
 func TestModelReconciler_WeightFromCRD(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "weighted"}
-	ref1 := newRef("openai-provider", "gpt-4o", "openai-chat")
+	ref1 := newRef("openai-provider", "gpt-4o", "openai-chat", "/v1/chat/completions")
 	ref1.Weight = ptr.To(80)
-	ref2 := newRef("azure-provider", "gpt-4o", "openai-chat")
+	ref2 := newRef("azure-provider", "gpt-4o", "openai-chat", "/v1/chat/completions")
 	ref2.Weight = ptr.To(20)
 
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
@@ -293,7 +294,7 @@ func TestModelReconciler_WeightFromCRD(t *testing.T) {
 func TestModelReconciler_WeightDefaultsToOne(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "no-weight"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
-		key: newTestModel("no-weight", "models", newRef("my-openai", "gpt-4o", "openai-chat")),
+		key: newTestModel("no-weight", "models", newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")),
 	}}
 
 	store := newInfoStore()
@@ -314,7 +315,7 @@ func TestModelReconciler_WeightDefaultsToOne(t *testing.T) {
 
 func TestModelReconciler_ConfigMerge(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "config-merge"}
-	ref := newRef("my-vertex", "gemini-pro", "openai-chat")
+	ref := newRef("my-vertex", "gemini-pro", "openai-chat", "/v1/chat/completions")
 	ref.Config = map[string]string{"endpoint": "custom-endpoint"}
 
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
@@ -338,6 +339,83 @@ func TestModelReconciler_ConfigMerge(t *testing.T) {
 	assert.Equal(t, "my-project", info.refs[0].config["project"])
 	assert.Equal(t, "us-central1", info.refs[0].config["location"])
 	assert.Equal(t, "custom-endpoint", info.refs[0].config["endpoint"])
+}
+
+func TestModelReconciler_PathStoredFromRef(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "remote-llama"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("remote-llama", "models", newRef("cluster-b", "llama-4-scout", "openai-chat", "/maas-default-gateway/v1/chat/completions")),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "cluster-b"},
+		&providerInfo{
+			provider: "openai", endpoint: "maas.cluster-b.example.com",
+			auth:       auth.Simple,
+			secretName: "cluster-b-key", secretNamespace: "models",
+			config: map[string]string{},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, "/maas-default-gateway/v1/chat/completions", info.refs[0].path,
+		"resolved path should come from the model ref's required path field")
+}
+
+func TestModelReconciler_PathPlaceholderResolution(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "vertex-model"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("vertex-model", "models", newRef("gcp-vertex", "gemini-pro", "openai-chat", "/v1/{project}/{location}/publishers/google/models/{model}:generateContent")),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "gcp-vertex"},
+		&providerInfo{
+			provider: "vertex", endpoint: "us-central1-aiplatform.googleapis.com",
+			auth:       auth.Simple,
+			secretName: "vertex-key", secretNamespace: "models",
+			config: map[string]string{"project": "my-project", "location": "us-central1"},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+
+	info, found := store.getModel(key)
+	require.True(t, found)
+	assert.Equal(t, "/v1/my-project/us-central1/publishers/google/models/{model}:generateContent",
+		info.refs[0].path,
+		"placeholders present in config should be resolved; unknown placeholders stay as-is")
+}
+
+func TestResolvePathPlaceholders(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		config map[string]string
+		want   string
+	}{
+		{"empty path", "", nil, ""},
+		{"no placeholders", "/v1/chat/completions", map[string]string{"k": "v"}, "/v1/chat/completions"},
+		{"single placeholder", "/v1/{project}/chat", map[string]string{"project": "my-proj"}, "/v1/my-proj/chat"},
+		{"multiple placeholders", "/{location}/{project}/models", map[string]string{"location": "us", "project": "p1"}, "/us/p1/models"},
+		{"unresolved placeholder stays", "/v1/{unknown}/chat", map[string]string{"other": "val"}, "/v1/{unknown}/chat"},
+		{"nil config", "/v1/{key}/x", nil, "/v1/{key}/x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolvePathPlaceholders(tt.path, tt.config)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestMergeConfig(t *testing.T) {

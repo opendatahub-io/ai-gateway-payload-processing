@@ -33,5 +33,6 @@ spec:
         name: vertex-openai
       targetModel: gemini-2.5-pro
       apiFormat: openai-chat
+      path: /v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions
       config:
         endpoint: openapi # Vertex AI endpoint name (not network endpoint — that's on the provider)

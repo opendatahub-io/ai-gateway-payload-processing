@@ -78,6 +78,16 @@ type ExternalProviderRef struct {
 	// +kubebuilder:validation:MaxLength=63
 	APIFormat string `json:"apiFormat"`
 
+	// Path sets the outgoing request `:path` pseudo-header for this model-provider binding.
+	// Must be a valid absolute path (e.g. "/v1/chat/completions" or
+	// "/maas-default-gateway/v1/chat/completions").
+	// Supports {key} placeholders resolved from the merged Config map.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`^/.*`
+	Path string `json:"path"`
+
 	// Config holds model-specific configuration as key-value pairs.
 	// Overrides the ExternalProvider config for this model-provider binding.
 	// +optional

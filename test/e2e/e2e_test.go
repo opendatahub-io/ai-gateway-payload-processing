@@ -85,7 +85,21 @@ spec:
         name: %s
       targetModel: %s
       apiFormat: %s
-`, p.Name, nsName, p.Name, p.Name, p.Provider))
+      path: %s
+`, p.Name, nsName, p.Name, p.Name, p.Provider, defaultPathForProvider(p.Provider)))
+}
+
+func defaultPathForProvider(provider string) string {
+	switch provider {
+	case "anthropic":
+		return "/v1/messages"
+	case "azure-openai":
+		return "/openai/v1/chat/completions"
+	case "vertex-openai":
+		return "/v1/projects/test-project/locations/us-central1/endpoints/openapi/chat/completions"
+	default:
+		return "/v1/chat/completions"
+	}
 }
 
 func deleteProviderResources(p Provider) {

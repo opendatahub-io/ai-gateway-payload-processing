@@ -30,3 +30,4 @@ spec:
         name: anthropic
       targetModel: claude-sonnet-4-20250514
       apiFormat: messages
+      path: /v1/messages

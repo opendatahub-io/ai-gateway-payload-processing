@@ -318,3 +318,24 @@ func TestMapProviderToAPIFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestMapProviderToDefaultPath(t *testing.T) {
+	tests := []struct {
+		provider string
+		path     string
+	}{
+		{"openai", "/v1/chat/completions"},
+		{"anthropic", "/v1/messages"},
+		{"azure", "/openai/v1/chat/completions"},
+		{"azure-openai", "/openai/v1/chat/completions"},
+		{"vertex-openai", "/v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions"},
+		{"bedrock", "/v1/chat/completions"},
+		{"bedrock-openai", "/v1/chat/completions"},
+		{"unknown", "/v1/chat/completions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			assert.Equal(t, tt.path, mapProviderToDefaultPath(tt.provider))
+		})
+	}
+}

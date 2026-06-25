@@ -31,3 +31,4 @@ spec:
         name: openai
       targetModel: gpt-4o
       apiFormat: openai-chat
+      path: /v1/chat/completions

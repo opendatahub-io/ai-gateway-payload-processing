@@ -134,6 +134,14 @@ func (p *APITranslationPlugin) WithName(name string) *APITranslationPlugin {
 	return p
 }
 
+// applyPathOverride sets the :path pseudo-header from CycleState.
+// Path is a required field on ExternalProviderRef (MinLength=1), so it is always present.
+func applyPathOverride(cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) {
+	if path, err := plugin.ReadCycleStateKey[string](cycleState, state.PathKey); err == nil {
+		request.SetHeader(":path", path)
+	}
+}
+
 // ProcessRequest reads the provider from CycleState (set by an upstream plugin) and translates
 // the request body from OpenAI format to the provider's native format if needed.
 // When the incoming client format matches the upstream API format (passthrough mode),
@@ -150,6 +158,7 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *p
 		logger.Info("passthrough mode — skipping request translation")
 		// Remove client auth header; apikey-injection plugin adds the provider credential downstream.
 		request.RemoveHeader("authorization")
+		applyPathOverride(cycleState, request)
 		return nil
 	}
 
@@ -183,6 +192,8 @@ func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *p
 	// authorization is a special header removed by the plugin, no matter which provider is used.
 	// The api-key is expected to be set by the the api-key injection plugin.
 	request.RemoveHeader("authorization")
+
+	applyPathOverride(cycleState, request)
 
 	// content-length is another special header that will be set automatically by the pluggable framework when the body is mutated.
 

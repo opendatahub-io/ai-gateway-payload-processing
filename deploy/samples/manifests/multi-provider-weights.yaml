@@ -54,9 +54,11 @@ spec:
         name: openai
       targetModel: gpt-4o
       apiFormat: openai-chat
+      path: /v1/chat/completions
       weight: 80
     - ref:
         name: azure
       targetModel: gpt-4o
       apiFormat: openai-chat
+      path: /openai/v1/chat/completions
       weight: 20
