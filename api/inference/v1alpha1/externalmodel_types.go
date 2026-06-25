@@ -108,6 +108,12 @@ type ExternalModelStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
+	// HTTPRouteName is the name of the HTTPRoute created by the controller
+	// for this ExternalModel. Consumers (e.g., maas-controller) can read this
+	// to attach policies without assuming naming conventions.
+	// +optional
+	HTTPRouteName string `json:"httpRouteName,omitempty"`
+
 	// Conditions represent the latest available observations of the model's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

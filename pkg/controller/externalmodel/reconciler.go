@@ -106,6 +106,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
+	model.Status.HTTPRouteName = model.Name
 	r.setStatus(ctx, logger, model, "Ready", metav1.ConditionTrue, "Reconciled", "HTTPRoute created successfully")
 	return ctrl.Result{}, nil
 }

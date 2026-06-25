@@ -22,7 +22,7 @@ const (
 
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 
-	DefaultGatewayName      = "default-gateway"
+	DefaultGatewayName      = "maas-default-gateway"
 	DefaultGatewayNamespace = "openshift-ingress"
 	DefaultRouteTimeout     = "300s"
 )

@@ -212,6 +212,7 @@ func TestReconcile_CreatesHTTPRoute(t *testing.T) {
 	require.Len(t, model.Status.Conditions, 1)
 	assert.Equal(t, metav1.ConditionTrue, model.Status.Conditions[0].Status)
 	assert.Equal(t, "Reconciled", model.Status.Conditions[0].Reason)
+	assert.Equal(t, "gpt4", model.Status.HTTPRouteName)
 }
 
 func TestReconcile_MissingProvider(t *testing.T) {
