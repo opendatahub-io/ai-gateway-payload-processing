@@ -34,8 +34,11 @@ import (
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	externalmodelctrl "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalmodel"
+	externalproviderctrl "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/externalprovider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -46,20 +49,33 @@ const (
 
 var _ requesthandling.RequestProcessor = &ModelProviderResolverPlugin{}
 
+type modelProviderResolverConfig struct {
+	GatewayName      string `json:"gatewayName,omitempty"`
+	GatewayNamespace string `json:"gatewayNamespace,omitempty"`
+}
+
 // ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin.
-func ModelProviderResolverFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
+func ModelProviderResolverFactory(name string, rawConfig json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	var config modelProviderResolverConfig
+	if len(rawConfig) > 0 {
+		if err := json.Unmarshal(rawConfig, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse model-provider-resolver plugin config: %w", err)
+		}
+	}
+
+	instance, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client(), config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
-	return plugin.WithName(name), nil
+	return instance.WithName(name), nil
 }
 
-// NewModelProviderResolver registers store reconcilers for inference.opendatahub.io
-// ExternalProvider and ExternalModel CRDs.
-func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClient client.Client) (*ModelProviderResolverPlugin, error) {
+// NewModelProviderResolver registers store reconcilers and resource-creating
+// reconcilers for inference.opendatahub.io ExternalProvider and ExternalModel CRDs.
+func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClient client.Client, config modelProviderResolverConfig) (*ModelProviderResolverPlugin, error) {
 	utilruntime.Must(inferencev1alpha1.AddToScheme(k8sClient.Scheme()))
+	utilruntime.Must(gatewayapiv1.Install(k8sClient.Scheme()))
 	store := newInfoStore()
 
 	// Watch ExternalProvider CRDs (inference.opendatahub.io) using typed client
@@ -97,6 +113,34 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 		Watches(&inferencev1alpha1.ExternalProvider{}, handler.EnqueueRequestsFromMapFunc(mapProviderToModels)).
 		Complete(modelReconciler); err != nil {
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
+	// ExternalProvider networking reconciler (Service, ServiceEntry, DestinationRule)
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalProvider{}).
+		Named("externalprovider-networking").
+		Complete(&externalproviderctrl.Reconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalProvider networking reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
+	// ExternalModel HTTPRoute reconciler
+	emReconciler := &externalmodelctrl.Reconciler{
+		Client:           k8sClient,
+		Scheme:           k8sClient.Scheme(),
+		GatewayName:      config.GatewayName,
+		GatewayNamespace: config.GatewayNamespace,
+	}
+	if err := reconcilerBuilder().
+		For(&inferencev1alpha1.ExternalModel{}).
+		Owns(&gatewayapiv1.HTTPRoute{}).
+		Watches(&inferencev1alpha1.ExternalProvider{},
+			handler.EnqueueRequestsFromMapFunc(emReconciler.MapProviderToModels)).
+		Named("inference-externalmodel-httproute").
+		Complete(emReconciler); err != nil {
+		return nil, fmt.Errorf("failed to register ExternalModel HTTPRoute reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
 	return &ModelProviderResolverPlugin{

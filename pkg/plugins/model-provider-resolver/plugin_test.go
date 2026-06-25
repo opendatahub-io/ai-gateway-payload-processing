@@ -18,6 +18,7 @@ package model_provider_resolver
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -282,6 +283,53 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 	err := instance.ProcessRequest(context.Background(), cs, req)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported API path")
+}
+
+func TestModelProviderResolverConfig_Parse(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantName  string
+		wantNS    string
+		wantError bool
+	}{
+		{
+			name:     "valid config",
+			input:    `{"gatewayName":"maas-default-gateway","gatewayNamespace":"openshift-ingress"}`,
+			wantName: "maas-default-gateway",
+			wantNS:   "openshift-ingress",
+		},
+		{
+			name:     "partial config",
+			input:    `{"gatewayName":"my-gw"}`,
+			wantName: "my-gw",
+			wantNS:   "",
+		},
+		{
+			name:     "empty JSON",
+			input:    `{}`,
+			wantName: "",
+			wantNS:   "",
+		},
+		{
+			name:      "invalid JSON",
+			input:     `{invalid`,
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg modelProviderResolverConfig
+			err := json.Unmarshal([]byte(tt.input), &cfg)
+			if tt.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantName, cfg.GatewayName)
+			require.Equal(t, tt.wantNS, cfg.GatewayNamespace)
+		})
+	}
 }
 
 func TestDetectInputAPIFormat(t *testing.T) {

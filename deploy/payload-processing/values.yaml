@@ -21,6 +21,10 @@ upstreamIpp:
           fieldName: model
           headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
+        name: model-provider-resolver
+        parameters:
+          gatewayName: "maas-default-gateway"
+          gatewayNamespace: "openshift-ingress"
       - type: api-translation
       - type: apikey-injection
       profiles:
