@@ -133,7 +133,7 @@ func TestProcessRequest_PathWrittenToCycleState(t *testing.T) {
 	require.Equal(t, path, actualPath)
 }
 
-func TestProcessRequest_ModelMismatch(t *testing.T) {
+func TestProcessRequest_UnknownModelPassesThrough(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel(
 		types.NamespacedName{Namespace: "llm", Name: "gpt4"},
@@ -148,10 +148,13 @@ func TestProcessRequest_ModelMismatch(t *testing.T) {
 	cs := plugin.NewCycleState()
 	req := requesthandling.NewInferenceRequest()
 	req.Headers[":path"] = "/llm/gpt4/v1/chat/completions"
-	req.Body["model"] = "wrong-name"
+	req.Body["model"] = "unknown-model"
 
 	err := instance.ProcessRequest(context.Background(), cs, req)
-	require.Error(t, err, "should error when body model doesn't match modelName")
+	require.NoError(t, err, "unknown model name should pass through for internal models")
+
+	_, provErr := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.Error(t, provErr, "provider should not be set for unknown models")
 }
 
 func TestProcessRequest_ModelNotFound(t *testing.T) {
@@ -321,7 +324,7 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 
 	err := instance.ProcessRequest(context.Background(), cs, req)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "unsupported API path")
+	require.Contains(t, err.Error(), "unsupported API endpoint")
 }
 
 func TestDetectInputAPIFormat(t *testing.T) {
