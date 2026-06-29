@@ -22,6 +22,7 @@ import (
 	maas_headers_guard "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/maas-headers-guard"
 	provider_resolver "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/model-provider-resolver"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/nemo"
+	stream_usage_enforcer "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/stream-usage-enforcer"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 )
 
@@ -32,4 +33,5 @@ func RegisterPlugins() {
 	plugin.Register(apikey_injection.APIKeyInjectionPluginType, apikey_injection.APIKeyInjectionFactory)
 	plugin.Register(nemo.NemoRequestGuardPluginType, nemo.NemoRequestGuardFactory)
 	plugin.Register(nemo.NemoResponseGuardPluginType, nemo.NemoResponseGuardFactory)
+	plugin.Register(stream_usage_enforcer.PluginType, stream_usage_enforcer.Factory)
 }
