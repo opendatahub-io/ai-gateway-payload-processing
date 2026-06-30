@@ -67,7 +67,7 @@ spec:
   provider: %s
   endpoint: %s
   auth:
-    type: simple
+    type: apikey
     secretRef:
       name: %s
 `, p.Name, nsName, p.Provider, simulatorFQDN, p.Name))

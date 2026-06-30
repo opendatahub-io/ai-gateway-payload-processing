@@ -16,7 +16,7 @@ spec:
   provider: anthropic
   endpoint: api.anthropic.com
   auth:
-    type: simple
+    type: apikey
     secretRef:
       name: anthropic-credentials
 ---

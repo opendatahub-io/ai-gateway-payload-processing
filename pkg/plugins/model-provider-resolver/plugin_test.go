@@ -46,7 +46,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 			provider:        provider.Anthropic,
 			targetModel:     targetModel,
 			apiFormat:       apiformat.Messages,
-			auth:            auth.Simple,
+			auth:            auth.APIKey,
 			endpoint:        endpoint,
 			secretName:      credName,
 			secretNamespace: extNS,
@@ -86,7 +86,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 
 	actualAuthType, err := plugin.ReadCycleStateKey[auth.Auth](cs, state.AuthTypeKey)
 	require.NoError(t, err)
-	require.Equal(t, auth.Simple, actualAuthType)
+	require.Equal(t, auth.APIKey, actualAuthType)
 
 	actualEndpoint, err := plugin.ReadCycleStateKey[string](cs, state.EndpointKey)
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestProcessRequest_PathWrittenToCycleState(t *testing.T) {
 			provider:        provider.OpenAI,
 			targetModel:     targetModel,
 			apiFormat:       apiformat.OpenAIChatCompletions,
-			auth:            auth.Simple,
+			auth:            auth.APIKey,
 			endpoint:        endpoint,
 			path:            path,
 			secretName:      credName,

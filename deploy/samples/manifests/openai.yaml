@@ -16,7 +16,7 @@ spec:
   provider: openai
   endpoint: api.openai.com
   auth:
-    type: simple
+    type: apikey
     secretRef:
       name: openai-credentials
 ---

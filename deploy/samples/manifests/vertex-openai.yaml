@@ -16,7 +16,7 @@ spec:
   provider: vertex-openai
   endpoint: us-central1-aiplatform.googleapis.com
   auth:
-    type: simple # TODO: replace with oauth2 once merged
+    type: apikey # TODO: replace with oauth2 once merged
     secretRef:
       name: vertex-credentials
   config:

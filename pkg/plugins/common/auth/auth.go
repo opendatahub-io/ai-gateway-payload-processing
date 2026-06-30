@@ -19,12 +19,12 @@ package auth
 type Auth string
 
 const (
-	Simple Auth = "simple"
+	APIKey Auth = "apikey"
 	SigV4  Auth = "sigv4"
 	OAuth2 Auth = "oauth2" // not used yet
 )
 
 const (
-	SimpleAuthHeaderName  = "authHeaderName"
-	SimpleAuthValuePrefix = "authValuePrefix"
+	APIKeyAuthHeaderName  = "authHeaderName"
+	APIKeyAuthValuePrefix = "authValuePrefix"
 )

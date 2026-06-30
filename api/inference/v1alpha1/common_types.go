@@ -19,9 +19,9 @@ package v1alpha1
 // AuthConfig defines the authentication method for an ExternalProvider.
 type AuthConfig struct {
 	// Type identifies the auth type for this provider.
-	// e.g. "simple" (header based), "sigv4", etc.
+	// e.g. "apikey" (header based), "sigv4", etc.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=simple;sigv4;oauth2
+	// +kubebuilder:validation:Enum=apikey;sigv4;oauth2
 	Type string `json:"type"`
 
 	// SecretRef references a Kubernetes Secret containing the provider API key.

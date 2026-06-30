@@ -39,7 +39,7 @@ func newTestPlugin(store *secretStore) *ApiKeyInjectionPlugin {
 	return &ApiKeyInjectionPlugin{
 		typedName: plugin.TypedName{Type: APIKeyInjectionPluginType, Name: APIKeyInjectionPluginType},
 		authHeadersGenerators: map[auth.Auth]authgenerator.AuthHeadersGenerator{
-			auth.Simple: authgenerator.NewSimpleAuthGenerator(),
+			auth.APIKey: authgenerator.NewAPIKeyAuthGenerator(),
 			auth.SigV4:  authgenerator.NewSigV4AuthGenerator(),
 		},
 		store: store,
@@ -64,11 +64,11 @@ func newSigV4CycleState(credsNamespace, credsName string) *plugin.CycleState {
 	return cs
 }
 
-// newSimpleCycleState builds a CycleState with credential ref, simple auth type,
+// newAPIKeyCycleState builds a CycleState with credential ref, apikey auth type,
 // and config. The config simulates what the provider reconciler would inject
 // (e.g. authHeaderName for providers like Anthropic/Azure).
-func newSimpleCycleState(credsNamespace, credsName string, config map[string]string) *plugin.CycleState {
-	cs := newCycleState(credsNamespace, credsName, auth.Simple)
+func newAPIKeyCycleState(credsNamespace, credsName string, config map[string]string) *plugin.CycleState {
+	cs := newCycleState(credsNamespace, credsName, auth.APIKey)
 	cs.Write(state.ModelConfigKey, config)
 	return cs
 }
@@ -91,20 +91,20 @@ func TestProcessRequest(t *testing.T) {
 		errorContains     string
 	}{
 		{
-			name:    "simple auth with default Bearer prefix (OpenAI style)",
+			name:    "apikey auth with default Bearer prefix (OpenAI style)",
 			secrets: []*corev1.Secret{testSecret("default", "openai-key", map[string]string{"api-key": "sk-test-key"})},
 			prepareCycleState: func() *plugin.CycleState {
-				return newSimpleCycleState("default", "openai-key", map[string]string{})
+				return newAPIKeyCycleState("default", "openai-key", map[string]string{})
 			},
 			wantHeaders: map[string]string{
 				"Authorization": "Bearer sk-test-key",
 			},
 		},
 		{
-			name:    "simple auth with config-injected header (Anthropic style)",
+			name:    "apikey auth with config-injected header (Anthropic style)",
 			secrets: []*corev1.Secret{testSecret("default", "anthropic-key", map[string]string{"api-key": "ant-key-123"})},
 			prepareCycleState: func() *plugin.CycleState {
-				return newSimpleCycleState("default", "anthropic-key", map[string]string{auth.SimpleAuthHeaderName: "x-api-key"})
+				return newAPIKeyCycleState("default", "anthropic-key", map[string]string{auth.APIKeyAuthHeaderName: "x-api-key"})
 			},
 			wantHeaders: map[string]string{
 				"x-api-key": "ant-key-123",
@@ -127,7 +127,7 @@ func TestProcessRequest(t *testing.T) {
 			secrets: []*corev1.Secret{testSecret("default", "no-creds", map[string]string{"api-key": "sk-key"})},
 			prepareCycleState: func() *plugin.CycleState {
 				cs := plugin.NewCycleState()
-				cs.Write(state.AuthTypeKey, auth.Simple) // external model has auth type but no creds
+				cs.Write(state.AuthTypeKey, auth.APIKey) // external model has auth type but no creds
 				return cs
 			},
 			errorContains: "missing credentialRef",
@@ -136,7 +136,7 @@ func TestProcessRequest(t *testing.T) {
 			name:    "credentials not found results in error",
 			secrets: []*corev1.Secret{},
 			prepareCycleState: func() *plugin.CycleState {
-				return newSimpleCycleState("default", "unknown", map[string]string{})
+				return newAPIKeyCycleState("default", "unknown", map[string]string{})
 			},
 			errorContains: "credentials not found",
 		},
@@ -144,7 +144,7 @@ func TestProcessRequest(t *testing.T) {
 			name:    "missing api-key field in credentials results in error",
 			secrets: []*corev1.Secret{testSecret("default", "wrong-fields", map[string]string{"wrong-field": "value"})},
 			prepareCycleState: func() *plugin.CycleState {
-				return newSimpleCycleState("default", "wrong-fields", map[string]string{})
+				return newAPIKeyCycleState("default", "wrong-fields", map[string]string{})
 			},
 			errorContains: "failed to generate auth headers",
 		},

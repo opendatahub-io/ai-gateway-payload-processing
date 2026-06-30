@@ -79,7 +79,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 		types.NamespacedName{Namespace: "models", Name: "my-openai"},
 		&providerInfo{
 			provider: "openai", endpoint: "api.openai.com",
-			auth:            auth.Simple,
+			auth:            auth.APIKey,
 			secretName: "openai-key", secretNamespace: "models",
 			config: map[string]string{},
 		},
@@ -97,7 +97,7 @@ func TestModelReconciler_HappyPath(t *testing.T) {
 	assert.Equal(t, "openai", info.refs[0].provider)
 	assert.Equal(t, "gpt-4o", info.refs[0].targetModel)
 	assert.Equal(t, apiformat.OpenAIChatCompletions, info.refs[0].apiFormat)
-	assert.Equal(t, auth.Simple, info.refs[0].auth)
+	assert.Equal(t, auth.APIKey, info.refs[0].auth)
 	assert.Equal(t, "openai-key", info.refs[0].secretName)
 	assert.Equal(t, 1, info.refs[0].weight)
 }
@@ -229,7 +229,7 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "auth-override"}
 	ref := newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")
 	ref.Auth = &inferencev1alpha1.AuthConfig{
-		Type:      "simple",
+		Type:      "apikey",
 		SecretRef: inferencev1alpha1.NameReference{Name: "model-specific-key"},
 	}
 
@@ -251,7 +251,7 @@ func TestModelReconciler_AuthOverride(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, auth.Simple, info.refs[0].auth, "model-level auth overrides provider-level auth")
+	assert.Equal(t, auth.APIKey, info.refs[0].auth, "model-level auth overrides provider-level auth")
 	assert.Equal(t, "model-specific-key", info.refs[0].secretName)
 	assert.Equal(t, "models", info.refs[0].secretNamespace)
 }
@@ -352,7 +352,7 @@ func TestModelReconciler_PathStoredFromRef(t *testing.T) {
 		types.NamespacedName{Namespace: "models", Name: "cluster-b"},
 		&providerInfo{
 			provider: "openai", endpoint: "maas.cluster-b.example.com",
-			auth:       auth.Simple,
+			auth:       auth.APIKey,
 			secretName: "cluster-b-key", secretNamespace: "models",
 			config: map[string]string{},
 		},
@@ -379,7 +379,7 @@ func TestModelReconciler_PathPlaceholderResolution(t *testing.T) {
 		types.NamespacedName{Namespace: "models", Name: "gcp-vertex"},
 		&providerInfo{
 			provider: "vertex", endpoint: "us-central1-aiplatform.googleapis.com",
-			auth:       auth.Simple,
+			auth:       auth.APIKey,
 			secretName: "vertex-key", secretNamespace: "models",
 			config: map[string]string{"project": "my-project", "location": "us-central1"},
 		},

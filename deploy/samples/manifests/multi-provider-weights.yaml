@@ -28,7 +28,7 @@ spec:
   provider: openai
   endpoint: api.openai.com
   auth:
-    type: simple
+    type: apikey
     secretRef:
       name: openai-credentials
 ---
@@ -40,7 +40,7 @@ spec:
   provider: azure-openai
   endpoint: my-resource.openai.azure.com
   auth:
-    type: simple
+    type: apikey
     secretRef:
       name: azure-credentials
 ---

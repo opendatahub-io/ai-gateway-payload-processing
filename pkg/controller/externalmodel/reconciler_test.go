@@ -130,7 +130,7 @@ func createExternalProvider(t *testing.T, name, namespace, endpoint string) {
 			Provider: "openai",
 			Endpoint: endpoint,
 			Auth: inferencev1alpha1.AuthConfig{
-				Type:      "simple",
+				Type:      "apikey",
 				SecretRef: inferencev1alpha1.NameReference{Name: "dummy-secret"},
 			},
 		},
