@@ -139,7 +139,8 @@ deploy_bbr() {
         -f "$SCRIPT_DIR/e2e-values.yaml" \
         --set upstreamIpp.inferenceGateway.name="$GATEWAY_NAME" \
         --set upstreamIpp.provider.name=istio \
-        --set upstreamIpp.provider.istio.envoyFilter.operation=INSERT_FIRST
+        --set upstreamIpp.provider.istio.envoyFilter.operation=INSERT_FIRST \
+        --set upstreamIpp.payloadProcessor.image.tag=latest
 
     # Disable sidecar injection on BBR pod
     kubectl patch deployment payload-processing -n "$GATEWAY_NAMESPACE" --type=merge \
