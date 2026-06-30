@@ -106,7 +106,7 @@ func parseConfig(pluginType string, rawParameters json.RawMessage) (*meteringBas
 }
 
 // processRequest is the shared request-side logic: read identity from maas-headers
-// CycleState (set by maas-headers-guard), check balance, inject stream_options.
+// CycleState (set by maas-headers-guard), check balance, strip Accept-Encoding.
 func (b *meteringBase) processRequest(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	logger := log.FromContext(ctx)
 
@@ -176,16 +176,8 @@ func (b *meteringBase) processRequest(ctx context.Context, cycleState *plugin.Cy
 	// The chunk processor needs plain text to extract usage data from streaming responses.
 	request.RemoveHeader("accept-encoding")
 
-	// Inject stream_options.include_usage for streaming requests (OpenAI-compatible providers).
-	// Anthropic always includes usage in streaming responses regardless of this option.
-	if streaming, ok := request.Body["stream"].(bool); ok && streaming {
-		opts, _ := request.Body["stream_options"].(map[string]any)
-		if opts == nil {
-			opts = map[string]any{}
-		}
-		opts["include_usage"] = true
-		request.Body["stream_options"] = opts
-	}
+	// Note: stream_options.include_usage injection is handled by the
+	// stream-usage-enforcer plugin (PR #364/#367), not here.
 
 	return nil
 }
