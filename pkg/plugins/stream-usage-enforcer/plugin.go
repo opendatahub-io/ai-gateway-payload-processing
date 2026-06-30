@@ -25,6 +25,8 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 const PluginType = "stream-usage-enforcer"
@@ -48,11 +50,17 @@ func (p *Plugin) WithName(name string) *Plugin {
 
 func (p *Plugin) TypedName() plugin.TypedName { return p.typedName }
 
-func (p *Plugin) ProcessRequest(ctx context.Context, _ *plugin.CycleState, request *requesthandling.InferenceRequest) error {
+func (p *Plugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	logger := log.FromContext(ctx).V(logutil.VERBOSE)
 
 	stream, ok := request.Body["stream"].(bool)
 	if !ok || !stream {
+		return nil
+	}
+
+	inputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.InputAPIFormatKey)
+	if inputFormat != "" && inputFormat != apiformat.OpenAIChatCompletions {
+		logger.Info("skipping stream_options enforcement for non-OpenAI format", "inputFormat", inputFormat)
 		return nil
 	}
 

@@ -25,6 +25,8 @@ import (
 
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 func TestFactory(t *testing.T) {
@@ -127,4 +129,65 @@ func TestProcessRequest_StreamFieldAbsent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, req.Body["stream_options"])
 	assert.False(t, req.BodyMutated())
+}
+
+func TestProcessRequest_OpenAIChatFormat(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	req := requesthandling.NewInferenceRequest()
+	req.Body["stream"] = true
+
+	cs := plugin.NewCycleState()
+	cs.Write(state.InputAPIFormatKey, apiformat.OpenAIChatCompletions)
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	opts, ok := req.Body["stream_options"].(map[string]any)
+	require.True(t, ok, "stream_options should be set for openai-chat format")
+	assert.Equal(t, true, opts["include_usage"])
+	assert.True(t, req.BodyMutated())
+}
+
+func TestProcessRequest_MessagesFormatSkipped(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	req := requesthandling.NewInferenceRequest()
+	req.Body["stream"] = true
+
+	cs := plugin.NewCycleState()
+	cs.Write(state.InputAPIFormatKey, apiformat.Messages)
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+	assert.Nil(t, req.Body["stream_options"], "should not inject stream_options for messages format")
+	assert.False(t, req.BodyMutated())
+}
+
+func TestProcessRequest_OpenAIResponsesFormatSkipped(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	req := requesthandling.NewInferenceRequest()
+	req.Body["stream"] = true
+
+	cs := plugin.NewCycleState()
+	cs.Write(state.InputAPIFormatKey, apiformat.OpenAIResponses)
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+	assert.Nil(t, req.Body["stream_options"], "should not inject stream_options for openai-responses format")
+	assert.False(t, req.BodyMutated())
+}
+
+func TestProcessRequest_EmptyCycleStateFallsBackToInjection(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	req := requesthandling.NewInferenceRequest()
+	req.Body["stream"] = true
+
+	cs := plugin.NewCycleState()
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	opts, ok := req.Body["stream_options"].(map[string]any)
+	require.True(t, ok, "stream_options should be set when CycleState has no format (backward compat)")
+	assert.Equal(t, true, opts["include_usage"])
+	assert.True(t, req.BodyMutated())
 }
