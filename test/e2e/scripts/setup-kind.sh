@@ -16,7 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-bbr-e2e}"
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-ipp-e2e}"
 ISTIO_VERSION="${ISTIO_VERSION:-1.29.2}"
 SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3.147.232.199}"
 GATEWAY_NAMESPACE="default"
@@ -66,7 +66,6 @@ create_kind_cluster() {
 install_istio() {
     echo "Installing Istio ${ISTIO_VERSION}..."
     istioctl install --set profile=minimal \
-        --set values.pilot.env.SUPPORT_GATEWAY_API_INFERENCE_EXTENSION=true \
         --set values.pilot.env.ENABLE_GATEWAY_API_INFERENCE_EXTENSION=true \
         -y
 
@@ -77,12 +76,12 @@ install_istio() {
 
 install_gateway_api_crds() {
     echo "Installing Gateway API CRDs..."
-    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+    kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
     echo "Gateway API CRDs installed"
 }
 
 install_external_model_crd() {
-    echo "Installing ExternalModel CRD..."
+    echo "Installing Legacy ExternalModel CRD..."
     kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
     echo "ExternalModel CRD installed"
 
@@ -118,14 +117,14 @@ EOF
     echo "Gateway ready"
 }
 
-deploy_bbr() {
-    echo "Deploying BBR via Helm chart..."
+deploy_ipp() {
+    echo "Deploying IPP via Helm chart..."
 
     local image_tag="quay.io/opendatahub/odh-ai-gateway-payload-processing:latest"
 
     # Always build from source to ensure E2E tests run against the current code.
     # The quay.io image may not include changes from the PR being tested.
-    echo "  Building BBR image from source..."
+    echo "  Building IPP image from source..."
     local platform="linux/amd64"
     if [[ "$(uname -m)" == "arm64" ]]; then
         platform="linux/arm64"
@@ -138,21 +137,18 @@ deploy_bbr() {
         --dependency-update \
         -f "$SCRIPT_DIR/e2e-values.yaml" \
         --set upstreamIpp.inferenceGateway.name="$GATEWAY_NAME" \
-        --set upstreamIpp.provider.name=istio \
-        --set upstreamIpp.provider.istio.envoyFilter.operation=INSERT_FIRST \
-        --set upstreamIpp.payloadProcessor.image.tag=latest
+        --set upstreamIpp.payloadProcessor.env[0].name=GATEWAY_NAME \
+        --set upstreamIpp.payloadProcessor.env[0].value="$GATEWAY_NAME" \
+        --set upstreamIpp.payloadProcessor.env[1].name=GATEWAY_NAMESPACE \
+        --set upstreamIpp.payloadProcessor.env[1].value="$GATEWAY_NAMESPACE" \
 
-    # Disable sidecar injection on BBR pod
+    # Disable sidecar injection on IPP pod
     kubectl patch deployment payload-processing -n "$GATEWAY_NAMESPACE" --type=merge \
         -p='{"spec":{"template":{"metadata":{"annotations":{"sidecar.istio.io/inject":"false"}}}}}'
 
-    # Set gateway config env vars for controller
-    kubectl set env deployment/payload-processing -n "$GATEWAY_NAMESPACE" \
-        GATEWAY_NAME="$GATEWAY_NAME" GATEWAY_NAMESPACE="$GATEWAY_NAMESPACE"
-
     kubectl rollout status deployment/payload-processing \
         -n "$GATEWAY_NAMESPACE" --timeout=120s
-    echo "BBR deployed"
+    echo "IPP deployed"
 }
 
 create_test_namespace() {
@@ -167,7 +163,7 @@ create_test_namespace() {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 main() {
-    echo "=== BBR E2E Test Environment Setup ==="
+    echo "=== IPP E2E Test Environment Setup ==="
     echo "  Cluster:   ${KIND_CLUSTER_NAME}"
     echo "  Istio:     ${ISTIO_VERSION}"
     echo "  Simulator: ${SIMULATOR_ENDPOINT}"
@@ -181,12 +177,12 @@ main() {
     install_external_model_crd
     create_gateway
     create_test_namespace "e2e-models"
-    deploy_bbr
+    deploy_ipp
 
     echo ""
     echo "=== Setup Complete ==="
     echo "  Gateway: ${GATEWAY_NAME} in ${GATEWAY_NAMESPACE}"
-    echo "  BBR: payload-processing deployed"
+    echo "  IPP: payload-processing deployed"
     echo "  Run: make test-e2e"
 }
 
