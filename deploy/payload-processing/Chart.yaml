@@ -11,5 +11,5 @@ appVersion: "0.2.0"
 dependencies:
   - name: payload-processor
     repository: oci://ghcr.io/llm-d/charts
-    version: v0.1.0-rc.2
+    version: v0.1.0-rc.3
     alias: upstreamIpp
