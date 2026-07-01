@@ -1,5 +1,7 @@
 upstreamIpp:
   payloadProcessor:
+    image:
+      tag: latest
     customConfig:
       plugins:
       - type: maas-headers-guard
@@ -9,9 +11,6 @@ upstreamIpp:
           fieldName: model
           headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
-        parameters:
-          gatewayName: "e2e-gateway"
-          gatewayNamespace: "default"
       - type: api-translation
         parameters:
           vertexOpenAI:
@@ -30,3 +29,8 @@ upstreamIpp:
           - pluginRef: apikey-injection
           response:
           - pluginRef: api-translation
+  provider:
+    name: istio
+    istio:
+      envoyFilter:
+        operation: INSERT_FIRST

@@ -59,7 +59,7 @@ func TestProviderReconciler_ValidCR(t *testing.T) {
 				Provider: "openai",
 				Endpoint: "api.openai.com",
 				Auth: inferencev1alpha1.AuthConfig{
-					Type:      "simple",
+					Type:      "apikey",
 					SecretRef: inferencev1alpha1.NameReference{Name: "openai-key"}},
 			},
 		},
@@ -75,11 +75,11 @@ func TestProviderReconciler_ValidCR(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, "openai", info.provider)
 	assert.Equal(t, "api.openai.com", info.endpoint)
-	assert.Equal(t, auth.Simple, info.auth)
+	assert.Equal(t, auth.APIKey, info.auth)
 	assert.Equal(t, "openai-key", info.secretName)
 	assert.Equal(t, "models", info.secretNamespace)
 	// openai has no special auth header default — config should not contain authHeaderName
-	_, hasAuthHeader := info.config[auth.SimpleAuthHeaderName]
+	_, hasAuthHeader := info.config[auth.APIKeyAuthHeaderName]
 	assert.False(t, hasAuthHeader, "openai provider should not have auth header default injected")
 }
 
@@ -109,7 +109,7 @@ func TestProviderReconciler_WithConfig(t *testing.T) {
 				Provider: "vertex-openai",
 				Endpoint: "us-central1-aiplatform.googleapis.com",
 				Auth: inferencev1alpha1.AuthConfig{
-					Type:      "simple",
+					Type:      "apikey",
 					SecretRef: inferencev1alpha1.NameReference{Name: "vertex-key"}},
 				Config: map[string]string{"project": "my-project", "location": "us-central1"},
 			},
@@ -124,7 +124,7 @@ func TestProviderReconciler_WithConfig(t *testing.T) {
 
 	info, found := store.getProvider(key)
 	require.True(t, found)
-	assert.Equal(t, auth.Simple, info.auth)
+	assert.Equal(t, auth.APIKey, info.auth)
 	assert.Equal(t, "my-project", info.config["project"])
 	assert.Equal(t, "us-central1", info.config["location"])
 }
@@ -138,7 +138,7 @@ func TestProviderReconciler_AuthDefaultsInjected(t *testing.T) {
 				Provider: "anthropic",
 				Endpoint: "api.anthropic.com",
 				Auth: inferencev1alpha1.AuthConfig{
-					Type:      "simple",
+					Type:      "apikey",
 					SecretRef: inferencev1alpha1.NameReference{Name: "anthropic-key"}},
 			},
 		},
@@ -151,7 +151,7 @@ func TestProviderReconciler_AuthDefaultsInjected(t *testing.T) {
 
 	info, found := store.getProvider(key)
 	require.True(t, found)
-	assert.Equal(t, "x-api-key", info.config[auth.SimpleAuthHeaderName],
+	assert.Equal(t, "x-api-key", info.config[auth.APIKeyAuthHeaderName],
 		"anthropic provider should have authHeaderName default injected")
 }
 
@@ -164,9 +164,9 @@ func TestProviderReconciler_AuthDefaultsNotOverridden(t *testing.T) {
 				Provider: "anthropic",
 				Endpoint: "api.anthropic.com",
 				Auth: inferencev1alpha1.AuthConfig{
-					Type:      "simple",
+					Type:      "apikey",
 					SecretRef: inferencev1alpha1.NameReference{Name: "anthropic-key"}},
-				Config: map[string]string{auth.SimpleAuthHeaderName: "custom-header"},
+				Config: map[string]string{auth.APIKeyAuthHeaderName: "custom-header"},
 			},
 		},
 	}}
@@ -178,7 +178,7 @@ func TestProviderReconciler_AuthDefaultsNotOverridden(t *testing.T) {
 
 	info, found := store.getProvider(key)
 	require.True(t, found)
-	assert.Equal(t, "custom-header", info.config[auth.SimpleAuthHeaderName],
+	assert.Equal(t, "custom-header", info.config[auth.APIKeyAuthHeaderName],
 		"user-specified config should not be overridden by defaults")
 }
 
@@ -220,7 +220,7 @@ func TestBuildConfigWithDefaults(t *testing.T) {
 		{
 			name:           "user config overrides default",
 			providerName:   "anthropic",
-			userConfig:     map[string]string{auth.SimpleAuthHeaderName: "custom"},
+			userConfig:     map[string]string{auth.APIKeyAuthHeaderName: "custom"},
 			wantHeaderName: "custom",
 			wantInConfig:   true,
 		},
@@ -236,7 +236,7 @@ func TestBuildConfigWithDefaults(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := buildConfigWithDefaults(test.providerName, test.userConfig)
-			headerName, exists := config[auth.SimpleAuthHeaderName]
+			headerName, exists := config[auth.APIKeyAuthHeaderName]
 			assert.Equal(t, test.wantInConfig, exists)
 			if test.wantInConfig {
 				assert.Equal(t, test.wantHeaderName, headerName)

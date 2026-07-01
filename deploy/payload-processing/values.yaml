@@ -21,6 +21,7 @@ upstreamIpp:
           fieldName: model
           headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
+      - type: stream-usage-enforcer
       - type: api-translation
       - type: apikey-injection
       profiles:
@@ -30,6 +31,7 @@ upstreamIpp:
           - pluginRef: maas-headers-guard
           - pluginRef: model-extractor
           - pluginRef: model-provider-resolver
+          - pluginRef: stream-usage-enforcer
           - pluginRef: api-translation
           - pluginRef: apikey-injection
           response:

@@ -99,7 +99,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			Provider: providerName,
 			Endpoint: endpoint,
 			Auth: inferencev1alpha1.AuthConfig{
-				Type:      "simple",
+				Type:      "apikey",
 				SecretRef: inferencev1alpha1.NameReference{Name: credsName},
 			},
 		},
@@ -117,6 +117,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 					Ref:         inferencev1alpha1.NameReference{Name: req.Name},
 					TargetModel: targetModel,
 					APIFormat:   mapProviderToAPIFormat(providerName),
+					Path:        mapProviderToDefaultPath(providerName),
 				},
 			},
 		},
@@ -205,4 +206,17 @@ func mapProviderToAPIFormat(provider string) string {
 		return "messages"
 	}
 	return "openai-chat"
+}
+
+func mapProviderToDefaultPath(provider string) string {
+	switch provider {
+	case "anthropic":
+		return "/v1/messages"
+	case "azure", "azure-openai":
+		return "/openai/v1/chat/completions"
+	case "vertex-openai":
+		return "/v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions"
+	default:
+		return "/v1/chat/completions"
+	}
 }

@@ -47,7 +47,7 @@ func TestExternalProviderDeepCopy(t *testing.T) {
 			Provider: "openai",
 			Endpoint: "api.openai.com",
 			Auth: AuthConfig{
-				Type:      "simple",
+				Type:      "apikey",
 				SecretRef: NameReference{Name: "key"},
 			},
 			Config: map[string]string{"project": "my-project", "location": "us-central1"},
@@ -71,6 +71,7 @@ func TestExternalModelDeepCopy(t *testing.T) {
 					Ref:         NameReference{Name: "my-openai"},
 					TargetModel: "gpt-4o",
 					APIFormat:   "openai-chat",
+					Path:        "/v1/chat/completions",
 				},
 			},
 		},

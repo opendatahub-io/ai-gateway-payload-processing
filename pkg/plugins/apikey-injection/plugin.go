@@ -72,7 +72,7 @@ func NewAPIKeyInjectionPlugin(reconcilerBuilder func() *builder.Builder, clientR
 			Name: APIKeyInjectionPluginType,
 		},
 		authHeadersGenerators: map[auth.Auth]authgenerator.AuthHeadersGenerator{
-			auth.Simple: authgenerator.NewSimpleAuthGenerator(),
+			auth.APIKey: authgenerator.NewAPIKeyAuthGenerator(),
 			auth.SigV4:  authgenerator.NewSigV4AuthGenerator(),
 		},
 		store: store,

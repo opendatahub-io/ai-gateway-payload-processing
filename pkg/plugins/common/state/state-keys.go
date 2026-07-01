@@ -27,4 +27,5 @@ const (
 	AuthTypeKey       = "auth"
 	InputAPIFormatKey = "input-api-format"
 	EndpointKey       = "endpoint"
+	PathKey           = "path"
 )

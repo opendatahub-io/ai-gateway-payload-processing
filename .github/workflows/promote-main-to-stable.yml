@@ -1,0 +1,100 @@
+# Promote Main to Stable Workflow
+#
+# Merges main into stable using a merge commit.
+# Triggered on-demand only (no cron schedule).
+#
+# This workflow:
+#   1. Checks if stable is behind main
+#   2. Attempts a merge commit (--no-ff) from main into stable
+#   3. Fails immediately if there are merge conflicts
+#   4. Pushes the merge commit to stable on success
+
+name: Promote Main to Stable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GH_USER_NAME: github-actions[bot]
+  GH_USER_EMAIL: github-actions[bot]@users.noreply.github.com
+
+jobs:
+  promote:
+    name: Promote main to stable
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "${{ env.GH_USER_NAME }}"
+          git config user.email "${{ env.GH_USER_EMAIL }}"
+
+      - name: Check for new commits
+        id: check
+        run: |
+          git fetch origin main stable
+
+          DIFF_COUNT=$(git rev-list --count origin/stable..origin/main)
+          if [ "$DIFF_COUNT" -eq 0 ]; then
+            echo "stable is already up to date with main. Nothing to promote."
+            echo "## Promote Main to Stable" >> "$GITHUB_STEP_SUMMARY"
+            echo "stable is already up to date with main. No changes to merge." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Found $DIFF_COUNT commit(s) to promote from main to stable."
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "diff_count=$DIFF_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Merge main into stable
+        if: steps.check.outputs.skip != 'true'
+        env:
+          DIFF_COUNT: ${{ steps.check.outputs.diff_count }}
+        run: |
+          git checkout stable
+          git reset --hard origin/stable
+
+          COMMIT_LOG=$(git log --oneline origin/stable..origin/main --no-merges | head -50)
+
+          MERGE_MSG="chore: promote main to stable (${DIFF_COUNT} commits)"
+          MERGE_MSG="${MERGE_MSG}"$'\n\n'"Commits included:"
+          MERGE_MSG="${MERGE_MSG}"$'\n'"${COMMIT_LOG}"
+
+          if ! git merge --no-ff origin/main -m "$MERGE_MSG"; then
+            echo "::error::Merge conflicts detected between main and stable."
+            echo "## Promote Main to Stable — FAILED" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Merge conflicts detected" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The following files have conflicts:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            git diff --name-only --diff-filter=U >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Please resolve conflicts manually before re-running this workflow." >> "$GITHUB_STEP_SUMMARY"
+            git merge --abort
+            exit 1
+          fi
+
+          git push origin stable
+
+          echo "## Promote Main to Stable — SUCCESS" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Promotion | \`main\` → \`stable\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commits merged | **${DIFF_COUNT}** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Commits included" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$COMMIT_LOG" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

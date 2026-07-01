@@ -33,24 +33,24 @@ const (
 )
 
 // compile-time interface check
-var _ AuthHeadersGenerator = &SimpleAuthGenerator{}
+var _ AuthHeadersGenerator = &APIKeyAuthGenerator{}
 
-func NewSimpleAuthGenerator() *SimpleAuthGenerator {
-	return &SimpleAuthGenerator{}
+func NewAPIKeyAuthGenerator() *APIKeyAuthGenerator {
+	return &APIKeyAuthGenerator{}
 }
 
-// SimpleAuthGenerator generates a single auth header from an API key.
+// APIKeyAuthGenerator generates a single auth header from an API key.
 // ExtractRequestData resolves the header name and value prefix from the model
 // config in CycleState (defaults are injected by the provider reconciler).
 // GenerateAuthHeaders reads those values from the merged credentials map.
 // Requires the credentials map to contain an "api-key" field.
-type SimpleAuthGenerator struct{}
+type APIKeyAuthGenerator struct{}
 
 // ExtractRequestData resolves the auth header name and value prefix from the
 // model config in CycleState. Provider-specific defaults (e.g. "x-api-key" for
 // Anthropic) are injected into the config by the provider reconciler. If not
 // set, falls back to "Authorization" with "Bearer " prefix.
-func (g *SimpleAuthGenerator) ExtractRequestData(cycleState *plugin.CycleState, _ *requesthandling.InferenceRequest) (map[string]string, error) {
+func (g *APIKeyAuthGenerator) ExtractRequestData(cycleState *plugin.CycleState, _ *requesthandling.InferenceRequest) (map[string]string, error) {
 	config, err := plugin.ReadCycleStateKey[map[string]string](cycleState, state.ModelConfigKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract config from cycle state - %w", err)
@@ -59,36 +59,36 @@ func (g *SimpleAuthGenerator) ExtractRequestData(cycleState *plugin.CycleState, 
 	authHeader := defaultAuthHeader
 	authValuePrefix := defaultAuthValuePrefix
 
-	if headerName, ok := config[auth.SimpleAuthHeaderName]; ok && headerName != "" {
+	if headerName, ok := config[auth.APIKeyAuthHeaderName]; ok && headerName != "" {
 		authHeader = headerName
 		authValuePrefix = ""                                           // non-default header implies no prefix unless explicitly set
-		if valuePrefix, ok := config[auth.SimpleAuthValuePrefix]; ok { // valuePrefix can be set only if header name is set
+		if valuePrefix, ok := config[auth.APIKeyAuthValuePrefix]; ok { // valuePrefix can be set only if header name is set
 			authValuePrefix = valuePrefix
 		}
 	}
 
 	return map[string]string{
-		auth.SimpleAuthHeaderName:  authHeader,
-		auth.SimpleAuthValuePrefix: authValuePrefix,
+		auth.APIKeyAuthHeaderName:  authHeader,
+		auth.APIKeyAuthValuePrefix: authValuePrefix,
 	}, nil
 }
 
 // GenerateAuthHeaders extracts the relevant fields from credentialsData and returns
 // the header name and formatted value. Returns an error if the field is missing.
-func (g *SimpleAuthGenerator) GenerateAuthHeaders(credentialsData map[string]string) (map[string]string, error) {
+func (g *APIKeyAuthGenerator) GenerateAuthHeaders(credentialsData map[string]string) (map[string]string, error) {
 	apiKey, ok := credentialsData[apiKeyField]
 	if !ok {
 		return nil, fmt.Errorf("credentials missing required field %s", apiKeyField)
 	}
 
-	headerName, ok := credentialsData[auth.SimpleAuthHeaderName]
+	headerName, ok := credentialsData[auth.APIKeyAuthHeaderName]
 	if !ok {
-		return nil, fmt.Errorf("credentials missing required field %s", auth.SimpleAuthHeaderName)
+		return nil, fmt.Errorf("credentials missing required field %s", auth.APIKeyAuthHeaderName)
 	}
 
-	valuePrefix, ok := credentialsData[auth.SimpleAuthValuePrefix]
+	valuePrefix, ok := credentialsData[auth.APIKeyAuthValuePrefix]
 	if !ok {
-		return nil, fmt.Errorf("credentials missing required field %s", auth.SimpleAuthValuePrefix)
+		return nil, fmt.Errorf("credentials missing required field %s", auth.APIKeyAuthValuePrefix)
 	}
 
 	return map[string]string{

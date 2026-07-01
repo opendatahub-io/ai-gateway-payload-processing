@@ -82,7 +82,7 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 func buildConfigWithDefaults(providerName string, userConfig map[string]string) map[string]string {
 	config := map[string]string{}
 	if headerName, ok := defaultAuthHeaders[providerName]; ok {
-		config[auth.SimpleAuthHeaderName] = headerName
+		config[auth.APIKeyAuthHeaderName] = headerName
 	}
 	maps.Copy(config, userConfig)
 	return config

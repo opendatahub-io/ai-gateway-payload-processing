@@ -19,6 +19,7 @@ package model_provider_resolver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -34,6 +35,18 @@ import (
 )
 
 const providerRequeueDelay = 5 * time.Second
+
+// resolvePathPlaceholders substitutes {key} placeholders in path with values
+// from the config map. Unresolved placeholders are left as-is.
+func resolvePathPlaceholders(path string, config map[string]string) string {
+	if path == "" || !strings.Contains(path, "{") {
+		return path
+	}
+	for k, v := range config {
+		path = strings.ReplaceAll(path, "{"+k+"}", v)
+	}
+	return path
+}
 
 // externalModelReconciler watches inference.opendatahub.io ExternalModel CRDs
 // and resolves provider info from the provider store.
@@ -109,12 +122,15 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1a
 		weight = *ref.Weight
 	}
 
+	path := resolvePathPlaceholders(ref.Path, config)
+
 	return &resolvedProviderRef{
 		provider:        providerInfo.provider,
 		targetModel:     ref.TargetModel,
 		apiFormat:       apiformat.APIFormat(ref.APIFormat),
 		auth:            authType,
 		endpoint:        providerInfo.endpoint,
+		path:            path,
 		secretName:      secretName,
 		secretNamespace: secretNamespace,
 		config:          config,

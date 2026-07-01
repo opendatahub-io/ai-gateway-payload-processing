@@ -41,6 +41,7 @@ type resolvedProviderRef struct {
 	apiFormat       apiformat.APIFormat
 	auth            auth.Auth
 	endpoint        string
+	path            string // outgoing :path from ExternalProviderRef (required field)
 	secretName      string
 	secretNamespace string
 	config          map[string]string

@@ -178,7 +178,7 @@ func TestReconcile_CreatesNewCRs(t *testing.T) {
 	provider := waitForNewProvider(t, "my-openai", ns)
 	assert.Equal(t, "openai", provider.Spec.Provider)
 	assert.Equal(t, "api.openai.com", provider.Spec.Endpoint)
-	assert.Equal(t, "simple", provider.Spec.Auth.Type)
+	assert.Equal(t, "apikey", provider.Spec.Auth.Type)
 	assert.Equal(t, "openai-key", provider.Spec.Auth.SecretRef.Name)
 	assert.Equal(t, managedByValue, provider.Labels[labelManagedBy])
 	assert.Equal(t, "my-openai", provider.Labels[labelMigratedFrom])
@@ -276,7 +276,7 @@ func TestReconcile_DoesNotOverwriteManualCRs(t *testing.T) {
 			Provider: "openai",
 			Endpoint: "manual.openai.com",
 			Auth: inferencev1alpha1.AuthConfig{
-				Type:      "simple",
+				Type:      "apikey",
 				SecretRef: inferencev1alpha1.NameReference{Name: "manual-key"},
 			},
 		},
@@ -315,6 +315,27 @@ func TestMapProviderToAPIFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.provider, func(t *testing.T) {
 			assert.Equal(t, tt.apiFormat, mapProviderToAPIFormat(tt.provider))
+		})
+	}
+}
+
+func TestMapProviderToDefaultPath(t *testing.T) {
+	tests := []struct {
+		provider string
+		path     string
+	}{
+		{"openai", "/v1/chat/completions"},
+		{"anthropic", "/v1/messages"},
+		{"azure", "/openai/v1/chat/completions"},
+		{"azure-openai", "/openai/v1/chat/completions"},
+		{"vertex-openai", "/v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions"},
+		{"bedrock", "/v1/chat/completions"},
+		{"bedrock-openai", "/v1/chat/completions"},
+		{"unknown", "/v1/chat/completions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			assert.Equal(t, tt.path, mapProviderToDefaultPath(tt.provider))
 		})
 	}
 }

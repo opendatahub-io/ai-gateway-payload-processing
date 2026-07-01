@@ -130,7 +130,7 @@ func createExternalProvider(t *testing.T, name, namespace, endpoint string) {
 			Provider: "openai",
 			Endpoint: endpoint,
 			Auth: inferencev1alpha1.AuthConfig{
-				Type:      "simple",
+				Type:      "apikey",
 				SecretRef: inferencev1alpha1.NameReference{Name: "dummy-secret"},
 			},
 		},
@@ -150,6 +150,7 @@ func newExternalModel(name, namespace, providerName, targetModel string) *infere
 					Ref:         inferencev1alpha1.NameReference{Name: providerName},
 					TargetModel: targetModel,
 					APIFormat:   "openai",
+					Path:        "/v1/chat/completions",
 				},
 			},
 		},

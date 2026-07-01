@@ -46,7 +46,7 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 			provider:        provider.Anthropic,
 			targetModel:     targetModel,
 			apiFormat:       apiformat.Messages,
-			auth:            auth.Simple,
+			auth:            auth.APIKey,
 			endpoint:        endpoint,
 			secretName:      credName,
 			secretNamespace: extNS,
@@ -86,11 +86,51 @@ func TestProcessRequest_ModelResolved(t *testing.T) {
 
 	actualAuthType, err := plugin.ReadCycleStateKey[auth.Auth](cs, state.AuthTypeKey)
 	require.NoError(t, err)
-	require.Equal(t, auth.Simple, actualAuthType)
+	require.Equal(t, auth.APIKey, actualAuthType)
 
 	actualEndpoint, err := plugin.ReadCycleStateKey[string](cs, state.EndpointKey)
 	require.NoError(t, err)
 	require.Equal(t, endpoint, actualEndpoint)
+}
+
+func TestProcessRequest_PathWrittenToCycleState(t *testing.T) {
+	store := newInfoStore()
+	const (
+		extNS       = "llm"
+		extName     = "remote-llama"
+		targetModel = "llama-4-scout"
+		credName    = "cluster-b-key"
+		endpoint    = "maas.cluster-b.example.com"
+		path        = "/maas-default-gateway/v1/chat/completions"
+	)
+	store.addOrUpdateModel(
+		types.NamespacedName{Namespace: extNS, Name: extName},
+		&externalModelInfo{modelName: extName, refs: []*resolvedProviderRef{{
+			provider:        provider.OpenAI,
+			targetModel:     targetModel,
+			apiFormat:       apiformat.OpenAIChatCompletions,
+			auth:            auth.APIKey,
+			endpoint:        endpoint,
+			path:            path,
+			secretName:      credName,
+			secretNamespace: extNS,
+			config:          map[string]string{},
+			weight:          1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/" + extNS + "/" + extName + "/v1/chat/completions"
+	req.Body["model"] = extName
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	actualPath, err := plugin.ReadCycleStateKey[string](cs, state.PathKey)
+	require.NoError(t, err)
+	require.Equal(t, path, actualPath)
 }
 
 func TestProcessRequest_ModelMismatch(t *testing.T) {

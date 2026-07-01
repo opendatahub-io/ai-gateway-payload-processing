@@ -29,7 +29,7 @@ import (
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
-func TestSimpleGenerateAuthHeaders(t *testing.T) {
+func TestAPIKeyGenerateAuthHeaders(t *testing.T) {
 	tests := []struct {
 		name        string
 		credentials map[string]string
@@ -40,8 +40,8 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 			name: "Bearer prefix (OpenAI style)",
 			credentials: map[string]string{
 				"api-key":                  "sk-test-key",
-				auth.SimpleAuthHeaderName:  "Authorization",
-				auth.SimpleAuthValuePrefix: "Bearer ",
+				auth.APIKeyAuthHeaderName:  "Authorization",
+				auth.APIKeyAuthValuePrefix: "Bearer ",
 			},
 			wantHeaders: map[string]string{
 				"Authorization": "Bearer sk-test-key",
@@ -51,8 +51,8 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 			name: "raw key without prefix (Anthropic style)",
 			credentials: map[string]string{
 				"api-key":                  "ant-key-123",
-				auth.SimpleAuthHeaderName:  "x-api-key",
-				auth.SimpleAuthValuePrefix: "",
+				auth.APIKeyAuthHeaderName:  "x-api-key",
+				auth.APIKeyAuthValuePrefix: "",
 			},
 			wantHeaders: map[string]string{
 				"x-api-key": "ant-key-123",
@@ -62,8 +62,8 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 			name: "missing api-key field returns error",
 			credentials: map[string]string{
 				"wrong-field":              "some-value",
-				auth.SimpleAuthHeaderName:  "Authorization",
-				auth.SimpleAuthValuePrefix: "Bearer ",
+				auth.APIKeyAuthHeaderName:  "Authorization",
+				auth.APIKeyAuthValuePrefix: "Bearer ",
 			},
 			wantErr: true,
 		},
@@ -76,7 +76,7 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 			name: "missing authHeaderName returns error",
 			credentials: map[string]string{
 				"api-key":                  "sk-test-key",
-				auth.SimpleAuthValuePrefix: "Bearer ",
+				auth.APIKeyAuthValuePrefix: "Bearer ",
 			},
 			wantErr: true,
 		},
@@ -84,7 +84,7 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 			name: "missing authValuePrefix returns error",
 			credentials: map[string]string{
 				"api-key":                 "sk-test-key",
-				auth.SimpleAuthHeaderName: "Authorization",
+				auth.APIKeyAuthHeaderName: "Authorization",
 			},
 			wantErr: true,
 		},
@@ -92,7 +92,7 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			generator := NewSimpleAuthGenerator()
+			generator := NewAPIKeyAuthGenerator()
 			authHeaders, err := generator.GenerateAuthHeaders(test.credentials)
 
 			if test.wantErr {
@@ -114,7 +114,7 @@ func TestSimpleGenerateAuthHeaders(t *testing.T) {
 	}
 }
 
-func TestSimpleExtractRequestData(t *testing.T) {
+func TestAPIKeyExtractRequestData(t *testing.T) {
 	tests := []struct {
 		name            string
 		config          map[string]string
@@ -129,25 +129,25 @@ func TestSimpleExtractRequestData(t *testing.T) {
 		},
 		{
 			name:            "config with custom header name clears value prefix",
-			config:          map[string]string{auth.SimpleAuthHeaderName: "x-api-key"},
+			config:          map[string]string{auth.APIKeyAuthHeaderName: "x-api-key"},
 			wantHeaderName:  "x-api-key",
 			wantValuePrefix: "",
 		},
 		{
 			name:            "config with header name and explicit prefix",
-			config:          map[string]string{auth.SimpleAuthHeaderName: "x-api-key", auth.SimpleAuthValuePrefix: "Key "},
+			config:          map[string]string{auth.APIKeyAuthHeaderName: "x-api-key", auth.APIKeyAuthValuePrefix: "Key "},
 			wantHeaderName:  "x-api-key",
 			wantValuePrefix: "Key ",
 		},
 		{
 			name:            "config with empty header name defaults to Authorization Bearer",
-			config:          map[string]string{auth.SimpleAuthHeaderName: ""},
+			config:          map[string]string{auth.APIKeyAuthHeaderName: ""},
 			wantHeaderName:  "Authorization",
 			wantValuePrefix: "Bearer ",
 		},
 		{
 			name:            "config with value prefix only is ignored without header name",
-			config:          map[string]string{auth.SimpleAuthValuePrefix: "Token "},
+			config:          map[string]string{auth.APIKeyAuthValuePrefix: "Token "},
 			wantHeaderName:  "Authorization",
 			wantValuePrefix: "Bearer ",
 		},
@@ -158,18 +158,18 @@ func TestSimpleExtractRequestData(t *testing.T) {
 			cs := plugin.NewCycleState()
 			cs.Write(state.ModelConfigKey, test.config)
 
-			generator := NewSimpleAuthGenerator()
+			generator := NewAPIKeyAuthGenerator()
 			result, err := generator.ExtractRequestData(cs, requesthandling.NewInferenceRequest())
 
 			require.NoError(t, err)
-			require.Equal(t, test.wantHeaderName, result[auth.SimpleAuthHeaderName])
-			require.Equal(t, test.wantValuePrefix, result[auth.SimpleAuthValuePrefix])
+			require.Equal(t, test.wantHeaderName, result[auth.APIKeyAuthHeaderName])
+			require.Equal(t, test.wantValuePrefix, result[auth.APIKeyAuthValuePrefix])
 		})
 	}
 }
 
-func TestSimpleExtractRequestData_MissingModelConfigKey(t *testing.T) {
-	generator := NewSimpleAuthGenerator()
+func TestAPIKeyExtractRequestData_MissingModelConfigKey(t *testing.T) {
+	generator := NewAPIKeyAuthGenerator()
 	_, err := generator.ExtractRequestData(plugin.NewCycleState(), requesthandling.NewInferenceRequest())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to extract config from cycle state")
