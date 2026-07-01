@@ -449,6 +449,58 @@ func TestExtractTokenCounts(t *testing.T) {
 	}
 }
 
+func TestExtractUsageFromChunk(t *testing.T) {
+	tests := []struct {
+		name      string
+		chunk     string
+		wantUsage bool
+		wantKey   string
+		wantVal   float64
+	}{
+		{
+			name:      "OpenAI chat completions - top level usage",
+			chunk:     `data: {"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`,
+			wantUsage: true, wantKey: "prompt_tokens", wantVal: 10,
+		},
+		{
+			name:      "Anthropic message_start - usage in message",
+			chunk:     `data: {"type":"message_start","message":{"usage":{"input_tokens":50,"output_tokens":25}}}`,
+			wantUsage: true, wantKey: "input_tokens", wantVal: 50,
+		},
+		{
+			name:      "OpenAI chat delta - usage in delta",
+			chunk:     `data: {"delta":{"usage":{"prompt_tokens":15,"completion_tokens":30}}}`,
+			wantUsage: true, wantKey: "prompt_tokens", wantVal: 15,
+		},
+		{
+			name:      "OpenAI Responses API - usage in response object",
+			chunk:     `data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":100,"output_tokens":200,"total_tokens":300}}}`,
+			wantUsage: true, wantKey: "input_tokens", wantVal: 100,
+		},
+		{
+			name:      "no usage data",
+			chunk:     `data: {"type":"response.output_text.delta","delta":"hello"}`,
+			wantUsage: false,
+		},
+		{
+			name:      "empty chunk",
+			chunk:     "",
+			wantUsage: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := extractUsageFromChunk(tt.chunk)
+			if !tt.wantUsage {
+				assert.Nil(t, usage)
+				return
+			}
+			require.NotNil(t, usage, "expected usage data")
+			assert.Equal(t, tt.wantVal, usage[tt.wantKey])
+		})
+	}
+}
+
 // --- Helpers ---
 
 func newTestPlugin(t *testing.T, meteringURL string, failOpen bool) *ExternalMeteringPlugin {
