@@ -130,6 +130,10 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		return fmt.Errorf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase)
 	}
 
+	if _, err := ctrlcommon.ResolvePath(ref.Path, mergeConfig(provider.Spec.Config, ref.Config)); err != nil {
+		return fmt.Errorf("path %q: %w", ref.Path, err)
+	}
+
 	labels := commonLabels(model.Name)
 	hr := buildHTTPRoute(
 		provider.Spec.Endpoint,
@@ -321,4 +325,15 @@ func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, name
 			},
 		},
 	}
+}
+
+func mergeConfig(providerConfig, modelConfig map[string]string) map[string]string {
+	merged := make(map[string]string, len(providerConfig)+len(modelConfig))
+	for k, v := range providerConfig {
+		merged[k] = v
+	}
+	for k, v := range modelConfig {
+		merged[k] = v
+	}
+	return merged
 }

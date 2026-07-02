@@ -371,7 +371,7 @@ func TestModelReconciler_PathStoredFromRef(t *testing.T) {
 func TestModelReconciler_PathPlaceholderResolution(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "vertex-model"}
 	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
-		key: newTestModel("vertex-model", "models", newRef("gcp-vertex", "gemini-pro", "openai-chat", "/v1/{project}/{location}/publishers/google/models/{model}:generateContent")),
+		key: newTestModel("vertex-model", "models", newRef("gcp-vertex", "gemini-pro", "openai-chat", "/v1/projects/{project}/locations/{location}/publishers/google/models/gemini-pro:generateContent")),
 	}}
 
 	store := newInfoStore()
@@ -391,31 +391,35 @@ func TestModelReconciler_PathPlaceholderResolution(t *testing.T) {
 
 	info, found := store.getModel(key)
 	require.True(t, found)
-	assert.Equal(t, "/v1/my-project/us-central1/publishers/google/models/{model}:generateContent",
+	assert.Equal(t, "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-pro:generateContent",
 		info.refs[0].path,
-		"placeholders present in config should be resolved; unknown placeholders stay as-is")
+		"all placeholders should be resolved from config")
 }
 
-func TestResolvePathPlaceholders(t *testing.T) {
-	tests := []struct {
-		name   string
-		path   string
-		config map[string]string
-		want   string
-	}{
-		{"empty path", "", nil, ""},
-		{"no placeholders", "/v1/chat/completions", map[string]string{"k": "v"}, "/v1/chat/completions"},
-		{"single placeholder", "/v1/{project}/chat", map[string]string{"project": "my-proj"}, "/v1/my-proj/chat"},
-		{"multiple placeholders", "/{location}/{project}/models", map[string]string{"location": "us", "project": "p1"}, "/us/p1/models"},
-		{"unresolved placeholder stays", "/v1/{unknown}/chat", map[string]string{"other": "val"}, "/v1/{unknown}/chat"},
-		{"nil config", "/v1/{key}/x", nil, "/v1/{key}/x"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := resolvePathPlaceholders(tt.path, tt.config)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+func TestModelReconciler_UnresolvedPlaceholderSkipsRef(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "bad-path"}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel("bad-path", "models", newRef("gcp-vertex", "gemini-pro", "openai-chat", "/v1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions")),
+	}}
+
+	store := newInfoStore()
+	store.addOrUpdateProvider(
+		types.NamespacedName{Namespace: "models", Name: "gcp-vertex"},
+		&providerInfo{
+			provider: "vertex", endpoint: "us-central1-aiplatform.googleapis.com",
+			auth:       auth.APIKey,
+			secretName: "vertex-key", secretNamespace: "models",
+			config: map[string]string{"project": "my-project"},
+		},
+	)
+
+	r := &externalModelReconciler{Reader: reader, store: store}
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, providerRequeueDelay, result.RequeueAfter, "should requeue when all refs fail validation")
+
+	_, found := store.getModel(key)
+	assert.False(t, found, "model should not be stored when path has unresolved placeholders")
 }
 
 func TestMergeConfig(t *testing.T) {
