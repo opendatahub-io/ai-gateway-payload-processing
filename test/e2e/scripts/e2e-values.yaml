@@ -12,11 +12,6 @@ upstreamIpp:
           headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
       - type: api-translation
-        parameters:
-          vertexOpenAI:
-            project: "test-project"
-            location: "us-central1"
-            endpoint: "openapi"
       - type: apikey-injection
       profiles:
       - name: default

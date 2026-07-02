@@ -40,12 +40,12 @@ func TestVertexOpenAI_TranslateRequest_PassthroughAllChatParams(t *testing.T) {
 		"frequency_penalty": 0.3,
 	}
 
-	translatedBody, headers, headersToRemove, err := NewVertexOpenAITranslator("test-project", "us-central1", "openapi").TranslateRequest(body)
+	translatedBody, headers, headersToRemove, err := NewVertexOpenAITranslator().TranslateRequest(body)
 	require.NoError(t, err)
 	assert.Nil(t, translatedBody, "Vertex OpenAI-compatible API should not mutate the request body")
-	assert.Equal(t, "/v1/projects/test-project/locations/us-central1/endpoints/openapi/chat/completions", headers[":path"])
 	assert.Equal(t, "application/json", headers["content-type"])
-	assert.Len(t, headers, 2)
+	assert.NotContains(t, headers, ":path", "path is set by applyPathOverride, not the translator")
+	assert.Len(t, headers, 1)
 	assert.Nil(t, headersToRemove)
 }
 
@@ -54,7 +54,7 @@ func TestVertexOpenAI_TranslateRequest_MissingModel(t *testing.T) {
 		"messages": []any{map[string]any{"role": "user", "content": "Hi"}},
 	}
 
-	_, _, _, err := NewVertexOpenAITranslator("p", "l", "e").TranslateRequest(body)
+	_, _, _, err := NewVertexOpenAITranslator().TranslateRequest(body)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "model field is required")
 }
@@ -65,7 +65,7 @@ func TestVertexOpenAI_TranslateRequest_EmptyModel(t *testing.T) {
 		"messages": []any{map[string]any{"role": "user", "content": "Hi"}},
 	}
 
-	_, _, _, err := NewVertexOpenAITranslator("p", "l", "e").TranslateRequest(body)
+	_, _, _, err := NewVertexOpenAITranslator().TranslateRequest(body)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "model field is required")
 }
@@ -75,7 +75,7 @@ func TestVertexOpenAI_TranslateRequest_MissingMessages(t *testing.T) {
 		"model": "gemini-2.5-flash",
 	}
 
-	_, _, _, err := NewVertexOpenAITranslator("p", "l", "e").TranslateRequest(body)
+	_, _, _, err := NewVertexOpenAITranslator().TranslateRequest(body)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "messages field is required and must not be empty")
 }
@@ -86,7 +86,7 @@ func TestVertexOpenAI_TranslateRequest_EmptyMessages(t *testing.T) {
 		"messages": []any{},
 	}
 
-	_, _, _, err := NewVertexOpenAITranslator("p", "l", "e").TranslateRequest(body)
+	_, _, _, err := NewVertexOpenAITranslator().TranslateRequest(body)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "messages field is required and must not be empty")
 }
@@ -114,7 +114,7 @@ func TestVertexOpenAI_TranslateResponse_NoExtraProperties(t *testing.T) {
 		},
 	}
 
-	translatedBody, err := NewVertexOpenAITranslator("p", "l", "e").TranslateResponse(body, "google/gemini-2.0-flash")
+	translatedBody, err := NewVertexOpenAITranslator().TranslateResponse(body, "google/gemini-2.0-flash")
 	require.NoError(t, err)
 	assert.Nil(t, translatedBody, "Response without extra_properties should not be mutated")
 }
@@ -152,7 +152,7 @@ func TestVertexOpenAI_TranslateResponse_StripsExtraProperties(t *testing.T) {
 		},
 	}
 
-	translatedBody, err := NewVertexOpenAITranslator("p", "l", "e").TranslateResponse(body, "google/gemini-2.5-flash")
+	translatedBody, err := NewVertexOpenAITranslator().TranslateResponse(body, "google/gemini-2.5-flash")
 	require.NoError(t, err)
 	require.NotNil(t, translatedBody, "Response with extra_properties should be mutated")
 	usage := translatedBody["usage"].(map[string]any)
@@ -170,7 +170,7 @@ func TestVertexOpenAI_TranslateResponse_ErrorPassthrough(t *testing.T) {
 		},
 	}
 
-	translatedBody, err := NewVertexOpenAITranslator("p", "l", "e").TranslateResponse(body, "invalid-model")
+	translatedBody, err := NewVertexOpenAITranslator().TranslateResponse(body, "invalid-model")
 	require.NoError(t, err)
 	assert.Nil(t, translatedBody, "Error responses should pass through unchanged")
 }

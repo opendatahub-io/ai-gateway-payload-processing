@@ -51,7 +51,7 @@ func (h *testHandle) GetAllPlugins() []plugin.Plugin           { return nil }
 func (h *testHandle) GetAllPluginsWithNames() map[string]plugin.Plugin { return nil }
 
 func newTestPlugin() *APITranslationPlugin {
-	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
+	p := NewAPITranslationPlugin(context.Background())
 	return p
 }
 
@@ -462,7 +462,7 @@ func TestProcessRequest_PathOverrideFromCycleState(t *testing.T) {
 }
 
 func TestProcessRequest_PathOverrideInPassthrough(t *testing.T) {
-	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
+	p := NewAPITranslationPlugin(context.Background())
 	cs := plugin.NewCycleState()
 	cs.Write(state.ProviderKey, "anthropic")
 	cs.Write(state.InputAPIFormatKey, apiformat.Messages)
@@ -483,7 +483,7 @@ func TestProcessRequest_PathOverrideInPassthrough(t *testing.T) {
 }
 
 func TestPassthrough_SkipsRequestTranslation(t *testing.T) {
-	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
+	p := NewAPITranslationPlugin(context.Background())
 	cs := plugin.NewCycleState()
 	cs.Write(state.ProviderKey, "anthropic")
 	cs.Write(state.InputAPIFormatKey, apiformat.Messages)
@@ -507,7 +507,7 @@ func TestPassthrough_SkipsRequestTranslation(t *testing.T) {
 }
 
 func TestPassthrough_SkipsResponseTranslation(t *testing.T) {
-	p, _ := NewAPITranslationPlugin(context.Background(), apiTranslationConfig{})
+	p := NewAPITranslationPlugin(context.Background())
 	cs := plugin.NewCycleState()
 	cs.Write(state.ProviderKey, "anthropic")
 	cs.Write(state.InputAPIFormatKey, apiformat.Messages)

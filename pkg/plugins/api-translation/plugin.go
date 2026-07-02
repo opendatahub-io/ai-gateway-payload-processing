@@ -48,56 +48,22 @@ const (
 var _ requesthandling.RequestProcessor = &APITranslationPlugin{}
 var _ requesthandling.ResponseProcessor = &APITranslationPlugin{}
 
-// apiTranslationConfig holds configuration for provider-specific translators.
-type apiTranslationConfig struct {
-	VertexOpenAI *vertexOpenAIConfig `json:"vertexOpenAI,omitempty"`
-}
-
-type vertexOpenAIConfig struct {
-	Project  string `json:"project"`
-	Location string `json:"location"`
-	Endpoint string `json:"endpoint"`
-}
-
 // APITranslationFactory defines the factory function for APITranslationPlugin.
-func APITranslationFactory(name string, rawConfig json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	var config apiTranslationConfig
-	if len(rawConfig) > 0 {
-		if err := json.Unmarshal(rawConfig, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse api-translation plugin config: %w", err)
-		}
-	}
-
-	p, err := NewAPITranslationPlugin(handle.Context(), config)
-	if err != nil {
-		return nil, err
-	}
+func APITranslationFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	p := NewAPITranslationPlugin(handle.Context())
 	return p.WithName(name), nil
 }
 
-// NewAPITranslationPlugin creates a new plugin instance with the given config.
-// If vertexOpenAI config is provided, the vertex-openai translator is registered.
-// If vertexOpenAI config is provided but has empty fields, an error is returned.
-func NewAPITranslationPlugin(ctx context.Context, config apiTranslationConfig) (*APITranslationPlugin, error) {
-	// vertex (native GenerateContent) is not used in 3.4 ExternalModel flow.
-	// Uncomment when vertex (non-OpenAI) provider support is needed.
-	// vertexTranslator := vertex.NewVertexTranslator()
+// NewAPITranslationPlugin creates a new plugin instance with all translators registered.
+// Provider-specific configuration (e.g., Vertex AI project/location/endpoint) is read
+// from ExternalProvider CRD config and path placeholders at runtime, not from plugin config.
+func NewAPITranslationPlugin(ctx context.Context) *APITranslationPlugin {
 	providers := map[string]translator.Translator{
 		provider.OpenAI:        openai.NewOpenAITranslator(),
 		provider.Anthropic:     anthropic.NewAnthropicTranslator(),
 		provider.AzureOpenAI:   azure.NewAzureOpenAITranslator(),
 		provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(),
-	}
-
-	if config.VertexOpenAI != nil {
-		if config.VertexOpenAI.Project == "" || config.VertexOpenAI.Location == "" || config.VertexOpenAI.Endpoint == "" {
-			return nil, fmt.Errorf("vertexOpenAI config requires non-empty project, location, and endpoint")
-		}
-		providers[provider.VertexOpenAI] = vertex.NewVertexOpenAITranslator(
-			config.VertexOpenAI.Project,
-			config.VertexOpenAI.Location,
-			config.VertexOpenAI.Endpoint,
-		)
+		provider.VertexOpenAI:  vertex.NewVertexOpenAITranslator(),
 	}
 
 	keys := make([]string, 0, len(providers))
@@ -113,7 +79,7 @@ func NewAPITranslationPlugin(ctx context.Context, config apiTranslationConfig) (
 			Name: APITranslationPluginType,
 		},
 		providers: providers,
-	}, nil
+	}
 }
 
 // APITranslationPlugin translates inference API requests and responses between
