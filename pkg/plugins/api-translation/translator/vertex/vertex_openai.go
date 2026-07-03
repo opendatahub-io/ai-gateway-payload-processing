@@ -43,7 +43,7 @@ type VertexOpenAITranslator struct {
 }
 
 // TranslateRequest validates the request body. The request body is not mutated since
-// the endpoint accepts OpenAI chat completions format as-is. Path is set by applyPathOverride.
+// the endpoint accepts OpenAI chat completions format as-is. 
 func (t *VertexOpenAITranslator) TranslateRequest(body map[string]any) (translatedBody map[string]any,
 	headersToMutate map[string]string, headersToRemove []string, err error) {
 	model, _ := body["model"].(string)
