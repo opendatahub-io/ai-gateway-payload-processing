@@ -86,7 +86,16 @@ spec:
       targetModel: %s
       apiFormat: %s
       path: %s
-`, p.Name, nsName, p.Name, p.Name, p.Provider, defaultPathForProvider(p.Provider)))
+`, p.Name, nsName, p.Name, p.Name, apiFormatForProvider(p.Provider), defaultPathForProvider(p.Provider)))
+}
+
+func apiFormatForProvider(provider string) string {
+	switch provider {
+	case "anthropic":
+		return "messages"
+	default:
+		return "openai-chat"
+	}
 }
 
 func defaultPathForProvider(provider string) string {

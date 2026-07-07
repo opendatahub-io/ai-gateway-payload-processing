@@ -82,18 +82,19 @@ func (m *mockTranslator) TranslateResponse(body map[string]any, model string) (m
 
 var _ translator.Translator = (*mockTranslator)(nil)
 
-func newPluginWithMock(providerName string, mock *mockTranslator) *APITranslationPlugin {
+func newPluginWithMock(input, output apiformat.APIFormat, mock *mockTranslator) *APITranslationPlugin {
 	return &APITranslationPlugin{
 		typedName: plugin.TypedName{Type: APITranslationPluginType, Name: APITranslationPluginType},
-		providers: map[string]translator.Translator{
-			providerName: mock,
+		translators: map[translatorKey]translator.Translator{
+			{input: input, output: output}: mock,
 		},
 	}
 }
 
-func newCycleStateWithProvider(providerName string) *plugin.CycleState {
+func newCycleStateWithFormats(input, output apiformat.APIFormat) *plugin.CycleState {
 	cs := plugin.NewCycleState()
-	cs.Write(state.ProviderKey, providerName)
+	cs.Write(state.InputAPIFormatKey, input)
+	cs.Write(state.APIFormatKey, output)
 	return cs
 }
 
@@ -116,7 +117,7 @@ func TestProcessRequest_NoProvider(t *testing.T) {
 func TestProcessRequest_OpenAIProvider(t *testing.T) {
 	p := newTestPlugin()
 
-	cs := newCycleStateWithProvider("openai")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	req := requesthandling.NewInferenceRequest()
 	req.Body["model"] = "gpt-4o"
 	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
@@ -126,18 +127,17 @@ func TestProcessRequest_OpenAIProvider(t *testing.T) {
 	assert.False(t, req.BodyMutated())
 }
 
-func TestProcessRequest_UnknownProvider(t *testing.T) {
+func TestProcessRequest_UnknownFormatCombination(t *testing.T) {
 	p := newTestPlugin()
 
-	cs := newCycleStateWithProvider("unknown")
+	cs := newCycleStateWithFormats(apiformat.OpenAIResponses, apiformat.Messages)
 	req := requesthandling.NewInferenceRequest()
 	req.Body["model"] = "some-model"
 	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
 
 	err := p.ProcessRequest(context.Background(), cs, req)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported provider")
-	assert.Contains(t, err.Error(), "unknown")
+	assert.Contains(t, err.Error(), "unsupported format combination")
 }
 
 // ---------------------------------------------------------------------------
@@ -150,9 +150,9 @@ func TestProcessRequest_BodyMutated(t *testing.T) {
 		reqHeaders: map[string]string{":path": "/v1/translated", "content-type": "application/json"},
 		reqRemove:  []string{"x-custom"},
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	req := requesthandling.NewInferenceRequest()
 	req.Headers["authorization"] = "Bearer sk-test"
 	req.Headers["x-custom"] = "val"
@@ -179,9 +179,9 @@ func TestProcessRequest_NilBody_NoMutation(t *testing.T) {
 		reqBody:    nil,
 		reqHeaders: map[string]string{":path": "/openai/v1/chat/completions"},
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	req := requesthandling.NewInferenceRequest()
 	req.Headers["authorization"] = "Bearer sk-test"
 	req.Body["model"] = "gpt-4o"
@@ -203,9 +203,9 @@ func TestProcessRequest_AuthorizationAlwaysRemoved(t *testing.T) {
 	mock := &mockTranslator{
 		reqRemove: nil,
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	req := requesthandling.NewInferenceRequest()
 	req.Headers["authorization"] = "Bearer sk-test"
 	req.Body["model"] = "m"
@@ -223,23 +223,23 @@ func TestProcessRequest_TranslatorError(t *testing.T) {
 	mock := &mockTranslator{
 		reqErr: fmt.Errorf("model field is required"),
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	req := requesthandling.NewInferenceRequest()
 	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "Hi"}}
 
 	err := p.ProcessRequest(context.Background(), cs, req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "model field is required")
-	assert.Contains(t, err.Error(), "test-provider")
+	assert.Contains(t, err.Error(), "openai-chat")
 }
 
 func TestProcessRequest_ReceivesOriginalBody(t *testing.T) {
 	mock := &mockTranslator{}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	req := requesthandling.NewInferenceRequest()
 	req.Body["model"] = "my-model"
 	req.Body["messages"] = []any{map[string]any{"role": "user", "content": "test"}}
@@ -271,7 +271,7 @@ func TestProcessResponse_NoProviderPassthrough(t *testing.T) {
 func TestProcessResponse_OpenAIPassthrough(t *testing.T) {
 	p := newTestPlugin()
 
-	cs := newCycleStateWithProvider("openai")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["object"] = "chat.completion"
@@ -293,9 +293,9 @@ func TestProcessResponse_BodyMutated(t *testing.T) {
 			"choices": []any{map[string]any{"message": map[string]any{"content": "translated"}}},
 		},
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	cs.Write(state.ModelKey, "test-model")
 
 	resp := requesthandling.NewInferenceResponse()
@@ -312,9 +312,9 @@ func TestProcessResponse_NilBody_NoMutation(t *testing.T) {
 	mock := &mockTranslator{
 		respBody: nil,
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["object"] = "chat.completion"
@@ -327,9 +327,9 @@ func TestProcessResponse_NilBody_NoMutation(t *testing.T) {
 
 func TestProcessResponse_ModelPassedToTranslator(t *testing.T) {
 	mock := &mockTranslator{}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	cs.Write(state.ModelKey, "my-model-name")
 
 	resp := requesthandling.NewInferenceResponse()
@@ -346,9 +346,9 @@ func TestProcessResponse_TranslatorError(t *testing.T) {
 	mock := &mockTranslator{
 		respErr: fmt.Errorf("malformed response"),
 	}
-	p := newPluginWithMock("test-provider", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("test-provider")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["data"] = "something"
@@ -356,20 +356,20 @@ func TestProcessResponse_TranslatorError(t *testing.T) {
 	err := p.ProcessResponse(context.Background(), cs, resp)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "malformed response")
-	assert.Contains(t, err.Error(), "test-provider")
+	assert.Contains(t, err.Error(), "openai-chat")
 }
 
-func TestProcessResponse_UnknownProvider(t *testing.T) {
+func TestProcessResponse_UnknownFormatCombination(t *testing.T) {
 	p := newTestPlugin()
 
-	cs := newCycleStateWithProvider("unknown")
+	cs := newCycleStateWithFormats(apiformat.OpenAIResponses, apiformat.Messages)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["data"] = "something"
 
 	err := p.ProcessResponse(context.Background(), cs, resp)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported provider")
+	assert.Contains(t, err.Error(), "unsupported format combination")
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +386,7 @@ func TestFactory_Success(t *testing.T) {
 func TestProcessRequest_OpenAIWithPathOverride(t *testing.T) {
 	p := newTestPlugin()
 
-	cs := newCycleStateWithProvider("openai")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	cs.Write(state.PathKey, "/maas-default-gateway/v1/chat/completions")
 
 	req := requesthandling.NewInferenceRequest()
@@ -443,9 +443,9 @@ func TestProcessRequest_PathOverrideFromCycleState(t *testing.T) {
 	mock := &mockTranslator{
 		reqHeaders: map[string]string{":path": "/v1/chat/completions"},
 	}
-	p := newPluginWithMock("openai", mock)
+	p := newPluginWithMock(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions, mock)
 
-	cs := newCycleStateWithProvider("openai")
+	cs := newCycleStateWithFormats(apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions)
 	cs.Write(state.PathKey, "/maas-default-gateway/v1/chat/completions")
 
 	req := requesthandling.NewInferenceRequest()

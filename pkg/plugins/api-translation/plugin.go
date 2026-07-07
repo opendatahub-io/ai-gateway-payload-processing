@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
@@ -31,12 +30,8 @@ import (
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/anthropic"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/azure"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/bedrock"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/openai"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator/vertex"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -54,39 +49,37 @@ func APITranslationFactory(name string, _ json.RawMessage, handle plugin.Handle)
 	return p.WithName(name), nil
 }
 
+// translatorKey identifies a translator by the combination of input and output API formats.
+type translatorKey struct {
+	input  apiformat.APIFormat
+	output apiformat.APIFormat
+}
+
 // NewAPITranslationPlugin creates a new plugin instance with all translators registered.
 // Provider-specific configuration (e.g., Vertex AI project/location/endpoint) is read
 // from ExternalProvider CRD config and path placeholders at runtime, not from plugin config.
 func NewAPITranslationPlugin(ctx context.Context) *APITranslationPlugin {
-	providers := map[string]translator.Translator{
-		provider.OpenAI:        openai.NewOpenAITranslator(),
-		provider.Anthropic:     anthropic.NewAnthropicTranslator(),
-		provider.AzureOpenAI:   azure.NewAzureOpenAITranslator(),
-		provider.BedrockOpenAI: bedrock.NewBedrockOpenAITranslator(),
-		provider.VertexOpenAI:  vertex.NewVertexOpenAITranslator(),
+	translators := map[translatorKey]translator.Translator{
+		{apiformat.OpenAIChatCompletions, apiformat.OpenAIChatCompletions}: openai.NewOpenAITranslator(),
+		{apiformat.OpenAIChatCompletions, apiformat.Messages}:             anthropic.NewAnthropicTranslator(),
 	}
 
-	keys := make([]string, 0, len(providers))
-	for key := range providers {
-		keys = append(keys, key)
-	}
-
-	log.FromContext(ctx).V(logutil.VERBOSE).Info("plugin initialized", "providers", strings.Join(keys, ","))
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("plugin initialized", "translators", len(translators))
 
 	return &APITranslationPlugin{
 		typedName: plugin.TypedName{
 			Type: APITranslationPluginType,
 			Name: APITranslationPluginType,
 		},
-		providers: providers,
+		translators: translators,
 	}
 }
 
 // APITranslationPlugin translates inference API requests and responses between
-// OpenAI Chat Completions format and provider-native formats (e.g., Anthropic Messages API).
+// API formats based on the (inputFormat, outputFormat) tuple from CycleState.
 type APITranslationPlugin struct {
-	typedName plugin.TypedName
-	providers map[string]translator.Translator // map from provider name to translator interface
+	typedName   plugin.TypedName
+	translators map[translatorKey]translator.Translator
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
@@ -115,66 +108,63 @@ func applyPathOverride(cycleState *plugin.CycleState, request *requesthandling.I
 func (p *APITranslationPlugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
-	providerName, err := plugin.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
-	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
+	inputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.InputAPIFormatKey)
+	outputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.APIFormatKey)
+	if inputFormat == "" || outputFormat == "" {
 		return nil
 	}
 
 	if isPassthrough(cycleState) {
 		logger.Info("passthrough mode — skipping request translation")
-		// Remove client auth header; apikey-injection plugin adds the provider credential downstream.
 		request.RemoveHeader("authorization")
 		applyPathOverride(cycleState, request)
 		return nil
 	}
 
-	translator, ok := p.providers[providerName]
+	key := translatorKey{input: inputFormat, output: outputFormat}
+	translator, ok := p.translators[key]
 	if !ok {
-		logger.Error(nil, "unsupported provider for translation", "provider", providerName)
-		return fmt.Errorf("unsupported provider - '%s'", providerName)
+		logger.Error(nil, "unsupported format combination for translation", "input", inputFormat, "output", outputFormat)
+		return fmt.Errorf("unsupported format combination: %s → %s", inputFormat, outputFormat)
 	}
 
 	translatedBody, headersToMutate, headersToRemove, err := translator.TranslateRequest(request.Body)
 	if err != nil {
-		logger.Error(err, "request translation failed", "provider", providerName)
+		logger.Error(err, "request translation failed", "input", inputFormat, "output", outputFormat)
 		var commErr errcommon.Error
 		if errors.As(err, &commErr) {
 			return commErr
 		}
-		return fmt.Errorf("request translation failed for provider '%s' - %w", providerName, err)
+		return fmt.Errorf("request translation failed for %s → %s: %w", inputFormat, outputFormat, err)
 	}
 
 	if translatedBody != nil {
 		request.SetBody(translatedBody)
 	}
 
-	for key, value := range headersToMutate {
-		request.SetHeader(key, value)
+	for k, v := range headersToMutate {
+		request.SetHeader(k, v)
 	}
-	for _, key := range headersToRemove {
-		request.RemoveHeader(key)
+	for _, k := range headersToRemove {
+		request.RemoveHeader(k)
 	}
 
-	// authorization is a special header removed by the plugin, no matter which provider is used.
-	// The api-key is expected to be set by the the api-key injection plugin.
 	request.RemoveHeader("authorization")
 
 	applyPathOverride(cycleState, request)
 
-	// content-length is another special header that will be set automatically by the pluggable framework when the body is mutated.
-
-	logger.Info("request api-translation completed successfully", "provider", providerName)
+	logger.Info("request api-translation completed successfully", "input", inputFormat, "output", outputFormat)
 	return nil
 }
 
-// ProcessResponse reads the provider from CycleState and translates the response
-// back to OpenAI Chat Completions format if needed.
-// When in passthrough mode, translation is skipped.
+// ProcessResponse reads format info from CycleState and translates the response
+// back to the client's input format if needed.
 func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
-	providerName, err := plugin.ReadCycleStateKey[string](cycleState, state.ProviderKey) // err if not found
-	if err != nil || providerName == "" {                                                   // empty provider means no translation needed
+	inputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.InputAPIFormatKey)
+	outputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.APIFormatKey)
+	if inputFormat == "" || outputFormat == "" {
 		return nil
 	}
 
@@ -183,29 +173,30 @@ func (p *APITranslationPlugin) ProcessResponse(ctx context.Context, cycleState *
 		return nil
 	}
 
-	translator, ok := p.providers[providerName]
+	key := translatorKey{input: inputFormat, output: outputFormat}
+	translator, ok := p.translators[key]
 	if !ok {
-		logger.Error(nil, "unsupported provider for response translation", "provider", providerName)
-		return fmt.Errorf("unsupported provider - '%s'", providerName)
+		logger.Error(nil, "unsupported format combination for response translation", "input", inputFormat, "output", outputFormat)
+		return fmt.Errorf("unsupported format combination: %s → %s", inputFormat, outputFormat)
 	}
 
 	model, _ := plugin.ReadCycleStateKey[string](cycleState, state.ModelKey)
 
 	translatedBody, err := translator.TranslateResponse(response.Body, model)
 	if err != nil {
-		logger.Error(err, "response translation failed", "provider", providerName)
+		logger.Error(err, "response translation failed", "input", inputFormat, "output", outputFormat)
 		var commErr errcommon.Error
 		if errors.As(err, &commErr) {
 			return commErr
 		}
-		return fmt.Errorf("response translation failed for provider '%s' - %w", providerName, err)
+		return fmt.Errorf("response translation failed for %s → %s: %w", inputFormat, outputFormat, err)
 	}
 
 	if translatedBody != nil {
 		response.SetBody(translatedBody)
 	}
 
-	logger.Info("response api-translation completed successfully", "provider", providerName)
+	logger.Info("response api-translation completed successfully", "input", inputFormat, "output", outputFormat)
 	return nil
 }
 
