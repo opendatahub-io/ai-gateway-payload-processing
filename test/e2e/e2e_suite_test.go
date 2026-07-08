@@ -93,7 +93,7 @@ spec:
 	ginkgo.By("Waiting for controllers to create networking resources")
 	for _, p := range providers {
 		gomega.Eventually(func() bool {
-			cmd := exec.Command("kubectl", "get", "httproute", p.Name, "-n", nsName, "--no-headers")
+			cmd := exec.Command(kubectlBin, "get", "httproute", p.Name, "-n", nsName, "--no-headers")
 			return cmd.Run() == nil
 		}, 60*time.Second, 2*time.Second).Should(gomega.BeTrue(),
 			fmt.Sprintf("HTTPRoute %s not created by controller", p.Name))

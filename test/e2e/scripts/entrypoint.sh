@@ -39,6 +39,9 @@ if ! oc cluster-info --request-timeout=10s >/dev/null 2>&1; then
 fi
 echo "Cluster connectivity OK."
 
+# Set KUBECTL_BIN so Go tests use oc consistently with this script.
+export KUBECTL_BIN=oc
+
 # Ensure ExternalModel CRD is installed (required for E2E tests).
 if ! oc get crd externalmodels.maas.opendatahub.io >/dev/null 2>&1; then
     echo "ExternalModel CRD not found, installing..."
