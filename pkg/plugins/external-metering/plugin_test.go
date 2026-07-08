@@ -841,3 +841,120 @@ func TestExtractErrorFromResponse_NonNumericStatus(t *testing.T) {
 	require.NotNil(t, info)
 	assert.Equal(t, 0, info["status_code"])
 }
+
+// --- Organization ID / Cost Center Tests ---
+
+func TestProcessRequest_OrgFieldsInCycleState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"hasAccess":true,"balance":9000,"usage":1000,"overage":0}`))
+	}))
+	defer srv.Close()
+
+	p := newTestPlugin(t, srv.URL, true)
+	cs := plugin.NewCycleState()
+
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["x-maas-username"] = "alice"
+	req.Headers["x-maas-group"] = "finance"
+	req.Headers["x-maas-subscription"] = "ai-tenant-acme/premium-sub"
+	req.Headers["x-maas-organization-id"] = "acme-corp"
+	req.Headers["x-maas-cost-center"] = "engineering"
+	req.Body["model"] = "gpt-4o"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	orgID, _ := plugin.ReadCycleStateKey[string](cs, state.MeteringOrganizationIDKey)
+	assert.Equal(t, "acme-corp", orgID)
+	costCenter, _ := plugin.ReadCycleStateKey[string](cs, state.MeteringCostCenterKey)
+	assert.Equal(t, "engineering", costCenter)
+}
+
+func TestProcessResponse_IncludesOrgFields(t *testing.T) {
+	var mu sync.Mutex
+	var receivedEvent map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/events" {
+			var evt map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&evt)
+			mu.Lock()
+			receivedEvent = evt
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := newTestPlugin(t, srv.URL, true)
+	cs := plugin.NewCycleState()
+	cs.Write(state.MeteringUsernameKey, "alice")
+	cs.Write(state.MeteringGroupKey, "finance")
+	cs.Write(state.MeteringSubscriptionKey, "ai-tenant-acme/premium-sub")
+	cs.Write(state.MeteringOrganizationIDKey, "acme-corp")
+	cs.Write(state.MeteringCostCenterKey, "engineering")
+	cs.Write(state.MeteringModelKey, "gpt-4o")
+
+	resp := newTestResponse(150, 80, 230)
+	err := p.ProcessResponse(context.Background(), cs, resp)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotNil(t, receivedEvent)
+
+	data, ok := receivedEvent["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "acme-corp", data["organization_id"])
+	assert.Equal(t, "engineering", data["cost_center"])
+}
+
+func TestErrorEvent_IncludesOrgFields(t *testing.T) {
+	var mu sync.Mutex
+	var receivedEvent map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/events" {
+			var evt map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&evt)
+			mu.Lock()
+			receivedEvent = evt
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := newTestPlugin(t, srv.URL, true)
+	cs := plugin.NewCycleState()
+	cs.Write(state.MeteringUsernameKey, "alice")
+	cs.Write(state.MeteringGroupKey, "finance")
+	cs.Write(state.MeteringSubscriptionKey, "ai-tenant-acme/premium-sub")
+	cs.Write(state.MeteringOrganizationIDKey, "acme-corp")
+	cs.Write(state.MeteringCostCenterKey, "engineering")
+	cs.Write(state.MeteringModelKey, "gpt-4o")
+	cs.Write(state.ProviderKey, "openai")
+
+	errorInfo := map[string]any{
+		"status_code":   float64(429),
+		"error_type":    "rate_limit_exceeded",
+		"error_message": "Too many requests",
+	}
+	p.reportErrorEvent(context.Background(), cs, errorInfo)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotNil(t, receivedEvent)
+	assert.Equal(t, "inference.request.error", receivedEvent["type"])
+
+	data, ok := receivedEvent["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "acme-corp", data["organization_id"])
+	assert.Equal(t, "engineering", data["cost_center"])
+	assert.Equal(t, float64(429), data["status_code"])
+}
