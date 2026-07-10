@@ -319,6 +319,78 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported API endpoint")
 }
 
+func TestProcessRequest_LLMISvcModelTranslation(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateLLMISvc("facebook/opt-125m", &llmisvcModelInfo{
+		modelName:   "facebook/opt-125m",
+		publisherID: "publishers/llm/models/facebook/opt-125m",
+		key:         "llm/facebook-opt-125m-simulated",
+	})
+
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/v1/chat/completions"
+	req.Headers["x-gateway-model-name"] = "facebook/opt-125m"
+	req.Body["model"] = "facebook/opt-125m"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	require.Equal(t, "publishers/llm/models/facebook/opt-125m", req.Headers["x-gateway-model-name"],
+		"header should be translated to publisher ID for BBR routing")
+
+	_, provErr := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.Error(t, provErr, "no provider should be set for internal models")
+}
+
+func TestProcessRequest_LLMISvcModelDoesNotAffectExternalModel(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateLLMISvc("facebook/opt-125m", &llmisvcModelInfo{
+		modelName:   "facebook/opt-125m",
+		publisherID: "publishers/llm/models/facebook/opt-125m",
+		key:         "llm/facebook-opt-125m-simulated",
+	})
+	store.addOrUpdateModel("gpt-4o",
+		&externalModelInfo{modelName: "gpt-4o", refs: []*resolvedProviderRef{{
+			provider: "openai", targetModel: "gpt-4o",
+			apiFormat: apiformat.OpenAIChatCompletions, auth: "apikey",
+			endpoint: "api.openai.com", secretName: "k", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/gpt-4o/v1/chat/completions"
+	req.Headers["x-gateway-model-name"] = "gpt-4o"
+	req.Body["model"] = "gpt-4o"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	actualProvider, err := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.NoError(t, err)
+	require.Equal(t, "openai", actualProvider, "ExternalModel should be resolved normally")
+}
+
+func TestProcessRequest_LLMISvcModelNotFound(t *testing.T) {
+	store := newInfoStore()
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/v1/chat/completions"
+	req.Headers["x-gateway-model-name"] = "unknown/model"
+	req.Body["model"] = "unknown/model"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err, "unknown model should pass through")
+
+	_, provErr := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
+	require.Error(t, provErr, "no provider should be set for unknown models")
+}
+
 func TestDetectInputAPIFormat(t *testing.T) {
 	tests := []struct {
 		path     string

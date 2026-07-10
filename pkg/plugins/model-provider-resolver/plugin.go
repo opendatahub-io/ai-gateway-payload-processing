@@ -99,6 +99,16 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
+	// Watch KServe LLMInferenceService CRDs (serving.kserve.io) using unstructured client.
+	// Translates spec.model.name to publisher ID for BBR HTTPRoute header matching.
+	llmisvcRec := &llmisvcReconciler{Reader: k8sClient, store: store}
+	if err := reconcilerBuilder().
+		For(newLLMISvcWatchObject()).
+		Named("kserve-llminferenceservice").
+		Complete(llmisvcRec); err != nil {
+		return nil, fmt.Errorf("failed to register LLMInferenceService reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
+	}
+
 	return &ModelProviderResolverPlugin{
 		typedName: plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
 		store:     store,
@@ -145,7 +155,15 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	modelInfo, found := p.store.getModelByName(modelName)
 	if !found {
-		return nil // not an external model — pass through for internal models
+		// Check LLMInferenceService models: translate user-facing model name
+		// to publisher ID for KServe BBR HTTPRoute header matching.
+		if llmisvcInfo, ok := p.store.getLLMISvcByName(modelName); ok {
+			request.SetHeader("x-gateway-model-name", llmisvcInfo.publisherID)
+			logger.Info("translated LLMInferenceService model name to publisher ID",
+				"modelName", modelName, "publisherID", llmisvcInfo.publisherID)
+			return nil
+		}
+		return nil // not a managed model — pass through
 	}
 
 	logger.Info("resolved model by name", "modelName", modelName)

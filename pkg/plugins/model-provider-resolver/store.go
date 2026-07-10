@@ -55,19 +55,32 @@ type externalModelInfo struct {
 	refs      []*resolvedProviderRef
 }
 
+// llmisvcModelInfo holds the publisher ID mapping for an LLMInferenceService model.
+// The reconciler populates this from the CRD spec; the plugin uses it to translate
+// the user-facing model name to the publisher ID header value for BBR routing.
+type llmisvcModelInfo struct {
+	modelName   string // spec.model.name (e.g., "facebook/opt-125m")
+	publisherID string // publishers/{ns}/models/{spec.model.name}
+	key         string // namespaced name for reverse lookup on deletion
+}
+
 // infoStore is a thread-safe in-memory store for both provider and model info.
 // The reconcilers write to it; the plugin reads from it during request processing.
 // Models are keyed by their unique client-facing modelName (spec.modelName).
 type infoStore struct {
-	providers map[string]*providerInfo
-	models    map[string]*externalModelInfo // modelName -> info
-	lock      sync.RWMutex
+	providers     map[string]*providerInfo
+	models        map[string]*externalModelInfo // modelName -> info
+	llmisvcModels map[string]*llmisvcModelInfo  // modelName -> info
+	llmisvcKeys   map[string]string             // namespacedName -> modelName (reverse index for deletion)
+	lock          sync.RWMutex
 }
 
 func newInfoStore() *infoStore {
 	return &infoStore{
-		providers: make(map[string]*providerInfo),
-		models:    make(map[string]*externalModelInfo),
+		providers:     make(map[string]*providerInfo),
+		models:        make(map[string]*externalModelInfo),
+		llmisvcModels: make(map[string]*llmisvcModelInfo),
+		llmisvcKeys:   make(map[string]string),
 	}
 }
 
@@ -112,5 +125,34 @@ func (s *infoStore) getModelByName(modelName string) (*externalModelInfo, bool) 
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	info, ok := s.models[modelName]
+	return info, ok
+}
+
+// addOrUpdateLLMISvc stores LLMInferenceService model name -> publisher ID mapping.
+func (s *infoStore) addOrUpdateLLMISvc(modelName string, info *llmisvcModelInfo) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if old, ok := s.llmisvcKeys[info.key]; ok && old != modelName {
+		delete(s.llmisvcModels, old)
+	}
+	s.llmisvcModels[modelName] = info
+	s.llmisvcKeys[info.key] = modelName
+}
+
+// deleteLLMISvcByKey removes an LLMInferenceService entry using its namespaced name.
+func (s *infoStore) deleteLLMISvcByKey(key string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if modelName, ok := s.llmisvcKeys[key]; ok {
+		delete(s.llmisvcModels, modelName)
+		delete(s.llmisvcKeys, key)
+	}
+}
+
+// getLLMISvcByName looks up an LLMInferenceService by its model name.
+func (s *infoStore) getLLMISvcByName(modelName string) (*llmisvcModelInfo, bool) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	info, ok := s.llmisvcModels[modelName]
 	return info, ok
 }
