@@ -647,6 +647,7 @@ data: {"type":"response.completed","response":{"id":"resp_1","status":"completed
 	mid := len(completed) / 2
 
 	// Neither half parses as JSON on its own.
+	resp.SetChunk(completed[:mid])
 	err = sp.ProcessResponseChunk(context.Background(), cs, resp, false)
 	assert.NoError(t, err)
 	resp.SetChunk(completed[mid:])
