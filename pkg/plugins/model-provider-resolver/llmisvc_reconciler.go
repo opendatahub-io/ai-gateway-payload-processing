@@ -52,7 +52,7 @@ func (r *llmisvcReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	obj.SetGroupVersionKind(llmInferenceServiceGVK)
 	if err := r.Get(ctx, req.NamespacedName, obj); err != nil {
 		if errors.IsNotFound(err) {
-			r.store.deleteLLMISvcByKey(req.NamespacedName.String())
+			r.store.deleteLLMISvcByKey(req.String())
 			logger.Info("LLMInferenceService removed from store", "name", req.Name, "namespace", req.Namespace)
 			return ctrl.Result{}, nil
 		}
@@ -65,7 +65,7 @@ func (r *llmisvcReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.store.addOrUpdateLLMISvc(modelName, &llmisvcModelInfo{
 		modelName:   modelName,
 		publisherID: publisherID,
-		key:         req.NamespacedName.String(),
+		key:         req.String(),
 	})
 	logger.Info("updated LLMInferenceService store", "modelName", modelName, "publisherID", publisherID)
 	return ctrl.Result{}, nil
