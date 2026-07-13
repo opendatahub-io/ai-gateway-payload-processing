@@ -24,10 +24,6 @@ rules:
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders/finalizers", "externalmodels/finalizers"]
     verbs: ["update"]
-  # model-provider-resolver plugin: watches KServe LLMInferenceService CRDs
-  - apiGroups: ["serving.kserve.io"]
-    resources: ["llminferenceservices"]
-    verbs: ["get", "list", "watch"]
   # controller reconcilers: create networking resources
   - apiGroups: [""]
     resources: ["services"]
@@ -76,10 +72,6 @@ rules:
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders/finalizers", "externalmodels/finalizers"]
     verbs: ["update"]
-  # model-provider-resolver plugin: watches KServe LLMInferenceService CRDs
-  - apiGroups: ["serving.kserve.io"]
-    resources: ["llminferenceservices"]
-    verbs: ["get", "list", "watch"]
   # controller reconcilers: create networking resources
   - apiGroups: [""]
     resources: ["services"]

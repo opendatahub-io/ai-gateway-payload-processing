@@ -99,16 +99,6 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 		return nil, fmt.Errorf("failed to register ExternalModel reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
 
-	// Watch KServe LLMInferenceService CRDs (serving.kserve.io) using unstructured client.
-	// Translates spec.model.name to publisher ID for BBR HTTPRoute header matching.
-	llmisvcRec := &llmisvcReconciler{Reader: k8sClient, store: store}
-	if err := reconcilerBuilder().
-		For(newLLMISvcWatchObject()).
-		Named("kserve-llminferenceservice").
-		Complete(llmisvcRec); err != nil {
-		return nil, fmt.Errorf("failed to register LLMInferenceService reconciler for plugin '%s' - %w", ModelProviderResolverPluginType, err)
-	}
-
 	return &ModelProviderResolverPlugin{
 		typedName: plugin.TypedName{Type: ModelProviderResolverPluginType, Name: ModelProviderResolverPluginType},
 		store:     store,
@@ -144,7 +134,6 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	}
 
 	log.FromContext(ctx).V(logutil.VERBOSE).Info("received incoming request", "path", request.Headers[":path"])
-	relativePath := sanitizePath(request.Headers[":path"])
 
 	// Resolve by model name: prefer X-Gateway-Model-Name header (set by body-field-to-header),
 	// fall back to request body model field. This supports both single-URL and per-model-URL patterns.
@@ -155,19 +144,25 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	modelInfo, found := p.store.getModelByName(modelName)
 	if !found {
-		// Check LLMInferenceService models: translate user-facing model name
-		// to publisher ID for KServe BBR HTTPRoute header matching.
-		if llmisvcInfo, ok := p.store.getLLMISvcByName(modelName); ok {
-			request.SetHeader("x-gateway-model-name", llmisvcInfo.publisherID)
-			logger.Info("translated LLMInferenceService model name to publisher ID",
-				"modelName", modelName, "publisherID", llmisvcInfo.publisherID)
-			return nil
+		// LLMISvc BBR: client sent publisher ID (publishers/{ns}/models/{name}) in body,
+		// as returned by KServe GET /v1/models. X-Gateway-Model-Name header already has
+		// the publisher ID (set by body-field-to-header) — do not modify it, KServe routes on it.
+		// Rewrite body model field so vLLM receives just the model name.
+		// Write publisher ID to CycleState so ipp-post (metering, api-translation) can use it.
+		if strings.HasPrefix(modelName, "publishers/") {
+			if parts := strings.SplitN(modelName, "/models/", 2); len(parts) == 2 && parts[1] != "" {
+				request.SetBodyField("model", parts[1])
+				cycleState.Write(state.ModelKey, modelName)
+				logger.Info("LLMISvc BBR: rewrote body model field",
+					"original", modelName, "rewritten", parts[1])
+			}
 		}
-		return nil // not a managed model — pass through
+		return nil
 	}
 
 	logger.Info("resolved model by name", "modelName", modelName)
 
+	relativePath := sanitizePath(request.Headers[":path"])
 	inputFormat := detectInputAPIFormat(relativePath)
 	if inputFormat == "" {
 		logger.Error(nil, "unsupported API path for external model", "model", modelName, "path", relativePath)

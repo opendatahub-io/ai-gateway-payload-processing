@@ -57,51 +57,6 @@ func TestProviderStore_Update(t *testing.T) {
 	assert.Equal(t, "new.com", info.endpoint)
 }
 
-func TestLLMISvcStore_AddGetDelete(t *testing.T) {
-	store := newInfoStore()
-
-	_, found := store.getLLMISvcByName("facebook/opt-125m")
-	assert.False(t, found)
-
-	store.addOrUpdateLLMISvc("facebook/opt-125m", &llmisvcModelInfo{
-		modelName:   "facebook/opt-125m",
-		publisherID: "publishers/llm/models/facebook/opt-125m",
-		key:         "llm/facebook-opt-125m-simulated",
-	})
-
-	info, found := store.getLLMISvcByName("facebook/opt-125m")
-	require.True(t, found)
-	assert.Equal(t, "publishers/llm/models/facebook/opt-125m", info.publisherID)
-
-	store.deleteLLMISvcByKey("llm/facebook-opt-125m-simulated")
-	_, found = store.getLLMISvcByName("facebook/opt-125m")
-	assert.False(t, found)
-}
-
-func TestLLMISvcStore_UpdateCleansOldEntry(t *testing.T) {
-	store := newInfoStore()
-	key := "llm/my-model"
-
-	store.addOrUpdateLLMISvc("old-name", &llmisvcModelInfo{
-		modelName: "old-name", publisherID: "publishers/llm/models/old-name", key: key,
-	})
-	store.addOrUpdateLLMISvc("new-name", &llmisvcModelInfo{
-		modelName: "new-name", publisherID: "publishers/llm/models/new-name", key: key,
-	})
-
-	_, foundOld := store.getLLMISvcByName("old-name")
-	assert.False(t, foundOld, "old model name should be removed")
-
-	info, foundNew := store.getLLMISvcByName("new-name")
-	require.True(t, foundNew)
-	assert.Equal(t, "publishers/llm/models/new-name", info.publisherID)
-}
-
-func TestLLMISvcStore_DeleteNonexistent(t *testing.T) {
-	store := newInfoStore()
-	store.deleteLLMISvcByKey("nonexistent/key")
-}
-
 func TestProviderStore_WithConfig(t *testing.T) {
 	store := newInfoStore()
 	key := types.NamespacedName{Namespace: "models", Name: "my-vertex"}

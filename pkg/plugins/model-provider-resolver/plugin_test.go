@@ -319,76 +319,49 @@ func TestProcessRequest_UnsupportedPath(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported API endpoint")
 }
 
-func TestProcessRequest_LLMISvcModelTranslation(t *testing.T) {
-	store := newInfoStore()
-	store.addOrUpdateLLMISvc("facebook/opt-125m", &llmisvcModelInfo{
-		modelName:   "facebook/opt-125m",
-		publisherID: "publishers/llm/models/facebook/opt-125m",
-		key:         "llm/facebook-opt-125m-simulated",
-	})
+func TestProcessRequest_LLMISvcPublisherIDBodyRewrite(t *testing.T) {
+	const publisherID = "publishers/llm/models/facebook/opt-125m"
+	const modelName = "facebook/opt-125m"
 
-	instance := &ModelProviderResolverPlugin{store: store}
-	cs := plugin.NewCycleState()
-	req := requesthandling.NewInferenceRequest()
-	req.Headers[":path"] = "/v1/chat/completions"
-	req.Headers["x-gateway-model-name"] = "facebook/opt-125m"
-	req.Body["model"] = "facebook/opt-125m"
-
-	err := instance.ProcessRequest(context.Background(), cs, req)
-	require.NoError(t, err)
-
-	require.Equal(t, "publishers/llm/models/facebook/opt-125m", req.Headers["x-gateway-model-name"],
-		"header should be translated to publisher ID for BBR routing")
-
-	_, provErr := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
-	require.Error(t, provErr, "no provider should be set for internal models")
-}
-
-func TestProcessRequest_LLMISvcModelDoesNotAffectExternalModel(t *testing.T) {
-	store := newInfoStore()
-	store.addOrUpdateLLMISvc("facebook/opt-125m", &llmisvcModelInfo{
-		modelName:   "facebook/opt-125m",
-		publisherID: "publishers/llm/models/facebook/opt-125m",
-		key:         "llm/facebook-opt-125m-simulated",
-	})
-	store.addOrUpdateModel("gpt-4o",
-		&externalModelInfo{modelName: "gpt-4o", refs: []*resolvedProviderRef{{
-			provider: "openai", targetModel: "gpt-4o",
-			apiFormat: apiformat.OpenAIChatCompletions, auth: "apikey",
-			endpoint: "api.openai.com", secretName: "k", secretNamespace: "llm",
-			config: map[string]string{}, weight: 1,
-		}}},
-	)
-
-	instance := &ModelProviderResolverPlugin{store: store}
-	cs := plugin.NewCycleState()
-	req := requesthandling.NewInferenceRequest()
-	req.Headers[":path"] = "/llm/gpt-4o/v1/chat/completions"
-	req.Headers["x-gateway-model-name"] = "gpt-4o"
-	req.Body["model"] = "gpt-4o"
-
-	err := instance.ProcessRequest(context.Background(), cs, req)
-	require.NoError(t, err)
-
-	actualProvider, err := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
-	require.NoError(t, err)
-	require.Equal(t, "openai", actualProvider, "ExternalModel should be resolved normally")
-}
-
-func TestProcessRequest_LLMISvcModelNotFound(t *testing.T) {
 	store := newInfoStore()
 	instance := &ModelProviderResolverPlugin{store: store}
 	cs := plugin.NewCycleState()
 	req := requesthandling.NewInferenceRequest()
 	req.Headers[":path"] = "/v1/chat/completions"
-	req.Headers["x-gateway-model-name"] = "unknown/model"
-	req.Body["model"] = "unknown/model"
+	req.Headers["x-gateway-model-name"] = publisherID
+	req.Body["model"] = publisherID
 
 	err := instance.ProcessRequest(context.Background(), cs, req)
-	require.NoError(t, err, "unknown model should pass through")
+	require.NoError(t, err)
+
+	require.Equal(t, modelName, req.Body["model"],
+		"body model field should be rewritten to just the model name for vLLM")
+	require.Equal(t, publisherID, req.Headers["x-gateway-model-name"],
+		"X-Gateway-Model-Name header must not be modified — KServe routes on it")
+
+	resolvedModel, err := plugin.ReadCycleStateKey[string](cs, state.ModelKey)
+	require.NoError(t, err)
+	require.Equal(t, publisherID, resolvedModel,
+		"publisher ID should be written to CycleState for ipp-post metering and response restoration")
 
 	_, provErr := plugin.ReadCycleStateKey[string](cs, state.ProviderKey)
-	require.Error(t, provErr, "no provider should be set for unknown models")
+	require.Error(t, provErr, "no provider should be set for LLMISvc models")
+}
+
+func TestProcessRequest_LLMISvcPublisherIDPassThroughWhenMalformed(t *testing.T) {
+	store := newInfoStore()
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/v1/chat/completions"
+	// No "/models/" segment — should pass through without rewriting
+	req.Headers["x-gateway-model-name"] = "publishers/llm/nope"
+	req.Body["model"] = "publishers/llm/nope"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err, "malformed publisher ID should pass through without error")
+	require.Equal(t, "publishers/llm/nope", req.Body["model"],
+		"malformed publisher ID body should not be rewritten")
 }
 
 func TestDetectInputAPIFormat(t *testing.T) {
