@@ -190,7 +190,7 @@ func TestReconcile_CreatesHTTPRoute(t *testing.T) {
 	// Two rules: path + header
 	require.Len(t, hr.Spec.Rules, 2)
 	assert.Equal(t, "/"+ns+"/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
-	assert.Equal(t, "gpt-4o", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "gpt4", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Backend ref points to provider's Service
 	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
@@ -336,9 +336,9 @@ func TestReconcile_TwoModelsOneProvider(t *testing.T) {
 	assert.Equal(t, "shared-provider", string(hr1.Spec.Rules[0].BackendRefs[0].Name))
 	assert.Equal(t, "shared-provider", string(hr2.Spec.Rules[0].BackendRefs[0].Name))
 
-	// But different target models in header match
-	assert.Equal(t, "gpt-4o", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
-	assert.Equal(t, "gpt-3.5-turbo", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Header match uses modelName (ExternalModel CR name)
+	assert.Equal(t, "gpt4", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "gpt35", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Different path prefixes
 	assert.Equal(t, "/"+ns+"/gpt4", *hr1.Spec.Rules[0].Matches[0].Path.Value)
@@ -363,7 +363,7 @@ func TestCommonLabels(t *testing.T) {
 func TestBuildHTTPRoute(t *testing.T) {
 	hr := buildHTTPRoute(
 		"api.openai.com", "my-openai",
-		"gpt4", "gpt-4o",
+		"gpt4",
 		"models", 443,
 		"default-gateway", "openshift-ingress", "300s",
 		commonLabels("gpt4"),
@@ -385,10 +385,10 @@ func TestBuildHTTPRoute(t *testing.T) {
 	rule1 := hr.Spec.Rules[0]
 	assert.Equal(t, "/models/gpt4", *rule1.Matches[0].Path.Value)
 
-	// Rule 2: header-based match uses targetModel
+	// Rule 2: header-based match uses modelName (what /v1/models returns)
 	rule2 := hr.Spec.Rules[1]
 	assert.Equal(t, "X-Gateway-Model-Name", string(rule2.Matches[0].Headers[0].Name))
-	assert.Equal(t, "gpt-4o", rule2.Matches[0].Headers[0].Value)
+	assert.Equal(t, "gpt4", rule2.Matches[0].Headers[0].Value)
 
 	// Backend ref points to the PROVIDER's Service, not the model
 	for i, rule := range hr.Spec.Rules {
@@ -409,7 +409,7 @@ func TestBuildHTTPRoute(t *testing.T) {
 func TestBuildHTTPRoute_TargetModelDiffersFromName(t *testing.T) {
 	hr := buildHTTPRoute(
 		"bedrock.us-east-1.amazonaws.com", "my-bedrock",
-		"claude", "anthropic.claude-3-opus",
+		"claude",
 		"models", 443,
 		"my-gateway", "gateway-ns", "300s",
 		commonLabels("claude"),
@@ -419,8 +419,8 @@ func TestBuildHTTPRoute_TargetModelDiffersFromName(t *testing.T) {
 	assert.Equal(t, "claude", hr.Name)
 	assert.Equal(t, "/models/claude", *hr.Spec.Rules[0].Matches[0].Path.Value)
 
-	// Header match uses targetModel (provider-side name)
-	assert.Equal(t, "anthropic.claude-3-opus", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Header match uses modelName (what /v1/models returns to clients)
+	assert.Equal(t, "claude", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Backend points to provider Service
 	assert.Equal(t, "my-bedrock", string(hr.Spec.Rules[0].BackendRefs[0].Name))
