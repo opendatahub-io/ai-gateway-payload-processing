@@ -65,12 +65,12 @@ func TestResolvePath(t *testing.T) {
 			false,
 		},
 		{
-			"model placeholder without targetModel returns error",
+			"model placeholder without targetModel resolves to empty",
 			"/v1/models/{model}/chat",
 			nil,
 			"",
-			"",
-			true,
+			"/v1/models//chat",
+			false,
 		},
 	}
 	for _, tt := range tests {

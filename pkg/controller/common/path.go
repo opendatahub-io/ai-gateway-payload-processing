@@ -38,12 +38,10 @@ func ResolvePath(path string, config map[string]string, targetModel string) (str
 	if path == "" || !strings.Contains(path, "{") {
 		return path, nil
 	}
-	if _, ok := config[ModelPlaceholder]; !ok && targetModel != "" {
-		path = strings.ReplaceAll(path, "{"+ModelPlaceholder+"}", targetModel)
-	}
 	for k, v := range config {
 		path = strings.ReplaceAll(path, "{"+k+"}", v)
 	}
+	path = strings.ReplaceAll(path, "{"+ModelPlaceholder+"}", targetModel)
 	matches := placeholderRe.FindAllStringSubmatch(path, -1)
 	if len(matches) > 0 {
 		keys := make([]string, 0, len(matches))
