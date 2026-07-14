@@ -52,7 +52,7 @@ metadata:
   name: azure-api-key
   namespace: llm
   labels:
-    inference.networking.k8s.io/bbr-managed: "true"
+    inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: "<AZURE_API_KEY>"

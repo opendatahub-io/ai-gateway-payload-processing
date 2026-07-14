@@ -622,7 +622,7 @@ metadata:
   name: <secret-name>
   namespace: <ns>
   labels:
-    inference.networking.k8s.io/bbr-managed: "true"
+    inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: "<provider-api-key>"

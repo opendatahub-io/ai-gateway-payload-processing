@@ -17,26 +17,17 @@ limitations under the License.
 package vertex
 
 import (
-	"fmt"
-
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation/translator"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
-)
-
-const (
-	// vertexOpenAIPathTemplate builds the full Vertex AI OpenAI-compatible endpoint path.
-	// Reference: https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations.endpoints.chat/completions
-	vertexOpenAIPathTemplate = "/v1/projects/%s/locations/%s/endpoints/%s/chat/completions"
 )
 
 // compile-time interface check
 var _ translator.Translator = &VertexOpenAITranslator{}
 
-// NewVertexOpenAITranslator initializes a new VertexOpenAITranslator with the given
-// GCP project, location, and endpoint, used to construct the full API path.
-func NewVertexOpenAITranslator(project, location, endpoint string) *VertexOpenAITranslator {
+// NewVertexOpenAITranslator creates a translator for Vertex AI's OpenAI-compatible endpoint.
+// Path construction is handled by CRD path placeholders and applyPathOverride, not by the translator.
+func NewVertexOpenAITranslator() *VertexOpenAITranslator {
 	return &VertexOpenAITranslator{
-		path: fmt.Sprintf(vertexOpenAIPathTemplate, project, location, endpoint),
 		stripper: translator.NewResponseFieldStripper([]string{
 			"usage.extra_properties",
 		}),
@@ -46,13 +37,13 @@ func NewVertexOpenAITranslator(project, location, endpoint string) *VertexOpenAI
 // VertexOpenAITranslator targets Vertex AI's native OpenAI-compatible chat/completions endpoint.
 // Unlike VertexTranslator (which converts to Gemini generateContent format), this translator
 // passes the request body through unchanged since the endpoint accepts OpenAI format natively.
+// Path is set by applyPathOverride from CycleState, not by this translator.
 type VertexOpenAITranslator struct {
-	path     string
 	stripper *translator.ResponseFieldStripper
 }
 
-// TranslateRequest rewrites the path to target Vertex AI's OpenAI-compatible endpoint.
-// The request body is not mutated since the endpoint accepts OpenAI chat completions format as-is.
+// TranslateRequest validates the request body. The request body is not mutated since
+// the endpoint accepts OpenAI chat completions format as-is. 
 func (t *VertexOpenAITranslator) TranslateRequest(body map[string]any) (translatedBody map[string]any,
 	headersToMutate map[string]string, headersToRemove []string, err error) {
 	model, _ := body["model"].(string)
@@ -66,7 +57,6 @@ func (t *VertexOpenAITranslator) TranslateRequest(body map[string]any) (translat
 	}
 
 	headersToMutate = map[string]string{
-		":path":        t.path,
 		"content-type": "application/json",
 	}
 

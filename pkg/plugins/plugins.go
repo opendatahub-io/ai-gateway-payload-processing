@@ -19,6 +19,7 @@ package plugins
 import (
 	api_translation "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/api-translation"
 	apikey_injection "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/apikey-injection"
+	external_metering "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/external-metering"
 	maas_headers_guard "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/maas-headers-guard"
 	provider_resolver "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/model-provider-resolver"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/nemo"
@@ -31,6 +32,8 @@ func RegisterPlugins() {
 	plugin.Register(provider_resolver.ModelProviderResolverPluginType, provider_resolver.ModelProviderResolverFactory)
 	plugin.Register(api_translation.APITranslationPluginType, api_translation.APITranslationFactory)
 	plugin.Register(apikey_injection.APIKeyInjectionPluginType, apikey_injection.APIKeyInjectionFactory)
+	plugin.Register(external_metering.ExternalMeteringPluginType, external_metering.ExternalMeteringFactory)
+	plugin.Register(external_metering.ExternalMeteringStreamingPluginType, external_metering.ExternalMeteringStreamingFactory)
 	plugin.Register(nemo.NemoRequestGuardPluginType, nemo.NemoRequestGuardFactory)
 	plugin.Register(nemo.NemoResponseGuardPluginType, nemo.NemoResponseGuardFactory)
 	plugin.Register(stream_usage_enforcer.PluginType, stream_usage_enforcer.Factory)

@@ -41,7 +41,7 @@ metadata:
   name: openai-api-key
   namespace: llm
   labels:
-    inference.networking.k8s.io/bbr-managed: "true"
+    inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: "sk-proj-..."

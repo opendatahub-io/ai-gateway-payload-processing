@@ -30,3 +30,12 @@ type Translator interface {
 	// A nil translatedBody means no body mutation is needed.
 	TranslateResponse(body map[string]any, model string) (translatedBody map[string]any, err error)
 }
+
+// ConfigAwareTranslator is an optional extension of Translator for providers that need
+// per-model/provider configuration at request time (e.g. anthropic_version for Vertex AI Claude).
+// The config map is sourced from the ExternalModel/Provider CRD's spec.config field,
+// resolved via CycleState at request time.
+type ConfigAwareTranslator interface {
+	Translator
+	TranslateRequestWithConfig(body map[string]any, config map[string]string) (translatedBody map[string]any, headersToMutate map[string]string, headersToRemove []string, err error)
+}

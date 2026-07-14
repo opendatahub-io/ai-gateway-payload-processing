@@ -22,4 +22,5 @@ const (
 	OpenAIChatCompletions APIFormat = "openai-chat"
 	Messages              APIFormat = "messages"
 	OpenAIResponses       APIFormat = "openai-responses"
+	VertexMessages        APIFormat = "vertex-messages"
 )

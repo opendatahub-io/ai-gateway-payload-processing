@@ -33,25 +33,28 @@ if [[ ! -f "$KUBECONFIG" ]]; then
 fi
 
 echo "Verifying cluster connectivity..."
-if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+if ! oc cluster-info --request-timeout=10s >/dev/null 2>&1; then
     echo "ERROR: Cannot connect to the cluster. Check KUBECONFIG."
     exit 1
 fi
 echo "Cluster connectivity OK."
 
+# Set KUBECTL_BIN so Go tests use oc consistently with this script.
+export KUBECTL_BIN=oc
+
 # Ensure ExternalModel CRD is installed (required for E2E tests).
-if ! kubectl get crd externalmodels.maas.opendatahub.io >/dev/null 2>&1; then
+if ! oc get crd externalmodels.maas.opendatahub.io >/dev/null 2>&1; then
     echo "ExternalModel CRD not found, installing..."
-    kubectl apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
+    oc apply -f https://raw.githubusercontent.com/opendatahub-io/models-as-a-service/refs/heads/main/deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
     echo "ExternalModel CRD installed."
 else
     echo "ExternalModel CRD already installed."
 fi
 
 # Ensure inference.opendatahub.io CRDs are installed.
-if ! kubectl get crd externalproviders.inference.opendatahub.io >/dev/null 2>&1; then
+if ! oc get crd externalproviders.inference.opendatahub.io >/dev/null 2>&1; then
     echo "Installing inference.opendatahub.io CRDs..."
-    kubectl apply -f /e2e/crds/
+    oc apply -f /e2e/crds/
     echo "inference.opendatahub.io CRDs installed."
 else
     echo "inference.opendatahub.io CRDs already installed."

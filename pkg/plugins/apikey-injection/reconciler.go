@@ -24,33 +24,20 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 )
 
 const (
 	// managedLabel selects Secrets managed by the apikey-injection plugin.
-	// Only Secrets carrying this label are watched by the reconciler.
-	managedLabel = "inference.networking.k8s.io/bbr-managed"
+	// The Secret informer uses this as a list/watch label selector; Reconcile
+	// also requires this label before caching Secret data.
+	managedLabel = "inference.llm-d.ai/ipp-managed"
 )
 
 func hasManagedLabel(object client.Object) bool {
 	return object.GetLabels()[managedLabel] == "true"
-}
-
-// managedLabelPredicate filters events to only Secrets labeled with
-// "inference.networking.k8s.io/bbr-managed" = "true".
-// For updates, it accepts the event when either the old or new object carries
-// the label so that label-removal is visible to the reconciler.
-func managedLabelPredicate() predicate.Predicate {
-	return predicate.Funcs{
-		CreateFunc:  func(e event.CreateEvent) bool { return hasManagedLabel(e.Object) },
-		UpdateFunc:  func(e event.UpdateEvent) bool { return hasManagedLabel(e.ObjectOld) || hasManagedLabel(e.ObjectNew) },
-		DeleteFunc:  func(e event.DeleteEvent) bool { return hasManagedLabel(e.Object) },
-		GenericFunc: func(e event.GenericEvent) bool { return hasManagedLabel(e.Object) },
-	}
 }
 
 // secretReconciler watches Secrets and updates the secretStore.

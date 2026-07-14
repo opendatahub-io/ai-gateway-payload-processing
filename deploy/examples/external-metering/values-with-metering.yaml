@@ -1,0 +1,27 @@
+# Example Helm values to enable external-metering in the IPP plugin chain.
+# Merge with your existing values file.
+#
+# The external-metering plugin should run AFTER model-provider-resolver
+# (needs provider/model info in CycleState) and BEFORE api-translation
+# (to access raw response token formats before translation).
+
+upstreamBbr:
+  bbr:
+    plugins:
+      - type: model-provider-resolver
+        name: model-provider-resolver
+
+      - type: external-metering
+        name: external-metering
+        json:
+          meteringURL: "http://openmeter.metering.svc:8080"
+          timeoutSeconds: 5
+          featureKey: "inference-tokens"
+          source: "maas-gateway"
+          failOpen: true
+
+      - type: api-translation
+        name: api-translation
+
+      - type: apikey-injection
+        name: apikey-injection

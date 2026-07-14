@@ -20,58 +20,63 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 )
 
-func TestModelStore_AddAndGetExternalModel(t *testing.T) {
+func TestModelStore_AddAndGetByName(t *testing.T) {
 	store := newInfoStore()
-	key := types.NamespacedName{Namespace: "ns", Name: "external-model"}
+	store.addOrUpdateModel("claude-opus-4-8", &externalModelInfo{
+		modelName: "claude-opus-4-8",
+		refs:      []*resolvedProviderRef{{provider: provider.Anthropic, weight: 1}},
+	})
 
-	store.addOrUpdateModel(key, &externalModelInfo{refs: []*resolvedProviderRef{
-		{provider: provider.Anthropic, weight: 1},
-	}})
-
-	info, found := store.getModel(key)
+	info, found := store.getModelByName("claude-opus-4-8")
 	assert.True(t, found)
 	assert.NotNil(t, info)
 	assert.Equal(t, provider.Anthropic, info.refs[0].provider)
 }
 
-func TestModelStore_GetModelInfo_NotFound(t *testing.T) {
+func TestModelStore_GetByName_NotFound(t *testing.T) {
 	store := newInfoStore()
-	store.addOrUpdateModel(
-		types.NamespacedName{Namespace: "ns", Name: "ext"},
-		&externalModelInfo{refs: []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}}},
-	)
+	store.addOrUpdateModel("claude-opus-4-8", &externalModelInfo{
+		modelName: "claude-opus-4-8",
+		refs:      []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}},
+	})
 
-	_, found := store.getModel(types.NamespacedName{Namespace: "ns", Name: "other"})
+	_, found := store.getModelByName("gpt-5.5")
 	assert.False(t, found)
 }
 
-func TestModelStore_DeleteExternalModel(t *testing.T) {
+func TestModelStore_DeleteByName(t *testing.T) {
 	store := newInfoStore()
-	key := types.NamespacedName{Namespace: "ns", Name: "ext"}
-	store.addOrUpdateModel(key, &externalModelInfo{refs: []*resolvedProviderRef{
-		{provider: provider.OpenAI, weight: 1},
-	}})
+	store.addOrUpdateModel("claude-opus-4-8", &externalModelInfo{
+		modelName: "claude-opus-4-8",
+		refs:      []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}},
+	})
 
-	_, foundBefore := store.getModel(key)
+	_, foundBefore := store.getModelByName("claude-opus-4-8")
 	assert.True(t, foundBefore)
 
-	store.deleteModel(key)
-	_, foundAfter := store.getModel(key)
+	store.deleteModel("claude-opus-4-8")
+	_, foundAfter := store.getModelByName("claude-opus-4-8")
 	assert.False(t, foundAfter)
 }
 
-func TestModelStore_CrossNamespaceIsolation(t *testing.T) {
+func TestModelStore_UniqueByModelName(t *testing.T) {
 	store := newInfoStore()
-	store.addOrUpdateModel(
-		types.NamespacedName{Namespace: "ns-a", Name: "shared-model"},
-		&externalModelInfo{refs: []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}}},
-	)
+	store.addOrUpdateModel("shared-model", &externalModelInfo{
+		modelName: "shared-model",
+		refs:      []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}},
+	})
 
-	_, found := store.getModel(types.NamespacedName{Namespace: "ns-b", Name: "shared-model"})
-	assert.False(t, found)
+	// Same modelName overwrites — no namespace isolation
+	store.addOrUpdateModel("shared-model", &externalModelInfo{
+		modelName: "shared-model",
+		refs:      []*resolvedProviderRef{{provider: provider.Anthropic, weight: 1}},
+	})
+
+	info, found := store.getModelByName("shared-model")
+	assert.True(t, found)
+	assert.Equal(t, provider.Anthropic, info.refs[0].provider, "last write wins")
 }

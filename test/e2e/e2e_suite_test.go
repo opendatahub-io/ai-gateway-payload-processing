@@ -35,6 +35,7 @@ var (
 	simulatorEP   string
 	simulatorFQDN string
 	curlTimeout   = 30 * time.Second
+	kubectlBin    = envOr("KUBECTL_BIN", "kubectl")
 )
 
 func TestE2E(t *testing.T) {
@@ -84,6 +85,54 @@ spec:
 `, nsName))
 	waitForPodReady("curl", nsName)
 
+	ginkgo.By("Creating mock token server for GCP OAuth2")
+	kubectlApplyLiteral(fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mock-token-server
+  namespace: %s
+  labels:
+    app: mock-token-server
+spec:
+  containers:
+  - name: server
+    image: python:3.11-alpine
+    command: ["python", "-c"]
+    args:
+    - |
+      from http.server import HTTPServer, BaseHTTPRequestHandler
+      import json
+
+      class Handler(BaseHTTPRequestHandler):
+          def do_POST(self):
+              self.send_response(200)
+              self.send_header('Content-Type', 'application/json')
+              self.end_headers()
+              # Return llm-katan's expected vertexai key so the simulator accepts the request
+              response = {"access_token": "llm-katan-vertexai-key", "token_type": "Bearer", "expires_in": 3600}
+              self.wfile.write(json.dumps(response).encode())
+          def log_message(self, format, *args):
+              pass
+
+      HTTPServer(('', 8081), Handler).serve_forever()
+    ports:
+    - containerPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-token-server
+  namespace: %s
+spec:
+  selector:
+    app: mock-token-server
+  ports:
+  - port: 8081
+    targetPort: 8081
+`, nsName, nsName))
+	waitForPodReady("mock-token-server", nsName)
+
 	ginkgo.By("Creating provider resources")
 	for _, p := range providers {
 		createProviderResources(p)
@@ -92,7 +141,7 @@ spec:
 	ginkgo.By("Waiting for controllers to create networking resources")
 	for _, p := range providers {
 		gomega.Eventually(func() bool {
-			cmd := exec.Command("kubectl", "get", "httproute", p.Name, "-n", nsName, "--no-headers")
+			cmd := exec.Command(kubectlBin, "get", "httproute", p.Name, "-n", nsName, "--no-headers")
 			return cmd.Run() == nil
 		}, 60*time.Second, 2*time.Second).Should(gomega.BeTrue(),
 			fmt.Sprintf("HTTPRoute %s not created by controller", p.Name))
@@ -104,6 +153,8 @@ func cleanupInfra() {
 		deleteProviderResources(p)
 	}
 	kubectlDeleteResource("pod", "curl", nsName)
+	kubectlDeleteResource("service", "mock-token-server", nsName)
+	kubectlDeleteResource("pod", "mock-token-server", nsName)
 	_ = kubeClient.CoreV1().Namespaces().Delete(context.TODO(), nsName, metav1.DeleteOptions{})
 }
 
@@ -125,17 +176,17 @@ func createNamespace(name string) {
 }
 
 func kubectlApplyLiteral(yamlContent string) {
-	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd := exec.Command(kubectlBin, "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(yamlContent)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "kubectl apply failed: %s\n%s\n", err, string(out))
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "%s apply failed: %s\n%s\n", kubectlBin, err, string(out))
 	}
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), string(out))
 }
 
 func kubectlDeleteResource(kind, name, namespace string) {
-	cmd := exec.Command("kubectl", "delete", kind, name, "-n", namespace, "--ignore-not-found", "--timeout=30s")
+	cmd := exec.Command(kubectlBin, "delete", kind, name, "-n", namespace, "--ignore-not-found", "--timeout=30s")
 	_, _ = cmd.CombinedOutput()
 }
 
