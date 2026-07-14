@@ -74,12 +74,7 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		config:          config,
 	})
 
-	logger.Info("updated provider store",
-		"provider", provider.Spec.Provider,
-		"endpoint", provider.Spec.Endpoint,
-		"crdAuthType", provider.Spec.Auth.Type,
-		"resolvedAuthType", authType,
-		"secretName", provider.Spec.Auth.SecretRef.Name)
+	logger.Info("updated provider store", "provider", provider.Spec.Provider, "endpoint", provider.Spec.Endpoint)
 	return ctrl.Result{}, nil
 }
 

@@ -173,7 +173,6 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	if model != ref.targetModel {
 		request.SetBodyField("model", ref.targetModel)
-		logger.Info("rewrote body model field", "from", model, "to", ref.targetModel)
 	}
 
 	cycleState.Write(state.ProviderKey, ref.provider)
@@ -187,12 +186,7 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.ModelConfigKey, ref.config)
 	cycleState.Write(state.InputAPIFormatKey, inputFormat)
 
-	logger.Info("external model resolved",
-		"model", modelName, "bodyModel", model,
-		"provider", ref.provider, "targetModel", ref.targetModel,
-		"inputFormat", inputFormat, "apiFormat", ref.apiFormat,
-		"authType", ref.auth, "endpoint", ref.endpoint,
-		"secretName", ref.secretName, "path", ref.path)
+	logger.Info("external model resolved", "model", modelName, "provider", ref.provider, "inputFormat", inputFormat, "apiFormat", ref.apiFormat)
 	return nil
 }
 
