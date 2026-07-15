@@ -64,10 +64,11 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	config := buildConfigWithDefaults(provider.Spec.Provider, provider.Spec.Config)
+	authType := mapCRDAuthType(provider.Spec.Auth.Type)
 	r.store.addOrUpdateProvider(req.NamespacedName, &providerInfo{
 		provider:        provider.Spec.Provider,
 		endpoint:        provider.Spec.Endpoint,
-		auth:            auth.Auth(provider.Spec.Auth.Type),
+		auth:            authType,
 		secretName:      provider.Spec.Auth.SecretRef.Name,
 		secretNamespace: req.Namespace,
 		config:          config,
@@ -75,6 +76,16 @@ func (r *externalProviderReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	logger.Info("updated provider store", "provider", provider.Spec.Provider, "endpoint", provider.Spec.Endpoint)
 	return ctrl.Result{}, nil
+}
+
+// mapCRDAuthType maps CRD auth.type values to internal auth constants.
+// The ExternalProvider CRD uses "simple" for API-key auth, while the
+// internal auth package uses "apikey".
+func mapCRDAuthType(crdType string) auth.Auth {
+	if crdType == "simple" {
+		return auth.APIKey
+	}
+	return auth.Auth(crdType)
 }
 
 // buildConfigWithDefaults returns a config map that starts from provider-specific

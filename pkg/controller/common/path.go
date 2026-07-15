@@ -24,15 +24,24 @@ import (
 
 var placeholderRe = regexp.MustCompile(`\{([^}]+)\}`)
 
+const (
+	// ModelPlaceholder is a reserved placeholder key that resolves to the
+	// ExternalProviderRef's targetModel without requiring a config map entry.
+	ModelPlaceholder = "model"
+)
+
 // ResolvePath substitutes {key} placeholders in path with values from config
 // and returns an error if any placeholders remain unresolved.
-func ResolvePath(path string, config map[string]string) (string, error) {
+// The reserved {model} placeholder is injected from targetModel automatically;
+// an explicit "model" key in config takes precedence.
+func ResolvePath(path string, config map[string]string, targetModel string) (string, error) {
 	if path == "" || !strings.Contains(path, "{") {
 		return path, nil
 	}
 	for k, v := range config {
 		path = strings.ReplaceAll(path, "{"+k+"}", v)
 	}
+	path = strings.ReplaceAll(path, "{"+ModelPlaceholder+"}", targetModel)
 	matches := placeholderRe.FindAllStringSubmatch(path, -1)
 	if len(matches) > 0 {
 		keys := make([]string, 0, len(matches))

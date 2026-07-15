@@ -171,6 +171,10 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	ref := selectByWeight(modelInfo.refs)
 
+	if model != ref.targetModel {
+		request.SetBodyField("model", ref.targetModel)
+	}
+
 	cycleState.Write(state.ProviderKey, ref.provider)
 	cycleState.Write(state.ModelKey, ref.targetModel)
 	cycleState.Write(state.APIFormatKey, ref.apiFormat)

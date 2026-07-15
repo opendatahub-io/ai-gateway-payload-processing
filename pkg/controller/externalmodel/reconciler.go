@@ -130,7 +130,7 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		return fmt.Errorf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase)
 	}
 
-	if _, err := ctrlcommon.ResolvePath(ref.Path, mergeConfig(provider.Spec.Config, ref.Config)); err != nil {
+	if _, err := ctrlcommon.ResolvePath(ref.Path, mergeConfig(provider.Spec.Config, ref.Config), ref.TargetModel); err != nil {
 		return fmt.Errorf("path %q: %w", ref.Path, err)
 	}
 
@@ -139,7 +139,6 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		provider.Spec.Endpoint,
 		provider.Name,
 		model.Name,
-		ref.TargetModel,
 		model.Namespace,
 		ctrlcommon.DefaultTLSPort,
 		r.gatewayName(),
@@ -243,7 +242,7 @@ func commonLabels(modelName string) map[string]string {
 	}
 }
 
-func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
+func buildHTTPRoute(providerEndpoint, providerName, modelName, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
 	gwNamespace := gatewayapiv1.Namespace(gatewayNamespace)
 	pathType := gatewayapiv1.PathMatchPathPrefix
 	pathPrefix := "/" + namespace + "/" + modelName
@@ -313,7 +312,7 @@ func buildHTTPRoute(providerEndpoint, providerName, modelName, targetModel, name
 								{
 									Name:  "X-Gateway-Model-Name",
 									Type:  &headerType,
-									Value: targetModel,
+									Value: modelName,
 								},
 							},
 						},
