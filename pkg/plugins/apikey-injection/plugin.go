@@ -138,6 +138,14 @@ func (p *ApiKeyInjectionPlugin) ProcessRequest(ctx context.Context, cycleState *
 		return nil
 	}
 
+	// "none" auth: strip existing auth headers without injecting new ones.
+	// Used for hub-to-spoke routing where mTLS handles authentication.
+	if authType == auth.None {
+		request.RemoveHeader("authorization")
+		logger.Info("auth headers stripped", "authType", authType)
+		return nil
+	}
+
 	credsName, err := plugin.ReadCycleStateKey[string](cycleState, state.CredsRefName)
 	if err != nil || credsName == "" {
 		logger.Error(err, "credentialRef name missing", "authType", authType)

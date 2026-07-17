@@ -100,9 +100,10 @@ type ExternalProviderRef struct {
 
 	// Weight determines the relative traffic proportion for this provider binding.
 	// Higher weight means more traffic. Used for weighted random selection across
-	// multiple provider refs. Defaults to 1 if not set.
+	// multiple provider refs. A weight of 0 disables the ref (no traffic routed
+	// to it). Defaults to 1 if not set.
 	// +optional
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=100
 	// +kubebuilder:default=1
 	Weight *int `json:"weight,omitempty"`

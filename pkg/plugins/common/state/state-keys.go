@@ -36,4 +36,5 @@ const (
 	MeteringModelKey        = "metering-model"
 	MeteringRequestTimeKey  = "metering-request-time"
 	MeteringLastUsageKey    = "metering-last-usage"
+	MeteringUserAgentKey    = "metering-user-agent"
 )

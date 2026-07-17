@@ -37,6 +37,7 @@ type providerInfo struct {
 // resolvedProviderRef holds resolved provider info for a single ExternalProviderRef.
 type resolvedProviderRef struct {
 	provider        string
+	providerName    string // ExternalProvider metadata.name — used for route matching
 	targetModel     string
 	apiFormat       apiformat.APIFormat
 	auth            auth.Auth

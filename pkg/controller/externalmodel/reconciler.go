@@ -19,6 +19,7 @@ package externalmodel
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -37,6 +38,7 @@ import (
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
+	providerresolver "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/model-provider-resolver"
 )
 
 const (
@@ -111,33 +113,55 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
+// resolvedRef holds the ExternalProvider info resolved for one ExternalProviderRef.
+type resolvedRef struct {
+	providerName     string
+	providerEndpoint string
+	targetModel      string
+}
+
 func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger, model *inferencev1alpha1.ExternalModel) error {
 	if len(model.Spec.ExternalProviderRefs) == 0 {
 		return fmt.Errorf("ExternalModel %q has no externalProviderRefs", model.Name)
 	}
-	ref := model.Spec.ExternalProviderRefs[0]
 
-	provider := &inferencev1alpha1.ExternalProvider{}
-	providerKey := types.NamespacedName{Name: ref.Ref.Name, Namespace: model.Namespace}
-	if err := r.Get(ctx, providerKey, provider); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("ExternalProvider %q not found in namespace %q", ref.Ref.Name, model.Namespace)
+	var resolved []resolvedRef
+	var skipReasons []string
+	for _, ref := range model.Spec.ExternalProviderRefs {
+		provider := &inferencev1alpha1.ExternalProvider{}
+		providerKey := types.NamespacedName{Name: ref.Ref.Name, Namespace: model.Namespace}
+		if err := r.Get(ctx, providerKey, provider); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Error(err, "ExternalProvider not found, skipping", "provider", ref.Ref.Name)
+				skipReasons = append(skipReasons, fmt.Sprintf("ExternalProvider %q not found in namespace %q", ref.Ref.Name, model.Namespace))
+				continue
+			}
+			return fmt.Errorf("failed to get ExternalProvider %q: %w", ref.Ref.Name, err)
 		}
-		return fmt.Errorf("failed to get ExternalProvider %q: %w", ref.Ref.Name, err)
+		if provider.Status.Phase != "Ready" {
+			logger.Info("ExternalProvider not ready, skipping", "provider", ref.Ref.Name, "phase", provider.Status.Phase)
+			skipReasons = append(skipReasons, fmt.Sprintf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase))
+			continue
+		}
+		if _, err := ctrlcommon.ResolvePath(ref.Path, mergeConfig(provider.Spec.Config, ref.Config), ref.TargetModel); err != nil {
+			logger.Error(err, "path resolution failed, skipping", "provider", ref.Ref.Name, "path", ref.Path)
+			skipReasons = append(skipReasons, fmt.Sprintf("path %q: %v", ref.Path, err))
+			continue
+		}
+		resolved = append(resolved, resolvedRef{
+			providerName:     provider.Name,
+			providerEndpoint: provider.Spec.Endpoint,
+			targetModel:      ref.TargetModel,
+		})
 	}
 
-	if provider.Status.Phase != "Ready" {
-		return fmt.Errorf("ExternalProvider %q is not ready (phase: %s)", ref.Ref.Name, provider.Status.Phase)
-	}
-
-	if _, err := ctrlcommon.ResolvePath(ref.Path, mergeConfig(provider.Spec.Config, ref.Config), ref.TargetModel); err != nil {
-		return fmt.Errorf("path %q: %w", ref.Path, err)
+	if len(resolved) == 0 {
+		return fmt.Errorf("ExternalModel %q: no provider refs resolved successfully: %s", model.Name, strings.Join(skipReasons, "; "))
 	}
 
 	labels := commonLabels(model.Name)
 	hr := buildHTTPRoute(
-		provider.Spec.Endpoint,
-		provider.Name,
+		resolved,
 		model.Name,
 		model.Namespace,
 		ctrlcommon.DefaultTLSPort,
@@ -155,10 +179,14 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		return fmt.Errorf("failed to apply HTTPRoute: %w", err)
 	}
 
+	providerNames := make([]string, len(resolved))
+	for i, rr := range resolved {
+		providerNames[i] = rr.providerName
+	}
 	logger.Info("ExternalModel HTTPRoute reconciled",
 		"httpRoute", model.Name,
-		"provider", provider.Name,
-		"targetModel", ref.TargetModel,
+		"providers", providerNames,
+		"targetModel", resolved[0].targetModel,
 	)
 	return nil
 }
@@ -242,7 +270,10 @@ func commonLabels(modelName string) map[string]string {
 	}
 }
 
-func buildHTTPRoute(providerEndpoint, providerName, modelName, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
+// selectedProviderHeader is the canonical header name from the plugin package.
+const selectedProviderHeader = gatewayapiv1.HTTPHeaderName(providerresolver.SelectedProviderHeader)
+
+func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
 	gwNamespace := gatewayapiv1.Namespace(gatewayNamespace)
 	pathType := gatewayapiv1.PathMatchPathPrefix
 	pathPrefix := "/" + namespace + "/" + modelName
@@ -250,30 +281,90 @@ func buildHTTPRoute(providerEndpoint, providerName, modelName, namespace string,
 	gwPort := gatewayapiv1.PortNumber(port)
 	timeout := gatewayapiv1.Duration(routeTimeout)
 
-	backendRefs := []gatewayapiv1.HTTPBackendRef{
-		{
+	var rules []gatewayapiv1.HTTPRouteRule
+
+	for _, ref := range refs {
+		backendRefs := []gatewayapiv1.HTTPBackendRef{{
 			BackendRef: gatewayapiv1.BackendRef{
 				BackendObjectReference: gatewayapiv1.BackendObjectReference{
-					Name: gatewayapiv1.ObjectName(providerName),
+					Name: gatewayapiv1.ObjectName(ref.providerName),
 					Port: &gwPort,
 				},
 			},
-		},
-	}
-
-	filters := []gatewayapiv1.HTTPRouteFilter{
-		{
+		}}
+		filters := []gatewayapiv1.HTTPRouteFilter{{
 			Type: gatewayapiv1.HTTPRouteFilterRequestHeaderModifier,
 			RequestHeaderModifier: &gatewayapiv1.HTTPHeaderFilter{
 				Set: []gatewayapiv1.HTTPHeader{
-					{
-						Name:  "Host",
-						Value: providerEndpoint,
-					},
+					{Name: "Host", Value: ref.providerEndpoint},
 				},
 			},
-		},
+		}}
+
+		rules = append(rules, gatewayapiv1.HTTPRouteRule{
+			Matches: []gatewayapiv1.HTTPRouteMatch{{
+				Path: &gatewayapiv1.HTTPPathMatch{Type: &pathType, Value: &pathPrefix},
+				Headers: []gatewayapiv1.HTTPHeaderMatch{{
+					Name: selectedProviderHeader, Type: &headerType, Value: ref.providerName,
+				}},
+			}},
+			BackendRefs: backendRefs,
+			Filters:     filters,
+			Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
+		})
+
+		rules = append(rules, gatewayapiv1.HTTPRouteRule{
+			Matches: []gatewayapiv1.HTTPRouteMatch{{
+				Path: &gatewayapiv1.HTTPPathMatch{Type: &pathType, Value: func() *string { s := "/"; return &s }()},
+				Headers: []gatewayapiv1.HTTPHeaderMatch{
+					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: ref.targetModel},
+					{Name: selectedProviderHeader, Type: &headerType, Value: ref.providerName},
+				},
+			}},
+			BackendRefs: backendRefs,
+			Filters:     filters,
+			Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
+		})
 	}
+
+	// Fallback rules (no x-ipp-selected-provider): route to refs[0]
+	fallbackBackendRefs := []gatewayapiv1.HTTPBackendRef{{
+		BackendRef: gatewayapiv1.BackendRef{
+			BackendObjectReference: gatewayapiv1.BackendObjectReference{
+				Name: gatewayapiv1.ObjectName(refs[0].providerName),
+				Port: &gwPort,
+			},
+		},
+	}}
+	fallbackFilters := []gatewayapiv1.HTTPRouteFilter{{
+		Type: gatewayapiv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayapiv1.HTTPHeaderFilter{
+			Set: []gatewayapiv1.HTTPHeader{
+				{Name: "Host", Value: refs[0].providerEndpoint},
+			},
+		},
+	}}
+
+	rules = append(rules,
+		gatewayapiv1.HTTPRouteRule{
+			Matches: []gatewayapiv1.HTTPRouteMatch{{
+				Path: &gatewayapiv1.HTTPPathMatch{Type: &pathType, Value: &pathPrefix},
+			}},
+			BackendRefs: fallbackBackendRefs,
+			Filters:     fallbackFilters,
+			Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
+		},
+		gatewayapiv1.HTTPRouteRule{
+			Matches: []gatewayapiv1.HTTPRouteMatch{{
+				Headers: []gatewayapiv1.HTTPHeaderMatch{
+					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: refs[0].targetModel},
+				},
+			}},
+			BackendRefs: fallbackBackendRefs,
+			Filters:     fallbackFilters,
+			Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
+		},
+	)
 
 	return &gatewayapiv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{
@@ -283,45 +374,12 @@ func buildHTTPRoute(providerEndpoint, providerName, modelName, namespace string,
 		},
 		Spec: gatewayapiv1.HTTPRouteSpec{
 			CommonRouteSpec: gatewayapiv1.CommonRouteSpec{
-				ParentRefs: []gatewayapiv1.ParentReference{
-					{
-						Name:      gatewayapiv1.ObjectName(gatewayName),
-						Namespace: &gwNamespace,
-					},
-				},
+				ParentRefs: []gatewayapiv1.ParentReference{{
+					Name:      gatewayapiv1.ObjectName(gatewayName),
+					Namespace: &gwNamespace,
+				}},
 			},
-			Rules: []gatewayapiv1.HTTPRouteRule{
-				// TODO: remove path prefix rule when unified entrypoint (RHAISTRAT-1540) is wired.
-				{
-					Matches: []gatewayapiv1.HTTPRouteMatch{
-						{
-							Path: &gatewayapiv1.HTTPPathMatch{
-								Type:  &pathType,
-								Value: &pathPrefix,
-							},
-						},
-					},
-					BackendRefs: backendRefs,
-					Filters:     filters,
-					Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
-				},
-				{
-					Matches: []gatewayapiv1.HTTPRouteMatch{
-						{
-							Headers: []gatewayapiv1.HTTPHeaderMatch{
-								{
-									Name:  "X-Gateway-Model-Name",
-									Type:  &headerType,
-									Value: modelName,
-								},
-							},
-						},
-					},
-					BackendRefs: backendRefs,
-					Filters:     filters,
-					Timeouts:    &gatewayapiv1.HTTPRouteTimeouts{Request: &timeout},
-				},
-			},
+			Rules: rules,
 		},
 	}
 }

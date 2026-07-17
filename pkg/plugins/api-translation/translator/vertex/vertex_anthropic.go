@@ -43,6 +43,7 @@ var vertexUnsupportedBodyFields = []string{
 	"mcp_servers",
 	"service_tier",
 	"container",
+	"stream_options",
 }
 
 func stripVertexUnsupportedFields(body map[string]any) {

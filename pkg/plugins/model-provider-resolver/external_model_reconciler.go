@@ -121,6 +121,7 @@ func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1a
 
 	return &resolvedProviderRef{
 		provider:        providerInfo.provider,
+		providerName:    ref.Ref.Name,
 		targetModel:     ref.TargetModel,
 		apiFormat:       apiformat.APIFormat(ref.APIFormat),
 		auth:            authType,

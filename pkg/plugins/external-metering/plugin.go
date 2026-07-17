@@ -151,10 +151,13 @@ func (b *meteringBase) processRequest(ctx context.Context, cycleState *plugin.Cy
 		model, _ = request.Body["model"].(string)
 	}
 
+	userAgent := request.Headers["user-agent"]
+
 	cycleState.Write(state.MeteringUsernameKey, username)
 	cycleState.Write(state.MeteringGroupKey, group)
 	cycleState.Write(state.MeteringSubscriptionKey, subscription)
 	cycleState.Write(state.MeteringModelKey, model)
+	cycleState.Write(state.MeteringUserAgentKey, userAgent)
 	cycleState.Write(state.MeteringRequestTimeKey, time.Now())
 
 	result, err := b.client.checkBalance(ctx, username, b.featureKey, model)
@@ -193,6 +196,7 @@ func (b *meteringBase) reportUsageEvent(ctx context.Context, cycleState *plugin.
 	subscription, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringSubscriptionKey)
 	model, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringModelKey)
 	provider, _ := plugin.ReadCycleStateKey[string](cycleState, state.ProviderKey)
+	userAgent, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringUserAgentKey)
 
 	promptTokens, completionTokens, totalTokens := extractTokenCounts(usage)
 
@@ -241,6 +245,7 @@ func (b *meteringBase) reportUsageEvent(ctx context.Context, cycleState *plugin.
 			"cache_creation_tokens": cacheCreationTokens,
 			"reasoning_tokens":      reasoningTokens,
 			"duration_ms":           durationMs,
+			"user_agent":            userAgent,
 		},
 	}
 
@@ -458,6 +463,7 @@ func (b *meteringBase) reportErrorEvent(ctx context.Context, cycleState *plugin.
 	subscription, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringSubscriptionKey)
 	model, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringModelKey)
 	provider, _ := plugin.ReadCycleStateKey[string](cycleState, state.ProviderKey)
+	userAgent, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringUserAgentKey)
 
 	var durationMs int64
 	if reqTime, err := plugin.ReadCycleStateKey[time.Time](cycleState, state.MeteringRequestTimeKey); err == nil {
@@ -482,6 +488,7 @@ func (b *meteringBase) reportErrorEvent(ctx context.Context, cycleState *plugin.
 			"error_type":    errorInfo["error_type"],
 			"error_message": errorInfo["error_message"],
 			"duration_ms":   durationMs,
+			"user_agent":    userAgent,
 		},
 	}
 

@@ -22,6 +22,7 @@ const (
 	APIKey Auth = "apikey"
 	SigV4  Auth = "sigv4"
 	OAuth2 Auth = "oauth2" // not used yet
+	None   Auth = "none"
 )
 
 const (

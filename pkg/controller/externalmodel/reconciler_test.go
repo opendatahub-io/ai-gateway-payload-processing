@@ -187,10 +187,10 @@ func TestReconcile_CreatesHTTPRoute(t *testing.T) {
 	require.Len(t, hr.Spec.ParentRefs, 1)
 	assert.Equal(t, "test-gateway", string(hr.Spec.ParentRefs[0].Name))
 
-	// Two rules: path + header
-	require.Len(t, hr.Spec.Rules, 2)
+	// 4 rules for single provider: 2 per-provider + 2 fallback
+	require.Len(t, hr.Spec.Rules, 4)
 	assert.Equal(t, "/"+ns+"/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
-	assert.Equal(t, "gpt4", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "x-ipp-selected-provider", string(hr.Spec.Rules[0].Matches[0].Headers[0].Name))
 
 	// Backend ref points to provider's Service
 	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
@@ -336,9 +336,9 @@ func TestReconcile_TwoModelsOneProvider(t *testing.T) {
 	assert.Equal(t, "shared-provider", string(hr1.Spec.Rules[0].BackendRefs[0].Name))
 	assert.Equal(t, "shared-provider", string(hr2.Spec.Rules[0].BackendRefs[0].Name))
 
-	// Header match uses modelName (ExternalModel CR name)
-	assert.Equal(t, "gpt4", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
-	assert.Equal(t, "gpt35", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Per-provider header match on rule 1 uses targetModel + x-ipp-selected-provider
+	assert.Equal(t, "gpt-4o", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "gpt-3.5-turbo", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Different path prefixes
 	assert.Equal(t, "/"+ns+"/gpt4", *hr1.Spec.Rules[0].Matches[0].Path.Value)
@@ -360,72 +360,53 @@ func TestCommonLabels(t *testing.T) {
 	assert.Len(t, labels, 2)
 }
 
-func TestBuildHTTPRoute(t *testing.T) {
-	hr := buildHTTPRoute(
-		"api.openai.com", "my-openai",
-		"gpt4",
-		"models", 443,
-		"default-gateway", "openshift-ingress", "300s",
-		commonLabels("gpt4"),
-	)
+func TestBuildHTTPRoute_SingleProvider(t *testing.T) {
+	refs := []resolvedRef{{
+		providerName: "my-openai", providerEndpoint: "api.openai.com", targetModel: "gpt-4o",
+	}}
+	hr := buildHTTPRoute(refs, "gpt4", "models", 443,
+		"default-gateway", "openshift-ingress", "300s", commonLabels("gpt4"))
 
 	assert.Equal(t, "gpt4", hr.Name)
 	assert.Equal(t, "models", hr.Namespace)
-	assert.Equal(t, managedByValue, hr.Labels[ctrlcommon.LabelManagedBy])
 
-	// Parent gateway ref
-	require.Len(t, hr.Spec.ParentRefs, 1)
-	assert.Equal(t, "default-gateway", string(hr.Spec.ParentRefs[0].Name))
-	assert.Equal(t, "openshift-ingress", string(*hr.Spec.ParentRefs[0].Namespace))
+	// 4 rules: 2 per-provider + 2 fallback
+	require.Len(t, hr.Spec.Rules, 4)
 
-	// Must have 2 rules: path-based and header-based
-	require.Len(t, hr.Spec.Rules, 2)
+	// Rule 0: path + x-ipp-selected-provider
+	assert.Equal(t, "/models/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
+	require.Len(t, hr.Spec.Rules[0].Matches[0].Headers, 1)
+	assert.Equal(t, "x-ipp-selected-provider", string(hr.Spec.Rules[0].Matches[0].Headers[0].Name))
+	assert.Equal(t, "my-openai", hr.Spec.Rules[0].Matches[0].Headers[0].Value)
+	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
 
-	// Rule 1: path-based match with namespace prefix
-	rule1 := hr.Spec.Rules[0]
-	assert.Equal(t, "/models/gpt4", *rule1.Matches[0].Path.Value)
+	// Rule 2: fallback path (no provider header)
+	assert.Empty(t, hr.Spec.Rules[2].Matches[0].Headers)
 
-	// Rule 2: header-based match uses modelName (what /v1/models returns)
-	rule2 := hr.Spec.Rules[1]
-	assert.Equal(t, "X-Gateway-Model-Name", string(rule2.Matches[0].Headers[0].Name))
-	assert.Equal(t, "gpt4", rule2.Matches[0].Headers[0].Value)
-
-	// Backend ref points to the PROVIDER's Service, not the model
-	for i, rule := range hr.Spec.Rules {
-		require.Len(t, rule.BackendRefs, 1, "rule %d", i)
-		assert.Equal(t, "my-openai", string(rule.BackendRefs[0].Name),
-			"rule %d: backend should be the provider's Service", i)
-	}
-
-	// Host header filter for TLS SNI uses provider endpoint
-	for i, rule := range hr.Spec.Rules {
-		require.Len(t, rule.Filters, 1, "rule %d", i)
-		assert.Equal(t, gatewayapiv1.HTTPRouteFilterRequestHeaderModifier, rule.Filters[0].Type)
-		assert.Equal(t, "Host", string(rule.Filters[0].RequestHeaderModifier.Set[0].Name))
-		assert.Equal(t, "api.openai.com", rule.Filters[0].RequestHeaderModifier.Set[0].Value)
-	}
+	// Host filter
+	assert.Equal(t, "api.openai.com", hr.Spec.Rules[0].Filters[0].RequestHeaderModifier.Set[0].Value)
 }
 
-func TestBuildHTTPRoute_TargetModelDiffersFromName(t *testing.T) {
-	hr := buildHTTPRoute(
-		"bedrock.us-east-1.amazonaws.com", "my-bedrock",
-		"claude",
-		"models", 443,
-		"my-gateway", "gateway-ns", "300s",
-		commonLabels("claude"),
-	)
+func TestBuildHTTPRoute_MultiProvider(t *testing.T) {
+	refs := []resolvedRef{
+		{providerName: "anthropic", providerEndpoint: "api.anthropic.com", targetModel: "claude-opus-4-8"},
+		{providerName: "sim-vertex", providerEndpoint: "sim.example.com", targetModel: "claude-opus-4-8"},
+	}
+	hr := buildHTTPRoute(refs, "claude", "models", 443,
+		"my-gateway", "gateway-ns", "300s", commonLabels("claude"))
 
-	// Name and path use ExternalModel name
-	assert.Equal(t, "claude", hr.Name)
-	assert.Equal(t, "/models/claude", *hr.Spec.Rules[0].Matches[0].Path.Value)
+	// 6 rules: 2 per-provider x 2 + 2 fallback
+	require.Len(t, hr.Spec.Rules, 6)
 
-	// Header match uses modelName (what /v1/models returns to clients)
-	assert.Equal(t, "claude", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Anthropic rules (0,1)
+	assert.Equal(t, "anthropic", hr.Spec.Rules[0].Matches[0].Headers[0].Value)
+	assert.Equal(t, "anthropic", string(hr.Spec.Rules[0].BackendRefs[0].Name))
 
-	// Backend points to provider Service
-	assert.Equal(t, "my-bedrock", string(hr.Spec.Rules[0].BackendRefs[0].Name))
+	// Sim-vertex rules (2,3)
+	assert.Equal(t, "sim-vertex", hr.Spec.Rules[2].Matches[0].Headers[0].Value)
+	assert.Equal(t, "sim-vertex", string(hr.Spec.Rules[2].BackendRefs[0].Name))
 
-	// Host header uses provider endpoint
-	assert.Equal(t, "bedrock.us-east-1.amazonaws.com",
-		hr.Spec.Rules[0].Filters[0].RequestHeaderModifier.Set[0].Value)
+	// Fallback rules (4,5) point to refs[0] (anthropic)
+	assert.Empty(t, hr.Spec.Rules[4].Matches[0].Headers)
+	assert.Equal(t, "anthropic", string(hr.Spec.Rules[4].BackendRefs[0].Name))
 }

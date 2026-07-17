@@ -256,3 +256,41 @@ func TestProcessRequest_AWSBedrock(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessRequest_NoneAuth(t *testing.T) {
+	tests := []struct {
+		name           string
+		initialHeaders map[string]string
+		wantHeaders    map[string]string
+	}{
+		{
+			name:           "strips existing authorization header",
+			initialHeaders: map[string]string{"authorization": "Bearer user-api-key", "content-type": "application/json"},
+			wantHeaders:    map[string]string{"content-type": "application/json"},
+		},
+		{
+			name:           "succeeds even when no authorization header present",
+			initialHeaders: map[string]string{"content-type": "application/json"},
+			wantHeaders:    map[string]string{"content-type": "application/json"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := newTestPlugin(newSecretStore())
+			request := requesthandling.NewInferenceRequest()
+			for k, v := range test.initialHeaders {
+				request.SetHeader(k, v)
+			}
+
+			cs := plugin.NewCycleState()
+			cs.Write(state.AuthTypeKey, auth.None)
+
+			err := p.ProcessRequest(context.Background(), cs, request)
+			require.NoError(t, err)
+			if diff := cmp.Diff(test.wantHeaders, request.Headers, cmpopts.SortMaps(func(a, b string) bool { return a < b })); diff != "" {
+				t.Errorf("headers mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
