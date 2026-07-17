@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/google/go-cmp v0.7.0
-	github.com/llm-d/llm-d-inference-payload-processor v0.1.0-rc.4
+	github.com/llm-d/llm-d-inference-payload-processor v0.1.0
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/stretchr/testify v1.11.1
