@@ -30,6 +30,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 )
 
 // --- NewNemoResponseGuardPlugin construction ---
@@ -280,6 +281,49 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 			wantErrContains: "content is not a string",
 			wantErrCode:     errcommon.Internal,
 		},
+		// OpenResponses integration
+		{
+			name: "allow: OpenResponses output passes NeMo",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "passed"}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body: map[string]any{
+				"object": "response",
+				"output": []any{
+					map[string]any{
+						"type": "message",
+						"role": "assistant",
+						"content": []any{
+							map[string]any{"type": "output_text", "text": "The weather is sunny."},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "block: OpenResponses output blocked by NeMo",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "blocked"}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body: map[string]any{
+				"object": "response",
+				"output": []any{
+					map[string]any{
+						"type":    "message",
+						"role":    "assistant",
+						"content": "Toxic content here",
+					},
+				},
+			},
+			wantErr:         true,
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
+		},
 	}
 
 	for _, tt := range tests {
@@ -428,10 +472,11 @@ func TestNemoResponseGuardFactoryMissingRequiredFields(t *testing.T) {
 
 func TestExtractAssistantMessages(t *testing.T) {
 	tests := []struct {
-		name    string
-		body    map[string]any
-		want    []map[string]string
-		wantErr bool
+		name        string
+		body        map[string]any
+		inputFormat apiformat.APIFormat
+		want        []map[string]string
+		wantErr     bool
 	}{
 		{
 			name: "single choice with message",
@@ -556,11 +601,51 @@ func TestExtractAssistantMessages(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		// OpenResponses payloads
+		{
+			name: "OpenResponses — output with nested text content",
+			body: map[string]any{
+				"id":     "resp_abc123",
+				"object": "response",
+				"status": "completed",
+				"model":  "openclaw",
+				"output": []any{
+					map[string]any{
+						"type": "message",
+						"role": "assistant",
+						"content": []any{
+							map[string]any{"type": "output_text", "text": "Your SSN is 123-45-6789"},
+						},
+					},
+				},
+			},
+			want: []map[string]string{{"role": "assistant", "content": "Your SSN is 123-45-6789"}},
+		},
+		{
+			name: "OpenResponses — output with string content",
+			body: map[string]any{
+				"output": []any{
+					map[string]any{"type": "message", "role": "assistant", "content": "Hello"},
+				},
+			},
+			want: []map[string]string{{"role": "assistant", "content": "Hello"}},
+		},
+		{
+			name:        "OpenResponses — explicit format with empty output — nil",
+			inputFormat: apiformat.OpenAIResponses,
+			body:        map[string]any{"object": "response"},
+			want:        nil,
+		},
+		{
+			name:    "OpenResponses — output is not an array — error",
+			body:    map[string]any{"output": "not-an-array"},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractAssistantMessages(tt.body)
+			got, err := extractAssistantMessages(tt.body, tt.inputFormat)
 			if tt.wantErr {
 				require.Error(t, err)
 				return

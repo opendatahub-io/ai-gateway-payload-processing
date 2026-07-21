@@ -30,6 +30,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 )
 
 // nemoAllowedJSON is a minimal NeMo guard response that means “allow”.
@@ -294,6 +295,35 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		// OpenResponses integration
+		{
+			name: "allow: OpenResponses input string passes NeMo",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(nemoAllowedJSON()); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body: map[string]any{
+				"model": "openclaw",
+				"input": "my email is john@example.com",
+			},
+			wantErr: false,
+		},
+		{
+			name: "block: OpenResponses input blocked by NeMo",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "blocked"}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body: map[string]any{
+				"model": "openclaw",
+				"input": "malicious content",
+			},
+			wantErr:         true,
+			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
+		},
 	}
 
 	for _, tt := range tests {
@@ -478,10 +508,11 @@ func TestNemoRequestGuardFactoryMissingRequiredFields(t *testing.T) {
 
 func TestExtractMessages(t *testing.T) {
 	tests := []struct {
-		name    string
-		body    map[string]any
-		want    []any
-		wantErr bool
+		name        string
+		body        map[string]any
+		inputFormat apiformat.APIFormat
+		want        []any
+		wantErr     bool
 	}{
 		{
 			name: "single user message",
@@ -595,11 +626,77 @@ func TestExtractMessages(t *testing.T) {
 			},
 			want: nil,
 		},
+		// OpenResponses payloads
+		{
+			name: "OpenResponses — input as string",
+			body: map[string]any{
+				"model": "openclaw",
+				"input": "my email is john@example.com",
+			},
+			want: []any{map[string]string{"role": "user", "content": "my email is john@example.com"}},
+		},
+		{
+			name: "OpenResponses — input as string with instructions",
+			body: map[string]any{
+				"model":        "openclaw",
+				"instructions": "You are helpful",
+				"input":        "my email is john@example.com",
+			},
+			want: []any{
+				map[string]string{"role": "system", "content": "You are helpful"},
+				map[string]string{"role": "user", "content": "my email is john@example.com"},
+			},
+		},
+		{
+			name: "OpenResponses — input as item array",
+			body: map[string]any{
+				"model": "openclaw",
+				"input": []any{
+					map[string]any{"type": "message", "role": "user", "content": "my email is john@example.com"},
+					map[string]any{"type": "message", "role": "assistant", "content": "noted"},
+					map[string]any{"type": "message", "role": "user", "content": "what is 2+2?"},
+				},
+			},
+			want: []any{
+				map[string]string{"role": "user", "content": "my email is john@example.com"},
+				map[string]string{"role": "assistant", "content": "noted"},
+				map[string]string{"role": "user", "content": "what is 2+2?"},
+			},
+		},
+		{
+			name: "OpenResponses — input with tool calls",
+			body: map[string]any{
+				"model": "openclaw",
+				"input": []any{
+					map[string]any{"type": "message", "role": "user", "content": "check the weather"},
+					map[string]any{"type": "function_call", "name": "get_weather", "arguments": `{"city":"NYC"}`},
+					map[string]any{"type": "function_call_output", "output": `{"temp":72}`},
+					map[string]any{"type": "message", "role": "assistant", "content": "It's 72°F in NYC"},
+				},
+			},
+			want: []any{
+				map[string]string{"role": "user", "content": "check the weather"},
+				map[string]string{"role": "assistant", "content": `get_weather({"city":"NYC"})`},
+				map[string]string{"role": "tool", "content": `{"temp":72}`},
+				map[string]string{"role": "assistant", "content": "It's 72°F in NYC"},
+			},
+		},
+		{
+			name:        "OpenResponses — explicit format with empty input — nil",
+			inputFormat: apiformat.OpenAIResponses,
+			body:        map[string]any{"model": "openclaw"},
+			want:        nil,
+		},
+		{
+			name:    "OpenResponses — input is not string or array — error",
+			body:    map[string]any{"model": "openclaw", "input": 42},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractMessages(tt.body)
+			got, err := extractMessages(tt.body, tt.inputFormat)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
