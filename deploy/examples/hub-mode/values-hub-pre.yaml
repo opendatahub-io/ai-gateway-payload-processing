@@ -1,0 +1,52 @@
+# Hub mode PRE-PROCESSING deployment values.
+#
+# Runs BEFORE auth and EPP. Handles the PROPOSE phase:
+# - body-field-to-header: extracts model name into X-Gateway-Model-Name header
+# - model-provider-resolver (hubMode): collects eligible spoke endpoints
+#   and sets envoy.lb.subset_hint dynamic metadata for EPP filtering
+#
+# Deploy with:
+#   helm install ipp-pre ./deploy/payload-processing -f deploy/examples/hub-mode/values-hub-pre.yaml
+#
+# Set anchorSubFilter to your auth filter name (e.g. WasmPlugin CR filter name).
+
+upstreamIpp:
+  payloadProcessor:
+    name: payload-pre-processing
+    replicas: 1
+    image:
+      registry: quay.io/opendatahub
+      repository: odh-ai-gateway-payload-processing
+      tag: odh-stable
+      pullPolicy: IfNotPresent
+    port: 9004
+    healthCheckPort: 9005
+    multiNamespace: true
+    flags:
+      v: 3
+    customConfig:
+      plugins:
+      - type: body-field-to-header
+        name: model-extractor
+        parameters:
+          fieldName: model
+          headerName: X-Gateway-Model-Name
+      - type: model-provider-resolver
+        parameters:
+          hubMode: true
+      profiles:
+      - name: default
+        plugins:
+          request:
+          - pluginRef: model-extractor
+          - pluginRef: model-provider-resolver
+
+  provider:
+    name: istio
+    istio:
+      envoyFilter:
+        operation: INSERT_BEFORE
+        anchorSubFilter: ""  # Set to auth filter name
+
+  inferenceGateway:
+    name: maas-default-gateway

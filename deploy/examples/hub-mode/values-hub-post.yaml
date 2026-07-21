@@ -1,3 +1,16 @@
+# Hub mode POST-PROCESSING deployment values.
+#
+# Runs AFTER the EPP has picked a destination spoke. Handles the TRANSFORM phase:
+# - model-provider-resolver (hubMode): reads x-gateway-destination-endpoint,
+#   matches to ExternalProvider, writes CycleState
+# - api-translation: transforms request format for the target provider
+# - apikey-injection: injects credentials
+#
+# Deploy with:
+#   helm install ipp-post ./deploy/payload-processing -f deploy/examples/hub-mode/values-hub-post.yaml
+#
+# Set anchorSubFilter to the EPP ext-proc filter name.
+
 upstreamIpp:
   payloadProcessor:
     name: payload-processing
@@ -14,15 +27,9 @@ upstreamIpp:
       v: 3
     customConfig:
       plugins:
-      - type: maas-headers-guard
-      - type: body-field-to-header
-        name: model-extractor
-        parameters:
-          fieldName: model
-          headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
-        # parameters:
-        #   hubMode: true  # Enable for hub mode (cross-cluster routing) deployments
+        parameters:
+          hubMode: true
       - type: stream-usage-enforcer
       - type: api-translation
       - type: apikey-injection
@@ -30,8 +37,6 @@ upstreamIpp:
       - name: default
         plugins:
           request:
-          - pluginRef: maas-headers-guard
-          - pluginRef: model-extractor
           - pluginRef: model-provider-resolver
           - pluginRef: stream-usage-enforcer
           - pluginRef: api-translation
@@ -41,17 +46,10 @@ upstreamIpp:
 
   provider:
     name: istio
+    istio:
+      envoyFilter:
+        operation: INSERT_AFTER
+        anchorSubFilter: ""  # Set to EPP filter name, e.g. "envoy.filters.http.ext_proc.epp-hub"
 
   inferenceGateway:
     name: maas-default-gateway
-
-# --- Hub mode (cross-cluster routing) ---
-# Hub mode requires TWO deployments of this chart:
-#   1. Pre-processing:  runs before auth+EPP (PROPOSE phase)
-#   2. Post-processing: runs after EPP (TRANSFORM phase)
-#
-# Each deployment uses different plugin chains and EnvoyFilter anchors.
-# The upstream chart's provider.istio.envoyFilter.operation and
-# anchorSubFilter values control filter ordering per deployment.
-#
-# See deploy/examples/hub-mode/ for ready-to-use values files.
