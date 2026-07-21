@@ -21,8 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"strings"
 
+	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
+	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -30,12 +35,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
-	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
-	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/dynamicmetadata"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -52,14 +54,26 @@ const (
 
 var _ requesthandling.RequestProcessor = &ModelProviderResolverPlugin{}
 
+type pluginConfig struct {
+	HubMode bool `json:"hubMode"`
+}
+
 // ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin.
-func ModelProviderResolverFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
+func ModelProviderResolverFactory(name string, configJSON json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	var cfg pluginConfig
+	if len(configJSON) > 0 {
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config for plugin '%s': %w", ModelProviderResolverPluginType, err)
+		}
+	}
+
+	p, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
+	p.hubMode = cfg.HubMode
 
-	return plugin.WithName(name), nil
+	return p.WithName(name), nil
 }
 
 // NewModelProviderResolver registers store reconcilers for inference.opendatahub.io
@@ -117,6 +131,7 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 type ModelProviderResolverPlugin struct {
 	typedName plugin.TypedName
 	store     *infoStore
+	hubMode   bool
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
@@ -178,14 +193,28 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	logger.Info("resolved model by name", "modelName", modelName)
 
+	// Hub mode PROPOSE: set dynamic metadata for EPP subset filtering.
+	if p.hubMode && request.Headers["x-gateway-destination-endpoint"] == "" {
+		return p.propose(ctx, request, modelInfo)
+	}
+
 	if inputFormat == "" {
 		logger.Error(nil, "unsupported API path for external model", "model", modelName, "path", relativePath)
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "unsupported API endpoint"}
 	}
 
-	ref := selectByWeight(modelInfo.refs)
-	if ref == nil {
-		return errcommon.Error{Code: errcommon.BadRequest, Msg: "all providers for model " + modelName + " are disabled (weight 0)"}
+	var ref *resolvedProviderRef
+	if p.hubMode {
+		ref = findRefByEndpoint(modelInfo.refs, request.Headers["x-gateway-destination-endpoint"])
+		if ref == nil {
+			return errcommon.Error{Code: errcommon.BadRequest,
+				Msg: "no ExternalProvider matches destination " + request.Headers["x-gateway-destination-endpoint"]}
+		}
+	} else {
+		ref = selectByWeight(modelInfo.refs)
+		if ref == nil {
+			return errcommon.Error{Code: errcommon.BadRequest, Msg: "all providers for model " + modelName + " are disabled (weight 0)"}
+		}
 	}
 
 	// Drive Envoy routing to the selected provider's backend.
@@ -250,6 +279,43 @@ func selectByWeight(refs []*resolvedProviderRef) *resolvedProviderRef {
 		}
 	}
 	return refs[len(refs)-1]
+}
+
+// propose handles the hub mode PROPOSE phase: collect eligible spoke endpoints
+// and set dynamic metadata for the EPP to filter on. No CycleState is written.
+func (p *ModelProviderResolverPlugin) propose(ctx context.Context, request *requesthandling.InferenceRequest, modelInfo *externalModelInfo) error {
+	var endpoints []string
+	for _, ref := range modelInfo.refs {
+		if ref.weight > 0 {
+			endpoints = append(endpoints, ref.endpoint)
+		}
+	}
+	if len(endpoints) == 0 {
+		return nil
+	}
+
+	log.FromContext(ctx).V(logutil.DEFAULT).Info("hub mode PROPOSE: setting endpoint subset",
+		"model", modelInfo.modelName, "endpoints", endpoints)
+	return dynamicmetadata.SetEndpointSubset(request, endpoints)
+}
+
+// findRefByEndpoint returns the first ref whose endpoint hostname matches the
+// destination. Ports are stripped from both sides before comparison.
+func findRefByEndpoint(refs []*resolvedProviderRef, destination string) *resolvedProviderRef {
+	host := stripPort(destination)
+	for _, ref := range refs {
+		if stripPort(ref.endpoint) == host {
+			return ref
+		}
+	}
+	return nil
+}
+
+func stripPort(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return hostport
 }
 
 func sanitizePath(relativeUrlPath string) string {

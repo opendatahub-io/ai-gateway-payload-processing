@@ -280,6 +280,7 @@ func newExtProcRunnable(extProcServer extProcPb.ExternalProcessorServer, port in
 			}
 			creds := credentials.NewTLS(&tls.Config{
 				Certificates: []tls.Certificate{cert},
+				MinVersion:   tls.VersionTLS12,
 				NextProtos:   []string{"h2"},
 			})
 			srv = grpc.NewServer(grpc.Creds(creds))

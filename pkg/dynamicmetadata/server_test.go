@@ -73,12 +73,49 @@ func TestExtractAndInjectMetadata(t *testing.T) {
 			wantPseudoStripped: true,
 		},
 		{
-			name:            "ResponseBody type is a no-op",
+			name: "ResponseHeaders pseudo-header stripped and metadata set",
+			resp: makeResponseHeadersResponse(
+				header(pseudoHeader, `{"ns":"envoy.lb.subset_hint","key":"x-gateway-destination-endpoint-subset","values":["spoke-east:443"]}`),
+				header("x-custom", "keep"),
+			),
+			wantDynamicMeta:    true,
+			wantNamespace:      "envoy.lb.subset_hint",
+			wantKey:            "x-gateway-destination-endpoint-subset",
+			wantValues:         []string{"spoke-east:443"},
+			wantRemainingHdrs:  1,
+			wantPseudoStripped: true,
+		},
+		{
+			name: "RequestBody pseudo-header stripped and metadata set",
+			resp: makeRequestBodyResponse(
+				header(pseudoHeader, `{"ns":"envoy.lb.subset_hint","key":"x-gateway-destination-endpoint-subset","values":["spoke-west:443"]}`),
+			),
+			wantDynamicMeta:    true,
+			wantNamespace:      "envoy.lb.subset_hint",
+			wantKey:            "x-gateway-destination-endpoint-subset",
+			wantValues:         []string{"spoke-west:443"},
+			wantRemainingHdrs:  0,
+			wantPseudoStripped: true,
+		},
+		{
+			name: "ResponseBody pseudo-header stripped and metadata set",
+			resp: makeResponseBodyResponse(
+				header(pseudoHeader, `{"ns":"envoy.lb.subset_hint","key":"x-gateway-destination-endpoint-subset","values":["spoke-central:443"]}`),
+			),
+			wantDynamicMeta:    true,
+			wantNamespace:      "envoy.lb.subset_hint",
+			wantKey:            "x-gateway-destination-endpoint-subset",
+			wantValues:         []string{"spoke-central:443"},
+			wantRemainingHdrs:  0,
+			wantPseudoStripped: true,
+		},
+		{
+			name:            "ResponseBody without pseudo-header is a no-op",
 			resp:            &extProcPb.ProcessingResponse{Response: &extProcPb.ProcessingResponse_ResponseBody{}},
 			wantDynamicMeta: false,
 		},
 		{
-			name:            "RequestBody type is a no-op",
+			name:            "RequestBody without pseudo-header is a no-op",
 			resp:            &extProcPb.ProcessingResponse{Response: &extProcPb.ProcessingResponse_RequestBody{}},
 			wantDynamicMeta: false,
 		},
@@ -130,21 +167,18 @@ func TestExtractAndInjectMetadata(t *testing.T) {
 				assertDynamicMetadata(t, tt.resp.DynamicMetadata, tt.wantNamespace, tt.wantKey, tt.wantValues)
 			}
 
-			if tt.wantPseudoStripped {
-				reqHdrs := tt.resp.Response.(*extProcPb.ProcessingResponse_RequestHeaders)
-				hdrs := reqHdrs.RequestHeaders.Response.HeaderMutation.SetHeaders
-				assert.Len(t, hdrs, tt.wantRemainingHdrs)
-				for _, h := range hdrs {
-					assert.NotEqual(t, pseudoHeader, h.Header.Key, "pseudo-header must be stripped")
-				}
-			}
-
-			if tt.wantRemainingHdrs > 0 && !tt.wantPseudoStripped {
-				reqHdrs, ok := tt.resp.Response.(*extProcPb.ProcessingResponse_RequestHeaders)
-				if ok && reqHdrs.RequestHeaders != nil &&
-					reqHdrs.RequestHeaders.Response != nil &&
-					reqHdrs.RequestHeaders.Response.HeaderMutation != nil {
-					assert.Len(t, reqHdrs.RequestHeaders.Response.HeaderMutation.SetHeaders, tt.wantRemainingHdrs)
+			if tt.wantPseudoStripped || tt.wantRemainingHdrs > 0 {
+				cr := commonResponse(tt.resp)
+				if cr != nil && cr.HeaderMutation != nil {
+					hdrs := cr.HeaderMutation.SetHeaders
+					if tt.wantPseudoStripped {
+						assert.Len(t, hdrs, tt.wantRemainingHdrs)
+						for _, h := range hdrs {
+							assert.NotEqual(t, pseudoHeader, h.Header.Key, "pseudo-header must be stripped")
+						}
+					} else {
+						assert.Len(t, hdrs, tt.wantRemainingHdrs)
+					}
 				}
 			}
 		})
@@ -155,6 +189,10 @@ func TestWrapServer(t *testing.T) {
 	inner := &extProcPb.UnimplementedExternalProcessorServer{}
 	wrapped := WrapServer(inner)
 	require.NotNil(t, wrapped)
+
+	s, ok := wrapped.(*Server)
+	require.True(t, ok, "WrapServer must return a *Server")
+	assert.Equal(t, inner, s.inner, "inner server must be preserved")
 }
 
 // fakeProcessServer captures the response forwarded by wrappedStream.Send. The
@@ -209,6 +247,48 @@ func makeRequestHeadersResponse(headers ...*corev3.HeaderValueOption) *extProcPb
 	return &extProcPb.ProcessingResponse{
 		Response: &extProcPb.ProcessingResponse_RequestHeaders{
 			RequestHeaders: &extProcPb.HeadersResponse{
+				Response: &extProcPb.CommonResponse{
+					HeaderMutation: &extProcPb.HeaderMutation{
+						SetHeaders: headers,
+					},
+				},
+			},
+		},
+	}
+}
+
+func makeResponseHeadersResponse(headers ...*corev3.HeaderValueOption) *extProcPb.ProcessingResponse {
+	return &extProcPb.ProcessingResponse{
+		Response: &extProcPb.ProcessingResponse_ResponseHeaders{
+			ResponseHeaders: &extProcPb.HeadersResponse{
+				Response: &extProcPb.CommonResponse{
+					HeaderMutation: &extProcPb.HeaderMutation{
+						SetHeaders: headers,
+					},
+				},
+			},
+		},
+	}
+}
+
+func makeRequestBodyResponse(headers ...*corev3.HeaderValueOption) *extProcPb.ProcessingResponse {
+	return &extProcPb.ProcessingResponse{
+		Response: &extProcPb.ProcessingResponse_RequestBody{
+			RequestBody: &extProcPb.BodyResponse{
+				Response: &extProcPb.CommonResponse{
+					HeaderMutation: &extProcPb.HeaderMutation{
+						SetHeaders: headers,
+					},
+				},
+			},
+		},
+	}
+}
+
+func makeResponseBodyResponse(headers ...*corev3.HeaderValueOption) *extProcPb.ProcessingResponse {
+	return &extProcPb.ProcessingResponse{
+		Response: &extProcPb.ProcessingResponse_ResponseBody{
+			ResponseBody: &extProcPb.BodyResponse{
 				Response: &extProcPb.CommonResponse{
 					HeaderMutation: &extProcPb.HeaderMutation{
 						SetHeaders: headers,

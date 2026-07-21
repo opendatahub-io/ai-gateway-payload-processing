@@ -34,28 +34,43 @@ func (w *wrappedStream) Send(resp *extProcPb.ProcessingResponse) error {
 	return w.ExternalProcessor_ProcessServer.Send(resp)
 }
 
+// commonResponse extracts the CommonResponse from any ProcessingResponse variant
+// that carries header mutations (RequestHeaders, ResponseHeaders, RequestBody, ResponseBody).
+func commonResponse(resp *extProcPb.ProcessingResponse) *extProcPb.CommonResponse {
+	switch r := resp.Response.(type) {
+	case *extProcPb.ProcessingResponse_RequestHeaders:
+		if r.RequestHeaders != nil {
+			return r.RequestHeaders.Response
+		}
+	case *extProcPb.ProcessingResponse_ResponseHeaders:
+		if r.ResponseHeaders != nil {
+			return r.ResponseHeaders.Response
+		}
+	case *extProcPb.ProcessingResponse_RequestBody:
+		if r.RequestBody != nil {
+			return r.RequestBody.Response
+		}
+	case *extProcPb.ProcessingResponse_ResponseBody:
+		if r.ResponseBody != nil {
+			return r.ResponseBody.Response
+		}
+	}
+	return nil
+}
+
 // extractAndInjectMetadata finds the pseudo-header in the response's header
-// mutations, removes it, and populates resp.DynamicMetadata.
-//
-// Only the RequestHeaders response variant is scanned. This is deliberate:
-// plugins set the pseudo-header during the request-headers phase, so it can
-// only ever ride a ProcessingResponse_RequestHeaders. Scanning that one variant
-// also guarantees the pseudo-header is stripped before it reaches Envoy/client.
-// If a plugin ever sets the pseudo-header on another phase (e.g. ResponseHeaders
-// or ResponseBody), this scan must be generalized to those variants — otherwise
-// the raw pseudo-header would leak downstream instead of becoming DynamicMetadata.
+// mutations, removes it, and populates resp.DynamicMetadata. Scans every
+// response variant (via commonResponse) so the internal pseudo-header is always
+// stripped before it reaches Envoy/client, regardless of the phase a plugin set
+// it on — hub mode's PROPOSE/TRANSFORM can emit it outside the request-headers
+// phase.
 func extractAndInjectMetadata(resp *extProcPb.ProcessingResponse) {
-	reqHeaders, ok := resp.Response.(*extProcPb.ProcessingResponse_RequestHeaders)
-	if !ok || reqHeaders.RequestHeaders == nil ||
-		reqHeaders.RequestHeaders.Response == nil ||
-		reqHeaders.RequestHeaders.Response.HeaderMutation == nil {
+	cr := commonResponse(resp)
+	if cr == nil || cr.HeaderMutation == nil || len(cr.HeaderMutation.SetHeaders) == 0 {
 		return
 	}
 
-	hm := reqHeaders.RequestHeaders.Response.HeaderMutation
-	if len(hm.SetHeaders) == 0 {
-		return
-	}
+	hm := cr.HeaderMutation
 
 	var e entry
 	var parsed bool

@@ -47,13 +47,14 @@ func TestSetEndpointSubset(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := requesthandling.NewInferenceRequest()
-			SetEndpointSubset(req, tt.endpoints)
+			err := SetEndpointSubset(req, tt.endpoints)
+			require.NoError(t, err)
 
 			raw, ok := req.MutatedHeaders()[pseudoHeader]
 			require.True(t, ok, "pseudo-header must be set in mutated headers")
 
 			var e entry
-			err := json.Unmarshal([]byte(raw), &e)
+			err = json.Unmarshal([]byte(raw), &e)
 			require.NoError(t, err, "pseudo-header value must be valid JSON")
 
 			assert.Equal(t, "envoy.lb.subset_hint", e.Namespace)
