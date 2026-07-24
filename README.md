@@ -48,6 +48,12 @@ kubectl apply -f config/crd/bases/
     > As a mandatory requirement, `--namespace` must match the namespace where the
     > Gateway resource lives.
 
+    > **Timeouts**: The Envoy ext_proc filter requires explicit `message_timeout`
+    > and `grpc_service.timeout` settings. Without them, Envoy uses very short
+    > defaults that cause timeout errors on large-context streaming requests
+    > (where Time To First Token exceeds the default). Set both to `300s` to
+    > match the HTTPRoute request timeout.
+
     The `GATEWAY_NAME` and `GATEWAY_NAMESPACE` environment variables are used by
     the controller reconcilers to set the correct parent ref on HTTPRoutes created
     for ExternalModel CRs.

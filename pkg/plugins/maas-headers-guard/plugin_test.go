@@ -55,9 +55,12 @@ func TestProcessRequest_StripsInternalHeaders(t *testing.T) {
 	_, hasSub := req.Headers["x-maas-subscription"]
 	assert.False(t, hasSub, "x-maas-subscription must be stripped")
 
+	// Auth headers stripped (must not leak to upstream model)
+	_, hasAuth := req.Headers["authorization"]
+	assert.False(t, hasAuth, "authorization must be stripped")
+
 	// Non-internal headers preserved
 	assert.Equal(t, "application/json", req.Headers["content-type"])
-	assert.Equal(t, "Bearer sk-oai-test", req.Headers["authorization"])
 
 	// All values saved in CycleState as a single map
 	captured, err := plugin.ReadCycleStateKey[map[string]string](cs, MaaSHeadersKey)
@@ -65,6 +68,21 @@ func TestProcessRequest_StripsInternalHeaders(t *testing.T) {
 	assert.Equal(t, "alice", captured["x-maas-username"])
 	assert.Equal(t, "engineering", captured["x-maas-group"])
 	assert.Equal(t, "premium", captured["x-maas-subscription"])
+}
+
+func TestProcessRequest_StripsXApiKey(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["x-api-key"] = "sk-oai-test"
+	req.Headers["content-type"] = "application/json"
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	_, hasKey := req.Headers["x-api-key"]
+	assert.False(t, hasKey, "x-api-key must be stripped")
+	assert.Equal(t, "application/json", req.Headers["content-type"])
 }
 
 func TestProcessRequest_NoInternalHeaders(t *testing.T) {

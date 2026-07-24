@@ -603,12 +603,13 @@ func TestProcessResponseChunk_UsageInFinalChunk(t *testing.T) {
 	resp := requesthandling.NewInferenceResponse()
 
 	// Non-final chunk with no usage
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, `data: {"type":"content_block_delta","delta":{"text":"hi"}}`, false)
+	resp.SetChunk(`data: {"type":"content_block_delta","delta":{"text":"hi"}}`)
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, false)
 	assert.NoError(t, err)
 
 	// Final chunk with usage
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp,
-		`data: {"type":"message_delta","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}`, true)
+	resp.SetChunk(`data: {"type":"message_delta","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}`)
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, true)
 	assert.NoError(t, err)
 
 	reported.Wait()
@@ -646,12 +647,15 @@ data: {"type":"response.completed","response":{"id":"resp_1","status":"completed
 	mid := len(completed) / 2
 
 	// Neither half parses as JSON on its own.
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, completed[:mid], false)
+	resp.SetChunk(completed[:mid])
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, false)
 	assert.NoError(t, err)
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, completed[mid:], false)
+	resp.SetChunk(completed[mid:])
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, false)
 	assert.NoError(t, err)
 	// Final (empty) chunk triggers reassembly and reporting.
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, "", true)
+	resp.SetChunk("")
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, true)
 	assert.NoError(t, err)
 
 	reported.Wait()
@@ -696,12 +700,14 @@ func TestProcessResponseChunk_UsageInPrettyPrintedJSON(t *testing.T) {
   }
 }`
 	mid := len(body) / 2
-
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, body[:mid], false)
+	resp.SetChunk(body[:mid])
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, false)
 	assert.NoError(t, err)
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, body[mid:], false)
+	resp.SetChunk(body[mid:])
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, false)
 	assert.NoError(t, err)
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, "", true)
+	resp.SetChunk("")
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, true)
 	assert.NoError(t, err)
 
 	reported.Wait()
@@ -723,7 +729,8 @@ func TestProcessResponseChunk_NoUsageData(t *testing.T) {
 	resp := requesthandling.NewInferenceResponse()
 
 	// Final chunk with no usage — should not error
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp, "", true)
+	resp.SetChunk("")
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, true)
 	assert.NoError(t, err)
 }
 
@@ -742,8 +749,8 @@ func TestProcessResponseChunk_MissingUsername(t *testing.T) {
 	resp := requesthandling.NewInferenceResponse()
 
 	// No username in CycleState — should skip
-	err = sp.ProcessResponseChunk(context.Background(), cs, resp,
-		`data: {"usage":{"input_tokens":10,"output_tokens":5}}`, true)
+	resp.SetChunk(`data: {"usage":{"input_tokens":10,"output_tokens":5}}`)
+	err = sp.ProcessResponseChunk(context.Background(), cs, resp, true)
 	assert.NoError(t, err)
 }
 
@@ -780,9 +787,12 @@ func TestProcessResponseChunk_ErrorResponseReported(t *testing.T) {
 	errBody := `{"type":"error","error":{"type":"invalid_request_error","message":"context_management: Extra inputs are not permitted"}}`
 	mid := len(errBody) / 2
 
-	require.NoError(t, sp.ProcessResponseChunk(context.Background(), cs, resp, errBody[:mid], false))
-	require.NoError(t, sp.ProcessResponseChunk(context.Background(), cs, resp, errBody[mid:], false))
-	require.NoError(t, sp.ProcessResponseChunk(context.Background(), cs, resp, "", true))
+	resp.SetChunk(errBody[:mid])
+	require.NoError(t, sp.ProcessResponseChunk(context.Background(), cs, resp, false))
+	resp.SetChunk(errBody[mid:])
+	require.NoError(t, sp.ProcessResponseChunk(context.Background(), cs, resp, false))
+	resp.SetChunk("")
+	require.NoError(t, sp.ProcessResponseChunk(context.Background(), cs, resp, true))
 
 	reported.Wait()
 	assert.Equal(t, "inference.request.error", received["type"])

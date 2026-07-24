@@ -336,7 +336,7 @@ func (p *ExternalMeteringStreamingPlugin) ProcessRequest(ctx context.Context, cy
 	return p.processRequest(ctx, cycleState, request)
 }
 
-func (p *ExternalMeteringStreamingPlugin) ProcessResponseChunk(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse, chunk string, isFinal bool) error {
+func (p *ExternalMeteringStreamingPlugin) ProcessResponseChunk(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse, isFinal bool) error {
 	logger := log.FromContext(ctx)
 
 	username, _ := plugin.ReadCycleStateKey[string](cycleState, state.MeteringUsernameKey)
@@ -344,8 +344,8 @@ func (p *ExternalMeteringStreamingPlugin) ProcessResponseChunk(ctx context.Conte
 		return nil
 	}
 
+	chunk := response.CurrentChunk
 	logger.V(logutil.VERBOSE).Info("chunk received", "length", len(chunk), "isFinal", isFinal)
-
 	if chunk != "" {
 		usage := extractUsageFromChunk(chunk)
 		if usage != nil {
