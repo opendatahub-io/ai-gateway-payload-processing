@@ -35,17 +35,23 @@ func main() {
 	// Register ai-gateway payload processing plugins with pluggable bbr
 	plugins.RegisterPlugins()
 
-	if err := runner.NewRunner().
-		WithExecutableName("ai-gateway-payload-processing").
-		WithCustomControllers(
+	r := runner.NewRunner().
+		WithExecutableName("ai-gateway-payload-processing")
+
+	if os.Getenv("DISABLE_EXTERNAL_MODEL_CONTROLLER") != "true" {
+		r = r.WithCustomControllers(
 			providerController(),
 			modelController(
 				os.Getenv("GATEWAY_NAME"),
 				os.Getenv("GATEWAY_NAMESPACE"),
 			),
 			legacyMigrationController(),
-		).
-		Run(ctrl.SetupSignalHandler()); err != nil {
+		)
+	} else {
+		ctrl.Log.WithName("setup").Info("ExternalModel/ExternalProvider controllers disabled via DISABLE_EXTERNAL_MODEL_CONTROLLER=true")
+	}
+
+	if err := r.Run(ctrl.SetupSignalHandler()); err != nil {
 		os.Exit(1)
 	}
 }
