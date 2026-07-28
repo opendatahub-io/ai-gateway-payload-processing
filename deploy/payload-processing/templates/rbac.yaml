@@ -13,7 +13,10 @@ rules:
     verbs: ["get", "list", "watch"]
   # model-provider-resolver plugin: watches ExternalModel and ExternalProvider CRDs
   - apiGroups: ["maas.opendatahub.io"]
-    resources: ["externalmodels"]
+    resources: ["externalmodels", "aitenants"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders", "externalmodels"]
@@ -61,7 +64,10 @@ rules:
     verbs: ["get", "list", "watch"]
   # model-provider-resolver plugin: watches ExternalModel and ExternalProvider CRDs
   - apiGroups: ["maas.opendatahub.io"]
-    resources: ["externalmodels"]
+    resources: ["externalmodels", "aitenants"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders", "externalmodels"]

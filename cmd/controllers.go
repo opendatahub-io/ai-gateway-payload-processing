@@ -45,17 +45,20 @@ func providerController() func(client.Client, *ctrlbuilder.Builder) error {
 }
 
 // modelController returns a setup function that registers the ExternalModel
-// controller. It creates HTTPRoute resources with the specified gateway parent ref.
-func modelController(gatewayName, gatewayNamespace string) func(client.Client, *ctrlbuilder.Builder) error {
+// controller. It creates HTTPRoute resources with the tenant-aware gateway parent ref.
+func modelController(gatewayName, gatewayNamespace, defaultTenantNamespace, aitenantNamespace string, tenantNamespaceDiscoveryEnabled bool) func(client.Client, *ctrlbuilder.Builder) error {
 	return func(c client.Client, b *ctrlbuilder.Builder) error {
 		utilruntime.Must(inferencev1alpha1.AddToScheme(c.Scheme()))
 		utilruntime.Must(gatewayapiv1.Install(c.Scheme()))
 
 		reconciler := &externalmodel.Reconciler{
-			Client:           c,
-			Scheme:           c.Scheme(),
-			GatewayName:      gatewayName,
-			GatewayNamespace: gatewayNamespace,
+			Client:                          c,
+			Scheme:                          c.Scheme(),
+			GatewayName:                     gatewayName,
+			GatewayNamespace:                gatewayNamespace,
+			DefaultTenantNamespace:          defaultTenantNamespace,
+			AITenantNamespace:               aitenantNamespace,
+			TenantNamespaceDiscoveryEnabled: tenantNamespaceDiscoveryEnabled,
 		}
 
 		return b.

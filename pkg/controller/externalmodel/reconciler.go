@@ -50,16 +50,21 @@ const (
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalmodels/finalizers,verbs=update
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders,verbs=get;list;watch
+//+kubebuilder:rbac:groups=maas.opendatahub.io,resources=aitenants,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;delete
 
 // Reconciler watches ExternalModel CRs, resolves the referenced ExternalProvider,
 // and creates an HTTPRoute that routes client traffic to the provider's Service.
 type Reconciler struct {
 	client.Client
-	Scheme           *runtime.Scheme
-	GatewayName      string
-	GatewayNamespace string
-	RouteTimeout     string
+	Scheme                          *runtime.Scheme
+	GatewayName                     string
+	GatewayNamespace                string
+	DefaultTenantNamespace          string
+	AITenantNamespace               string
+	TenantNamespaceDiscoveryEnabled bool
+	RouteTimeout                    string
 }
 
 func (r *Reconciler) gatewayName() string {
@@ -74,6 +79,20 @@ func (r *Reconciler) gatewayNamespace() string {
 		return r.GatewayNamespace
 	}
 	return ctrlcommon.DefaultGatewayNamespace
+}
+
+func (r *Reconciler) defaultTenantNamespace() string {
+	if r.DefaultTenantNamespace != "" {
+		return r.DefaultTenantNamespace
+	}
+	return ctrlcommon.DefaultTenantNamespace
+}
+
+func (r *Reconciler) aitenantNamespace() string {
+	if r.AITenantNamespace != "" {
+		return r.AITenantNamespace
+	}
+	return ctrlcommon.DefaultAITenantNamespace
 }
 
 func (r *Reconciler) routeTimeout() string {
@@ -160,13 +179,31 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 	}
 
 	labels := commonLabels(model.Name)
+	gatewayRef, err := ctrlcommon.ResolveGatewayForNamespace(
+		ctx,
+		r.Client,
+		model.Namespace,
+		r.aitenantNamespace(),
+		r.defaultTenantNamespace(),
+		r.gatewayName(),
+		r.gatewayNamespace(),
+		r.TenantNamespaceDiscoveryEnabled,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve tenant gateway for ExternalModel %s/%s: %w", model.Namespace, model.Name, err)
+	}
+	if gatewayRef.Name == "" || gatewayRef.Namespace == "" {
+		return fmt.Errorf("no gateway resolved for ExternalModel %s/%s", model.Namespace, model.Name)
+	}
+	logger.V(4).Info("Using tenant gateway for ExternalModel", "gateway", fmt.Sprintf("%s/%s", gatewayRef.Namespace, gatewayRef.Name))
+
 	hr := buildHTTPRoute(
 		resolved,
 		model.Name,
 		model.Namespace,
 		ctrlcommon.DefaultTLSPort,
-		r.gatewayName(),
-		r.gatewayNamespace(),
+		gatewayRef.Name,
+		gatewayRef.Namespace,
 		r.routeTimeout(),
 		labels,
 	)

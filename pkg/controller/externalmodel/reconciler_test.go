@@ -380,8 +380,17 @@ func TestBuildHTTPRoute_SingleProvider(t *testing.T) {
 	assert.Equal(t, "my-openai", hr.Spec.Rules[0].Matches[0].Headers[0].Value)
 	assert.Equal(t, "my-openai", string(hr.Spec.Rules[0].BackendRefs[0].Name))
 
+	// Rule 1: BBR — CR name + x-ipp-selected-provider (not targetModel)
+	require.Len(t, hr.Spec.Rules[1].Matches[0].Headers, 2)
+	assert.Equal(t, "X-Gateway-Model-Name", string(hr.Spec.Rules[1].Matches[0].Headers[0].Name))
+	assert.Equal(t, "gpt4", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "x-ipp-selected-provider", string(hr.Spec.Rules[1].Matches[0].Headers[1].Name))
+
 	// Rule 2: fallback path (no provider header)
 	assert.Empty(t, hr.Spec.Rules[2].Matches[0].Headers)
+
+	// Rule 3: fallback BBR — CR name only
+	assert.Equal(t, "gpt4", hr.Spec.Rules[3].Matches[0].Headers[0].Value)
 
 	// Host filter
 	assert.Equal(t, "api.openai.com", hr.Spec.Rules[0].Filters[0].RequestHeaderModifier.Set[0].Value)
@@ -406,7 +415,24 @@ func TestBuildHTTPRoute_MultiProvider(t *testing.T) {
 	assert.Equal(t, "sim-vertex", hr.Spec.Rules[2].Matches[0].Headers[0].Value)
 	assert.Equal(t, "sim-vertex", string(hr.Spec.Rules[2].BackendRefs[0].Name))
 
+	// BBR rules use CR name, not targetModel
+	assert.Equal(t, "claude", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "claude", hr.Spec.Rules[3].Matches[0].Headers[0].Value)
+
 	// Fallback rules (4,5) point to refs[0] (anthropic)
 	assert.Empty(t, hr.Spec.Rules[4].Matches[0].Headers)
 	assert.Equal(t, "anthropic", string(hr.Spec.Rules[4].BackendRefs[0].Name))
+	assert.Equal(t, "claude", hr.Spec.Rules[5].Matches[0].Headers[0].Value)
+}
+
+func TestBuildHTTPRoute_CrNameDiffersFromTargetModel(t *testing.T) {
+	refs := []resolvedRef{{
+		providerName: "my-openai", providerEndpoint: "api.openai.com", targetModel: "facebook/opt-125m",
+	}}
+	hr := buildHTTPRoute(refs, "opt-external", "llm", 443,
+		"default-gateway", "openshift-ingress", "300s", commonLabels("opt-external"))
+
+	// BBR header match must use CR name (what clients send), not upstream targetModel
+	assert.Equal(t, "opt-external", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "opt-external", hr.Spec.Rules[3].Matches[0].Headers[0].Value)
 }
