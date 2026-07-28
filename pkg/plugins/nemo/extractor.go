@@ -37,9 +37,6 @@ import (
 //
 // Returns (nil, nil) when no content is found.
 func extractMessages(body map[string]any, inputFormat apiformat.APIFormat) ([]any, error) {
-	if inputFormat == apiformat.OpenAIResponses {
-		return extractOpenResponsesInput(body)
-	}
 	if raw, ok := body["messages"]; ok {
 		return extractOpenAIMessages(raw)
 	}
@@ -305,7 +302,7 @@ func extractOpenResponsesTextContent(raw any) (string, error) {
 				}
 			}
 		}
-		return strings.Join(parts, ""), nil
+		return strings.Join(parts, " "), nil
 	default:
 		return "", fmt.Errorf("content has unsupported type")
 	}
