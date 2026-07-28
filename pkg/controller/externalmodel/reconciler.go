@@ -317,7 +317,7 @@ func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, port int32,
 			Matches: []gatewayapiv1.HTTPRouteMatch{{
 				Path: &gatewayapiv1.HTTPPathMatch{Type: &pathType, Value: func() *string { s := "/"; return &s }()},
 				Headers: []gatewayapiv1.HTTPHeaderMatch{
-					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: ref.targetModel},
+					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: modelName},
 					{Name: selectedProviderHeader, Type: &headerType, Value: ref.providerName},
 				},
 			}},
@@ -357,7 +357,7 @@ func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, port int32,
 		gatewayapiv1.HTTPRouteRule{
 			Matches: []gatewayapiv1.HTTPRouteMatch{{
 				Headers: []gatewayapiv1.HTTPHeaderMatch{
-					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: refs[0].targetModel},
+					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: modelName},
 				},
 			}},
 			BackendRefs: fallbackBackendRefs,
