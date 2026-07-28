@@ -163,6 +163,7 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 					"original", modelName, "rewritten", parts[1])
 			}
 		}
+		cycleState.Write(requesthandling.SkipResponseBufferingKey, true)
 		return nil
 	}
 
@@ -199,8 +200,22 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.ModelConfigKey, ref.config)
 	cycleState.Write(state.InputAPIFormatKey, inputFormat)
 
+	if isPassthrough(inputFormat, apiformat.APIFormat(ref.apiFormat)) {
+		cycleState.Write(requesthandling.SkipResponseBufferingKey, true)
+	}
+
 	logger.Info("external model resolved", "model", modelName, "provider", ref.provider, "inputFormat", inputFormat, "apiFormat", ref.apiFormat)
 	return nil
+}
+
+func isPassthrough(inputFormat, outputFormat apiformat.APIFormat) bool {
+	if inputFormat == "" || outputFormat == "" {
+		return false
+	}
+	if inputFormat != outputFormat {
+		return false
+	}
+	return inputFormat != apiformat.OpenAIChatCompletions
 }
 
 // detectInputAPIFormat determines the client's API format from the request path suffix.
