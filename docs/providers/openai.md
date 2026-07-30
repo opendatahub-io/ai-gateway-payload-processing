@@ -13,38 +13,51 @@ as the canonical request format, this translator only rewrites the `:path` heade
 | Endpoint | `api.openai.com` |
 | Auth header | `Authorization: Bearer <API_KEY>` |
 | API path | `/v1/chat/completions` |
+| `apiFormat` | `openai-chat` |
 | Request format | OpenAI Chat Completions (pass-through) |
 | Response format | OpenAI Chat Completions (pass-through) |
 
-## ExternalModel Example
+## Example
 
 ```yaml
-apiVersion: maas.opendatahub.io/v1alpha1
-kind: ExternalModel
-metadata:
-  name: my-openai-model
-  namespace: llm
-spec:
-  provider: openai
-  targetModel: gpt-4o-mini
-  endpoint: api.openai.com
-  credentialRef:
-    name: openai-api-key
-```
-
-## Secret Example
-
-```yaml
+---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: openai-api-key
+  name: openai-key
   namespace: llm
   labels:
     inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
   api-key: "sk-proj-..."
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: openai-prod
+  namespace: llm
+spec:
+  provider: openai
+  endpoint: api.openai.com
+  auth:
+    type: apikey
+    secretRef:
+      name: openai-key
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gpt4o
+  namespace: llm
+spec:
+  modelName: gpt-4o
+  externalProviderRefs:
+    - ref:
+        name: openai-prod
+      targetModel: gpt-4o
+      apiFormat: openai-chat
+      path: /v1/chat/completions
 ```
 
 ## How to Get an API Key
@@ -72,10 +85,10 @@ curl -sk "https://api.openai.com/v1/chat/completions" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
 
 # Through MaaS gateway
-curl -sk "https://${GATEWAY_HOST}/llm/my-openai-model/v1/chat/completions" \
+curl -sk "https://${GATEWAY_HOST}/v1/chat/completions" \
   -H "Authorization: Bearer ${MAAS_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
 ```
 
 ## Official Documentation
