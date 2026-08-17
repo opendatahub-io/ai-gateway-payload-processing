@@ -1,6 +1,6 @@
 # Dockerfile has specific requirement to put this ARG at the beginning:
 # https://docs.docker.com/engine/reference/builder/#understand-how-arg-and-from-interact
-ARG GOLANG_VERSION=1.25
+ARG GOLANG_VERSION=1.26
 
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
