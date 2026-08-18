@@ -370,6 +370,7 @@ func TestDetectInputAPIFormat(t *testing.T) {
 		expected apiformat.APIFormat
 	}{
 		{"llm/model/v1/chat/completions", apiformat.OpenAIChatCompletions},
+		{"llm/model/v1/embeddings", apiformat.OpenAIEmbeddings},
 		{"llm/model/v1/messages", apiformat.Messages},
 		{"llm/model/v1/responses", apiformat.OpenAIResponses},
 		{"llm/model/v1/unknown", ""},

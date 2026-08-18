@@ -20,6 +20,7 @@ type APIFormat string
 
 const (
 	OpenAIChatCompletions APIFormat = "openai-chat"
+	OpenAIEmbeddings      APIFormat = "openai-embeddings"
 	Messages              APIFormat = "messages"
 	OpenAIResponses       APIFormat = "openai-responses"
 	VertexMessages        APIFormat = "vertex-messages"

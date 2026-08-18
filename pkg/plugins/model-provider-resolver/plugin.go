@@ -208,6 +208,8 @@ func detectInputAPIFormat(path string) apiformat.APIFormat {
 	switch {
 	case strings.HasSuffix(path, "/v1/chat/completions"), path == "v1/chat/completions":
 		return apiformat.OpenAIChatCompletions
+	case strings.HasSuffix(path, "/v1/embeddings"), path == "v1/embeddings":
+		return apiformat.OpenAIEmbeddings
 	case strings.HasSuffix(path, "/v1/messages"), path == "v1/messages":
 		return apiformat.Messages
 	case strings.HasSuffix(path, "/v1/responses"), path == "v1/responses":
