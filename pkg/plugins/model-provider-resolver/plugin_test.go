@@ -298,6 +298,34 @@ func TestProcessRequest_OpenAIResponses(t *testing.T) {
 	require.Equal(t, apiformat.OpenAIResponses, inputFmt)
 }
 
+func TestProcessRequest_OpenAIEmbeddings(t *testing.T) {
+	store := newInfoStore()
+	store.addOrUpdateModel("bge-m3",
+		&externalModelInfo{modelName: "bge-m3", refs: []*resolvedProviderRef{{
+			provider: provider.OpenAI, targetModel: "bge-m3",
+			apiFormat: apiformat.OpenAIEmbeddings, secretName: "key", secretNamespace: "llm",
+			config: map[string]string{}, weight: 1,
+		}}},
+	)
+
+	instance := &ModelProviderResolverPlugin{store: store}
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers[":path"] = "/llm/bge-m3/v1/embeddings"
+	req.Body["model"] = "bge-m3"
+
+	err := instance.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	inputFmt, err := plugin.ReadCycleStateKey[apiformat.APIFormat](cs, state.InputAPIFormatKey)
+	require.NoError(t, err)
+	require.Equal(t, apiformat.OpenAIEmbeddings, inputFmt)
+
+	apiFormat, err := plugin.ReadCycleStateKey[apiformat.APIFormat](cs, state.APIFormatKey)
+	require.NoError(t, err)
+	require.Equal(t, apiformat.OpenAIEmbeddings, apiFormat)
+}
+
 func TestProcessRequest_UnsupportedPath(t *testing.T) {
 	store := newInfoStore()
 	store.addOrUpdateModel("model",
