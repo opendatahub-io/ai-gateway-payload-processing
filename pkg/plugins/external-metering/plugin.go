@@ -53,19 +53,29 @@ var _ requesthandling.ResponseChunkProcessor = &ExternalMeteringStreamingPlugin{
 // --- Shared config and construction ---
 
 type externalMeteringConfig struct {
-	MeteringURL    string `json:"meteringURL"`
+	MeteringURL    string `json:"meteringURL,omitempty"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 	FeatureKey     string `json:"featureKey,omitempty"`
 	Source         string `json:"source,omitempty"`
 	FailOpen       *bool  `json:"failOpen,omitempty"`
+
+	// Kafka transport (alternative to HTTP for usage reporting).
+	// When set, usage events are published to Kafka instead of HTTP POST.
+	KafkaBrokers    string `json:"kafkaBrokers,omitempty"`
+	KafkaTopic      string `json:"kafkaTopic,omitempty"`
+	KafkaTLSCA      string `json:"kafkaTLSCA,omitempty"`
+	KafkaTLSEnabled *bool  `json:"kafkaTLSEnabled,omitempty"`
+	KafkaSASLUser     string `json:"kafkaSASLUser,omitempty"`
+	KafkaSASLPassFile string `json:"kafkaSASLPassFile,omitempty"`
 }
 
 type meteringBase struct {
-	typedName  plugin.TypedName
-	client     *meteringClient
-	featureKey string
-	source     string
-	failOpen   bool
+	typedName      plugin.TypedName
+	reporter       usageReporter
+	balanceChecker *meteringClient
+	featureKey     string
+	source         string
+	failOpen       bool
 }
 
 func parseConfig(pluginType string, rawParameters json.RawMessage) (*meteringBase, error) {
@@ -83,8 +93,8 @@ func parseConfig(pluginType string, rawParameters json.RawMessage) (*meteringBas
 		}
 	}
 
-	if config.MeteringURL == "" {
-		return nil, fmt.Errorf("'meteringURL' is required for '%s' plugin", pluginType)
+	if config.MeteringURL == "" && config.KafkaBrokers == "" {
+		return nil, fmt.Errorf("either 'meteringURL' or 'kafkaBrokers' is required for '%s' plugin", pluginType)
 	}
 
 	if config.FeatureKey == "" {
@@ -94,16 +104,44 @@ func parseConfig(pluginType string, rawParameters json.RawMessage) (*meteringBas
 		config.Source = defaultSource
 	}
 
-	return &meteringBase{
+	base := &meteringBase{
 		typedName: plugin.TypedName{
 			Type: pluginType,
 			Name: pluginType,
 		},
-		client:     newMeteringClient(config.MeteringURL, config.TimeoutSeconds),
 		featureKey: config.FeatureKey,
 		source:     config.Source,
 		failOpen:   config.FailOpen == nil || *config.FailOpen,
-	}, nil
+	}
+
+	if config.KafkaBrokers != "" {
+		kafkaTLSEnabled := true
+		if config.KafkaTLSEnabled != nil {
+			kafkaTLSEnabled = *config.KafkaTLSEnabled
+		}
+		reporter, err := newKafkaReporter(kafkaConfig{
+			Brokers:    config.KafkaBrokers,
+			Topic:      config.KafkaTopic,
+			TLSCACert:  config.KafkaTLSCA,
+			SASLUser:   config.KafkaSASLUser,
+			SASLPassFile: config.KafkaSASLPassFile,
+			TLSEnabled: kafkaTLSEnabled,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating Kafka reporter for '%s' plugin: %w", pluginType, err)
+		}
+		base.reporter = reporter
+	}
+
+	if config.MeteringURL != "" {
+		httpClient := newMeteringClient(config.MeteringURL, config.TimeoutSeconds)
+		base.balanceChecker = httpClient
+		if base.reporter == nil {
+			base.reporter = &httpReporter{client: httpClient}
+		}
+	}
+
+	return base, nil
 }
 
 // processRequest is the shared request-side logic: read identity from maas-headers
@@ -177,22 +215,24 @@ func (b *meteringBase) processRequest(ctx context.Context, cycleState *plugin.Cy
 	cycleState.Write(state.MeteringUserAgentKey, userAgent)
 	cycleState.Write(state.MeteringRequestTimeKey, time.Now())
 
-	result, err := b.client.checkBalance(ctx, username, b.featureKey, model)
-	if err != nil {
-		if b.failOpen {
-			logger.Error(err, "metering balance check failed (fail-open), allowing request")
-			return nil
+	if b.balanceChecker != nil {
+		result, err := b.balanceChecker.checkBalance(ctx, username, b.featureKey, model)
+		if err != nil {
+			if b.failOpen {
+				logger.Error(err, "metering balance check failed (fail-open), allowing request")
+				return nil
+			}
+			logger.Error(err, "metering balance check failed (fail-closed)")
+			return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "metering system unavailable"}
 		}
-		logger.Error(err, "metering balance check failed (fail-closed)")
-		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "metering system unavailable"}
-	}
 
-	if !result.HasAccess {
-		logger.Info("request blocked by metering", "customer", username, "balance", result.Balance)
-		return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: "token budget exhausted"}
-	}
+		if !result.HasAccess {
+			logger.Info("request blocked by metering", "customer", username, "balance", result.Balance)
+			return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: "token budget exhausted"}
+		}
 
-	logger.V(logutil.VERBOSE).Info("metering check passed", "balance", result.Balance)
+		logger.V(logutil.VERBOSE).Info("metering check passed", "balance", result.Balance)
+	}
 
 	// Strip Accept-Encoding so the upstream sends uncompressed SSE responses.
 	// The chunk processor needs plain text to extract usage data from streaming responses.
@@ -276,7 +316,7 @@ func (b *meteringBase) reportUsageEvent(ctx context.Context, cycleState *plugin.
 		return
 	}
 
-	if reportErr := b.client.reportUsage(ctx, eventJSON); reportErr != nil {
+	if reportErr := b.reporter.reportUsage(ctx, eventJSON); reportErr != nil {
 		logger.Error(reportErr, "failed to report usage to metering system")
 	} else {
 		logger.V(logutil.VERBOSE).Info("usage reported", "model", model, "tokens", totalTokens)
@@ -508,12 +548,12 @@ func (b *meteringBase) reportErrorEvent(ctx context.Context, cycleState *plugin.
 			"organization_id": organizationID,
 			"cost_center":     costCenter,
 			"provider":        provider,
-			"model":           model,
-			"status_code":     errorInfo["status_code"],
-			"error_type":      errorInfo["error_type"],
-			"error_message":   errorInfo["error_message"],
-			"duration_ms":     durationMs,
-			"user_agent":      userAgent,
+			"model":         model,
+			"status_code":   errorInfo["status_code"],
+			"error_type":    errorInfo["error_type"],
+			"error_message": errorInfo["error_message"],
+			"duration_ms":   durationMs,
+			"user_agent":    userAgent,
 		},
 	}
 
@@ -523,7 +563,7 @@ func (b *meteringBase) reportErrorEvent(ctx context.Context, cycleState *plugin.
 		return
 	}
 
-	if reportErr := b.client.reportUsage(ctx, eventJSON); reportErr != nil {
+	if reportErr := b.reporter.reportUsage(ctx, eventJSON); reportErr != nil {
 		logger.Error(reportErr, "failed to report error event to metering system")
 	} else {
 		logger.Info("error event reported", "customer", username, "model", model, "errorType", errorInfo["error_type"])
