@@ -31,6 +31,8 @@ import (
 const (
 	// NemoRequestGuardPluginType is the plugin type identifier.
 	NemoRequestGuardPluginType = "nemo-request-guard"
+
+	phaseRequest = "request"
 )
 
 // compile-time type validation
@@ -95,8 +97,9 @@ func (p *NemoRequestGuardPlugin) WithName(name string) *NemoRequestGuardPlugin {
 //
 // NeMo always returns HTTP 200 for both allowed and blocked requests. The decision is
 // conveyed through the response body "status" field: "passed" means the request passed
-// all rails, "modified" means content was redacted (currently passed through as-is),
-// and "blocked" means the request is blocked.
+// all rails, "modified" means content was redacted and the plugin replaces all message
+// contents with the redacted versions from NeMo, and "blocked" means the request is
+// blocked.
 func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	model, ok := request.Body["model"].(string)
 	if !ok {
@@ -111,8 +114,6 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *plugin.C
 		return nil // no messages to check (e.g. non-chat request) → allow
 	}
 
-	// "model" field is required by the NeMo OpenAI-compatible API schema but is not used.
-	// the guard model is defined in NeMo's config.yml.
 	reqBody := map[string]any{
 		"model":    model,
 		"messages": messages,
@@ -122,12 +123,33 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *plugin.C
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("marshal request: %v", err)}
 	}
 
-	code, callErr := p.callNemoGuard(ctx, payload)
+	result, callErr := p.callNemoGuard(ctx, payload, phaseRequest)
 	if callErr != nil {
-		if code == errcommon.Forbidden {
-			return errcommon.Error{Code: code, Msg: "request blocked by NeMo guardrails"}
+		return callErr
+	}
+
+	if result.Action == nemoStatusModified {
+		if err := applyRedactedMessages(request.Body, result.ModifiedTexts); err != nil {
+			return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to apply redacted content: %v", err)}
 		}
-		return errcommon.Error{Code: code, Msg: callErr.Error()}
+		request.SetBody(request.Body)
+	}
+	return nil
+}
+
+// applyRedactedMessages replaces the content of each message in the request body
+// with the corresponding redacted text from NeMo.
+func applyRedactedMessages(body map[string]any, redactedTexts []string) error {
+	msgs, ok := body["messages"].([]any)
+	if !ok {
+		return fmt.Errorf("messages field is not an array")
+	}
+	for i, redacted := range redactedTexts {
+		msg, ok := msgs[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		msg["content"] = redacted
 	}
 	return nil
 }

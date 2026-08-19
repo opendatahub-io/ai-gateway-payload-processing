@@ -37,6 +37,35 @@ func nemoAllowedJSON() map[string]any {
 	return map[string]any{"status": "passed"}
 }
 
+// nemoModifiedJSON builds a NeMo response with status "modified" and the given
+// redacted texts in guardrails_data, matching the real NeMo response shape.
+// Each text corresponds to a mask_sensitive_data action for one message.
+func nemoModifiedJSON(texts ...string) map[string]any {
+	rails := make([]any, 0, len(texts))
+	for _, text := range texts {
+		rails = append(rails, map[string]any{
+			"name": "mask sensitive data on input",
+			"executed_actions": []any{
+				map[string]any{
+					"action_name":  "mask_sensitive_data",
+					"return_value": text,
+				},
+			},
+		})
+	}
+	return map[string]any{
+		"status": "modified",
+		"rails_status": map[string]any{
+			"mask sensitive data on input": map[string]any{"status": "modified"},
+		},
+		"guardrails_data": map[string]any{
+			"log": map[string]any{
+				"activated_rails": rails,
+			},
+		},
+	}
+}
+
 // --- NewNemoRequestGuardPlugin construction ---
 
 func TestNewNemoRequestGuardPlugin(t *testing.T) {
@@ -115,7 +144,17 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "allow: NeMo returns status modified — passed through (redaction not yet applied)",
+			name: "redact: NeMo returns modified with redacted content",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(nemoModifiedJSON("My email is <EMAIL_ADDRESS>")); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:    map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "My email is test@example.com"}}},
+			wantErr: false,
+		},
+		{
+			name: "fail-closed: NeMo returns modified but no redacted content in guardrails_data",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewEncoder(w).Encode(map[string]any{
 					"status": "modified",
@@ -126,8 +165,10 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 				}
 			},
-			body:    map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "My email is test@example.com"}}},
-			wantErr: false,
+			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "My email is test@example.com"}}},
+			wantErr:         true,
+			wantErrContains: "no redacted content found",
+			wantErrCode:     errcommon.Internal,
 		},
 		{
 			name: "fail-closed: unknown status — status allowed is rejected",
@@ -606,6 +647,101 @@ func TestExtractMessages(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// --- Redaction ---
+
+func TestNemoRequestGuardRedaction(t *testing.T) {
+	tests := []struct {
+		name            string
+		nemoResp        map[string]any
+		body            map[string]any
+		wantErr         bool
+		wantErrContains string
+		wantContents    []string // expected content for each message after redaction
+	}{
+		{
+			name:     "redacted content replaces all messages",
+			nemoResp: nemoModifiedJSON("You are helpful", "Hi, my name is <PERSON> and my email is <EMAIL_ADDRESS>"),
+			body: map[string]any{
+				"model": "gpt-4",
+				"messages": []any{
+					map[string]any{"role": "system", "content": "You are helpful"},
+					map[string]any{"role": "user", "content": "Hi, my name is Rob Geada and my email is rgeada@redhat.com"},
+				},
+			},
+			wantContents: []string{"You are helpful", "Hi, my name is <PERSON> and my email is <EMAIL_ADDRESS>"},
+		},
+		{
+			name:     "multi-turn: all messages replaced with NeMo output",
+			nemoResp: nemoModifiedJSON("Hello", "Hi there", "My SSN is <SSN>"),
+			body: map[string]any{
+				"model": "gpt-4",
+				"messages": []any{
+					map[string]any{"role": "user", "content": "Hello"},
+					map[string]any{"role": "assistant", "content": "Hi there"},
+					map[string]any{"role": "user", "content": "My SSN is 123-45-6789"},
+				},
+			},
+			wantContents: []string{"Hello", "Hi there", "My SSN is <SSN>"},
+		},
+		{
+			name:     "model and other fields preserved after redaction",
+			nemoResp: nemoModifiedJSON("You are helpful", "redacted text"),
+			body: map[string]any{
+				"model":      "gpt-4",
+				"max_tokens": float64(100),
+				"messages": []any{
+					map[string]any{"role": "system", "content": "You are helpful"},
+					map[string]any{"role": "user", "content": "original text"},
+				},
+			},
+			wantContents: []string{"You are helpful", "redacted text"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(tt.nemoResp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			}))
+			defer srv.Close()
+
+			p, err := NewNemoRequestGuardPlugin(srv.URL, 30)
+			require.NoError(t, err)
+
+			req := requesthandling.NewInferenceRequest()
+			for k, v := range tt.body {
+				req.Body[k] = v
+			}
+
+			err = p.ProcessRequest(context.Background(), plugin.NewCycleState(), req)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrContains != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+			require.NoError(t, err)
+
+			if len(tt.wantContents) > 0 {
+				msgs := req.Body["messages"].([]any)
+				require.Len(t, msgs, len(tt.wantContents))
+				for i, want := range tt.wantContents {
+					msg := msgs[i].(map[string]any)
+					assert.Equal(t, want, msg["content"], "message[%d] content mismatch", i)
+				}
+			}
+
+			if model, ok := tt.body["model"]; ok {
+				assert.Equal(t, model, req.Body["model"])
+			}
 		})
 	}
 }
