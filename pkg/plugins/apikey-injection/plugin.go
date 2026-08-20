@@ -53,7 +53,7 @@ var _ requesthandling.RequestProcessor = &ApiKeyInjectionPlugin{}
 
 // APIKeyInjectionFactory defines the factory function for ApiKeyInjectionPlugin.
 func APIKeyInjectionFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	plugin, err := NewAPIKeyInjectionPlugin(handle.Context(), handle.ReconcilerBuilder, handle.Client())
+	plugin, err := NewAPIKeyInjectionPlugin(handle.Context(), handle.ReconcilerBuilder)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", APIKeyInjectionPluginType, err)
 	}
@@ -64,19 +64,26 @@ func APIKeyInjectionFactory(name string, _ json.RawMessage, handle plugin.Handle
 // NewAPIKeyInjectionPlugin creates a new apiKeyInjectionPlugin and returns its pointer.
 // It sets up a label-filtered informer cache so only Secrets matching the
 // ipp-managed label are listed from the API server.
-func NewAPIKeyInjectionPlugin(ctx context.Context, reconcilerBuilder func() *builder.Builder, clientReader client.Reader) (*ApiKeyInjectionPlugin, error) {
+func NewAPIKeyInjectionPlugin(ctx context.Context, reconcilerBuilder func() *builder.Builder) (*ApiKeyInjectionPlugin, error) {
 	cacheCtx, cancel := context.WithCancel(ctx)
 
 	store := newSecretStore()
-	reconciler := &secretReconciler{
-		Reader: clientReader,
-		store:  store,
-	}
 
 	filteredCache, err := newFilteredSecretCache(cacheCtx)
 	if err != nil {
 		cancel()
 		return nil, err
+	}
+
+	// The reconciler must read from the same cache that produces its watch
+	// events. Reading through a second cache (e.g. the manager client) races
+	// it: a Get served before that cache observes a just-created Secret
+	// returns NotFound, and the reconciler drops the Secret from the store
+	// without a requeue — credentials then stay missing for the Secret's
+	// lifetime.
+	reconciler := &secretReconciler{
+		Reader: filteredCache,
+		store:  store,
 	}
 
 	var secretObj client.Object = &corev1.Secret{}

@@ -39,28 +39,14 @@ AWS re:Invent in late 2025. Key differences from Bedrock Runtime:
 | Endpoint | `bedrock-mantle.{region}.api.aws` (e.g., `bedrock-mantle.us-east-2.api.aws`) |
 | Auth header | `Authorization: Bearer <BEDROCK_API_KEY>` |
 | API path | `/v1/chat/completions` |
+| `apiFormat` | `openai-chat` |
 | Request format | OpenAI Chat Completions (pass-through) |
 | Response format | OpenAI Chat Completions (pass-through) |
 
-## ExternalModel Example
+## Example
 
 ```yaml
-apiVersion: maas.opendatahub.io/v1alpha1
-kind: ExternalModel
-metadata:
-  name: my-bedrock-model
-  namespace: llm
-spec:
-  provider: bedrock-openai
-  targetModel: openai.gpt-oss-20b
-  endpoint: bedrock-mantle.us-east-2.api.aws
-  credentialRef:
-    name: bedrock-api-key
-```
-
-## Secret Example
-
-```yaml
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -71,6 +57,33 @@ metadata:
 type: Opaque
 stringData:
   api-key: "<BEDROCK_API_KEY>"
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: bedrock-prod
+  namespace: llm
+spec:
+  provider: bedrock-openai
+  endpoint: bedrock-mantle.us-east-2.api.aws
+  auth:
+    type: apikey
+    secretRef:
+      name: bedrock-api-key
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: my-bedrock-model
+  namespace: llm
+spec:
+  modelName: openai.gpt-oss-20b
+  externalProviderRefs:
+    - ref:
+        name: bedrock-prod
+      targetModel: openai.gpt-oss-20b
+      apiFormat: openai-chat
+      path: /v1/chat/completions
 ```
 
 ## How to Get a Bedrock API Key

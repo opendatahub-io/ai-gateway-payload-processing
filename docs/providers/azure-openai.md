@@ -15,6 +15,7 @@ in responses that the translator strips.
 | Endpoint | `<deployment>.openai.azure.com` (e.g., `testing-azure1.openai.azure.com`) |
 | Auth header | `api-key: <API_KEY>` (NOT Authorization: Bearer) |
 | API path | `/openai/v1/chat/completions` |
+| `apiFormat` | `openai-chat` |
 | Request format | OpenAI Chat Completions (pass-through) |
 | Response format | Azure-specific fields stripped (`content_filter_results`, `prompt_filter_results`) |
 
@@ -27,25 +28,10 @@ Azure adds provider-specific fields to responses that are not part of the OpenAI
 
 The translator removes these fields, returning a clean OpenAI-compatible response.
 
-## ExternalModel Example
+## Example
 
 ```yaml
-apiVersion: maas.opendatahub.io/v1alpha1
-kind: ExternalModel
-metadata:
-  name: my-azure-model
-  namespace: llm
-spec:
-  provider: azure-openai
-  targetModel: gpt-4.1-mini
-  endpoint: testing-azure1.openai.azure.com
-  credentialRef:
-    name: azure-api-key
-```
-
-## Secret Example
-
-```yaml
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -56,6 +42,33 @@ metadata:
 type: Opaque
 stringData:
   api-key: "<AZURE_API_KEY>"
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: azure-prod
+  namespace: llm
+spec:
+  provider: azure-openai
+  endpoint: testing-azure1.openai.azure.com
+  auth:
+    type: apikey
+    secretRef:
+      name: azure-api-key
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: my-azure-model
+  namespace: llm
+spec:
+  modelName: gpt-4.1-mini
+  externalProviderRefs:
+    - ref:
+        name: azure-prod
+      targetModel: gpt-4.1-mini
+      apiFormat: openai-chat
+      path: /openai/v1/chat/completions
 ```
 
 ## How to Get an API Key

@@ -6,7 +6,7 @@ Configuration guides for each supported external model provider.
 |----------|-------------|------------|------|-------|
 | [OpenAI](openai.md) | `openai-chat` | Pass-through | `Authorization: Bearer` | [openai.md](openai.md) |
 | [Anthropic](anthropic.md) | `messages` | OpenAI ↔ Messages API | `x-api-key` | [anthropic.md](anthropic.md) |
-| [AWS Bedrock](bedrock-openai.md) | `openai-chat` | Pass-through | SigV4 | [bedrock-openai.md](bedrock-openai.md) |
+| [AWS Bedrock](bedrock-openai.md) | `openai-chat` | Pass-through | `Authorization: Bearer` (Mantle API key) | [bedrock-openai.md](bedrock-openai.md) |
 | [Azure OpenAI](azure-openai.md) | `openai-chat` | Path rewrite | `api-key` | [azure-openai.md](azure-openai.md) |
 | [Vertex AI (Gemini)](vertex-openai.md) | `openai-chat` | Path rewrite + OAuth2 | Bearer (OAuth2) | [vertex-openai.md](vertex-openai.md) |
 | [Vertex AI (Claude)](vertex-anthropic.md) | `vertex-messages` | OpenAI → Anthropic + Vertex | Bearer (OAuth2) | [vertex-anthropic.md](vertex-anthropic.md) |

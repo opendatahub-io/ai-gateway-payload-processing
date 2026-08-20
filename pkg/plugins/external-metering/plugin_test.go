@@ -258,6 +258,56 @@ func TestProcessResponse_ReportsUsage(t *testing.T) {
 	assert.Equal(t, float64(230), data["total_tokens"])
 }
 
+func TestProcessResponse_IncludesUserAgent(t *testing.T) {
+	var received map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&received)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := newTestPlugin(t, srv.URL, true)
+	cs := plugin.NewCycleState()
+	cs.Write(state.MeteringUsernameKey, "yossi")
+	cs.Write(state.MeteringGroupKey, "ai-eng")
+	cs.Write(state.MeteringSubscriptionKey, "ai-eng")
+	cs.Write(state.MeteringModelKey, "claude-opus-4-8")
+	cs.Write(state.MeteringUserAgentKey, "claude-cli/2.1.199 (external, cli)")
+
+	resp := newTestResponse(100, 50, 150)
+	err := p.ProcessResponse(context.Background(), cs, resp)
+	require.NoError(t, err)
+
+	require.NotNil(t, received)
+	data, ok := received["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "claude-cli/2.1.199 (external, cli)", data["user_agent"])
+	assert.Equal(t, "yossi", data["user"])
+}
+
+func TestProcessRequest_CapturesUserAgent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"hasAccess":true,"balance":9000,"usage":1000,"overage":0}`))
+	}))
+	defer srv.Close()
+
+	p := newTestPlugin(t, srv.URL, true)
+	cs := plugin.NewCycleState()
+	req := newTestRequest("alice", "finance", "premium", "gpt-4o", false)
+	req.Headers["user-agent"] = "undici"
+
+	err := p.ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	ua, _ := plugin.ReadCycleStateKey[string](cs, state.MeteringUserAgentKey)
+	assert.Equal(t, "undici", ua)
+}
+
 func TestProcessResponse_MissingUsage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

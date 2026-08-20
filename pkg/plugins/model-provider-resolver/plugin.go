@@ -148,6 +148,16 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 		modelName = model
 	}
 
+	// Record the client's API format for every inference request on a
+	// recognized path — even when no ExternalModel matches — so downstream
+	// consumers (e.g. passthrough-profile-picker) can distinguish an
+	// internal-model request from a request this plugin never processed.
+	relativePath := sanitizePath(request.Headers[":path"])
+	inputFormat := detectInputAPIFormat(relativePath)
+	if inputFormat != "" {
+		cycleState.Write(state.InputAPIFormatKey, inputFormat)
+	}
+
 	modelInfo, found := p.store.getModelByName(modelName)
 	if !found {
 		// LLMISvc BBR: client sent publisher ID (publishers/{ns}/models/{name}) in body,
@@ -168,8 +178,6 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	logger.Info("resolved model by name", "modelName", modelName)
 
-	relativePath := sanitizePath(request.Headers[":path"])
-	inputFormat := detectInputAPIFormat(relativePath)
 	if inputFormat == "" {
 		logger.Error(nil, "unsupported API path for external model", "model", modelName, "path", relativePath)
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "unsupported API endpoint"}
@@ -197,7 +205,6 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.CredsRefName, ref.secretName)
 	cycleState.Write(state.CredsRefNamespace, ref.secretNamespace)
 	cycleState.Write(state.ModelConfigKey, ref.config)
-	cycleState.Write(state.InputAPIFormatKey, inputFormat)
 
 	logger.Info("external model resolved", "model", modelName, "provider", ref.provider, "inputFormat", inputFormat, "apiFormat", ref.apiFormat)
 	return nil
@@ -208,6 +215,8 @@ func detectInputAPIFormat(path string) apiformat.APIFormat {
 	switch {
 	case strings.HasSuffix(path, "/v1/chat/completions"), path == "v1/chat/completions":
 		return apiformat.OpenAIChatCompletions
+	case strings.HasSuffix(path, "/v1/embeddings"), path == "v1/embeddings":
+		return apiformat.OpenAIEmbeddings
 	case strings.HasSuffix(path, "/v1/messages"), path == "v1/messages":
 		return apiformat.Messages
 	case strings.HasSuffix(path, "/v1/responses"), path == "v1/responses":

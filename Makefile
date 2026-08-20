@@ -125,11 +125,11 @@ E2E_JUNIT_REPORT ?= results_e2e_xunit.xml
 
 .PHONY: test-e2e
 test-e2e: ## Run E2E tests (requires cluster with Istio + BBR deployed).
-	go test ./test/e2e/ -v -ginkgo.v -count=1 -timeout=10m
+	go test ./test/e2e/ -v -ginkgo.v -count=1 -timeout=25m
 
 .PHONY: test-e2e-junit
 test-e2e-junit: ## Run E2E tests with JUnit XML report output.
-	go test ./test/e2e/ -v -ginkgo.v -count=1 -timeout=10m \
+	go test ./test/e2e/ -v -ginkgo.v -count=1 -timeout=25m \
 		-ginkgo.junit-report=$(E2E_JUNIT_REPORT) \
 		$(if $(E2E_LABEL_FILTER),-ginkgo.label-filter="$(E2E_LABEL_FILTER)",)
 

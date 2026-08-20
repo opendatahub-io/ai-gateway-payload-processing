@@ -46,7 +46,7 @@ spec:
 | Type | Description | Secret fields |
 |------|-------------|--------------|
 | `apikey` | HTTP header auth (API key) | `api-key` |
-| `sigv4` | AWS SigV4 request signing | `access-key`, `secret-key`, `session-token` (optional) |
+| `sigv4` | AWS SigV4 request signing | `aws-access-key-id`, `aws-secret-access-key`, `aws-session-token` (optional) |
 | `oauth2` | GCP service account → OAuth2 Bearer token | `gcp-service-account-json` |
 | `none` | Strip client auth, inject nothing (mTLS routes) | — |
 
@@ -117,6 +117,11 @@ Controls which translator the gateway applies:
 | `openai-chat` | OpenAI Chat Completions | Path rewrite only (same format) |
 | `messages` | Anthropic Messages API | OpenAI → Anthropic body conversion |
 | `vertex-messages` | Vertex AI Anthropic | OpenAI → Anthropic + Vertex-specific adjustments |
+
+> **The OpenAI Responses API (`/v1/responses`) is not supported for external models.**
+> No translator is registered for it, so a request routed to it fails with
+> `unsupported format combination`. Use `openai-chat` (Chat Completions) instead.
+> These three values are the only supported `apiFormat` inputs today.
 
 ### `path` and config placeholders
 
