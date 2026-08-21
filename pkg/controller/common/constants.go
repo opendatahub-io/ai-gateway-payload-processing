@@ -24,5 +24,7 @@ const (
 
 	DefaultGatewayName      = "maas-default-gateway"
 	DefaultGatewayNamespace = "openshift-ingress"
+	DefaultTenantNamespace  = "models-as-a-service"
+	DefaultAITenantNamespace = "ai-tenants"
 	DefaultRouteTimeout     = "300s"
 )

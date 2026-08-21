@@ -24,12 +24,33 @@ package main
 
 import (
 	"os"
+	"strconv"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"github.com/llm-d/llm-d-inference-payload-processor/cmd/runner"
 
+	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins"
 )
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
 
 func main() {
 	// Register ai-gateway payload processing plugins with pluggable bbr
@@ -42,8 +63,11 @@ func main() {
 		r = r.WithCustomControllers(
 			providerController(),
 			modelController(
-				os.Getenv("GATEWAY_NAME"),
-				os.Getenv("GATEWAY_NAMESPACE"),
+				envOr("GATEWAY_NAME", ctrlcommon.DefaultGatewayName),
+				envOr("GATEWAY_NAMESPACE", ctrlcommon.DefaultGatewayNamespace),
+				envOr("DEFAULT_TENANT_NAMESPACE", ctrlcommon.DefaultTenantNamespace),
+				envOr("AITENANT_NAMESPACE", ctrlcommon.DefaultAITenantNamespace),
+				envBool("ENABLE_TENANT_NAMESPACE_DISCOVERY", true),
 			),
 			legacyMigrationController(),
 		)
