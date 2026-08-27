@@ -70,6 +70,12 @@ func (p *Plugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleSta
 		logger.Info("internal header captured and stripped", "header", key)
 	}
 
+	// Strip client auth credentials so they never reach the upstream model.
+	// For ExternalModels, apikey-injection re-adds the provider credential later.
+	// For internal models (LLMISvc), no credential is needed (mTLS handles auth).
+	request.RemoveHeader("authorization")
+	request.RemoveHeader("x-api-key")
+
 	cycleState.Write(MaaSHeadersKey, captured)
 
 	return nil

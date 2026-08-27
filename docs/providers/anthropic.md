@@ -14,6 +14,7 @@ translation, and usage field mapping.
 | Endpoint | `api.anthropic.com` |
 | Auth header | `x-api-key: <API_KEY>` (NOT Bearer token) |
 | API path | `/v1/messages` |
+| `apiFormat` | `messages` |
 | Request format | Translated from OpenAI to Anthropic Messages API |
 | Response format | Translated from Anthropic back to OpenAI format |
 
@@ -35,35 +36,47 @@ translation, and usage field mapping.
 - Tool use blocks converted to OpenAI `tool_calls` format
 - Error responses translated to OpenAI error format
 
-## ExternalModel Example
+## Example
 
 ```yaml
-apiVersion: maas.opendatahub.io/v1alpha1
-kind: ExternalModel
-metadata:
-  name: my-anthropic-model
-  namespace: llm
-spec:
-  provider: anthropic
-  targetModel: claude-haiku-4-5-20251001
-  endpoint: api.anthropic.com
-  credentialRef:
-    name: anthropic-api-key
-```
-
-## Secret Example
-
-```yaml
+---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: anthropic-api-key
+  name: anthropic-key
   namespace: llm
   labels:
     inference.llm-d.ai/ipp-managed: "true"
 type: Opaque
 stringData:
-  api-key: "sk-ant-api03-..."
+  api-key: "sk-ant-..."
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: anthropic-prod
+  namespace: llm
+spec:
+  provider: anthropic
+  endpoint: api.anthropic.com
+  auth:
+    type: apikey
+    secretRef:
+      name: anthropic-key
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: claude
+  namespace: llm
+spec:
+  modelName: claude-sonnet
+  externalProviderRefs:
+    - ref:
+        name: anthropic-prod
+      targetModel: claude-sonnet-4-20250514
+      apiFormat: messages
+      path: /v1/messages
 ```
 
 ## How to Get an API Key
@@ -84,7 +97,7 @@ Full list: https://docs.anthropic.com/en/docs/about-claude/models
 
 - `frequency_penalty`, `presence_penalty`, `logprobs`, `n`, `response_format`, `seed` are silently
   dropped (Anthropic doesn't support these parameters)
-- Multimodal content (images) is extracted as text-only; full multimodal support is tracked separately
+- `anthropic-beta` header passes through unchanged — Claude Code Tool Search (`anthropic-beta: tool-search-tool-2025-10-19`) works natively through the gateway
 
 ## Testing
 
@@ -94,13 +107,13 @@ curl -sk "https://api.anthropic.com/v1/messages" \
   -H "x-api-key: <YOUR_API_KEY>" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-haiku-4-5-20251001","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
+  -d '{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
 
 # Through MaaS gateway (OpenAI format — translated automatically)
-curl -sk "https://${GATEWAY_HOST}/llm/my-anthropic-model/v1/chat/completions" \
+curl -sk "https://${GATEWAY_HOST}/v1/chat/completions" \
   -H "Authorization: Bearer ${MAAS_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-haiku-4-5-20251001","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
+  -d '{"model":"claude-sonnet","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
 ```
 
 ## Official Documentation

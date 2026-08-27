@@ -9,7 +9,7 @@
 #     -v $(pwd)/results:/results \
 #     quay.io/opendatahub/ai-gateway-payload-processing-e2e:latest
 
-ARG GOLANG_VERSION=1.25
+ARG GOLANG_VERSION=1.26
 
 ## Stage 1: Build the test binary and download kubectl
 FROM registry.access.redhat.com/ubi9/go-toolset:$GOLANG_VERSION AS builder

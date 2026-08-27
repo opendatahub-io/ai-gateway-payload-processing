@@ -108,10 +108,10 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 		wantErrCode     string
 	}{
 		{
-			name: "allow: NeMo returns status passed",
+			name: "allow: NeMo returns status success",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewEncoder(w).Encode(map[string]any{
-					"status": "passed",
+					"status": "success",
 					"rails_status": map[string]any{
 						"output-rail": map[string]any{"status": "passed"},
 					},
@@ -138,9 +138,9 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "fail-closed: unknown status — status success is no longer recognized",
+			name: "fail-closed: legacy passed status is no longer recognized",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewEncoder(w).Encode(map[string]any{"status": "success"}); err != nil {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "passed"}); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 				}
 			},
@@ -189,6 +189,33 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 			wantErr:         true,
 			wantErrContains: forbiddenMsg,
 			wantErrCode:     errcommon.Forbidden,
+		},
+		{
+			name: "error: NeMo returns status error with guardrails_data",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{
+					"status":          "error",
+					"guardrails_data": map[string]any{"error": "Internal error occurred during rail execution"},
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:            validResponseBody("Hello"),
+			wantErr:         true,
+			wantErrContains: "nemo guardrails error",
+			wantErrCode:     errcommon.ServiceUnavailable,
+		},
+		{
+			name: "error: NeMo returns status error without guardrails_data",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "error"}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:            validResponseBody("Hello"),
+			wantErr:         true,
+			wantErrContains: "nemo guardrails error: unspecified error",
+			wantErrCode:     errcommon.ServiceUnavailable,
 		},
 		{
 			name: "fail-closed: NeMo returns refusal-style text only (no status)",

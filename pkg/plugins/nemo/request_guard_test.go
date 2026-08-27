@@ -34,7 +34,7 @@ import (
 
 // nemoAllowedJSON is a minimal NeMo guard response that means “allow”.
 func nemoAllowedJSON() map[string]any {
-	return map[string]any{"status": "passed"}
+	return map[string]any{"status": "success"}
 }
 
 // --- NewNemoRequestGuardPlugin construction ---
@@ -100,10 +100,10 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 		wantErrCode     string
 	}{
 		{
-			name: "allow: NeMo returns top-level status passed",
+			name: "allow: NeMo returns top-level status success",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewEncoder(w).Encode(map[string]any{
-					"status": "passed",
+					"status": "success",
 					"rails_status": map[string]any{
 						"rail-a": map[string]any{"status": "passed"},
 					},
@@ -142,9 +142,9 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			wantErrCode:     errcommon.Internal,
 		},
 		{
-			name: "fail-closed: legacy success status is no longer recognized",
+			name: "fail-closed: legacy passed status is no longer recognized",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewEncoder(w).Encode(map[string]any{"status": "success"}); err != nil {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "passed"}); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 				}
 			},
@@ -194,6 +194,33 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			wantErr:         true,
 			wantErrContains: forbiddenMsg,
 			wantErrCode:     errcommon.Forbidden,
+		},
+		{
+			name: "error: NeMo returns status error with guardrails_data",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{
+					"status":          "error",
+					"guardrails_data": map[string]any{"error": "Internal error occurred during rail execution"},
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
+			wantErr:         true,
+			wantErrContains: "nemo guardrails error",
+			wantErrCode:     errcommon.ServiceUnavailable,
+		},
+		{
+			name: "error: NeMo returns status error without guardrails_data",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "error"}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
+			wantErr:         true,
+			wantErrContains: "nemo guardrails error: unspecified error",
+			wantErrCode:     errcommon.ServiceUnavailable,
 		},
 		{
 			name: "fail-closed: NeMo returns refusal-style text only (no status)",

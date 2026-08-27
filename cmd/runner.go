@@ -201,6 +201,7 @@ func run(ctx context.Context,
 		theConfig.ProfilePicker,
 		theConfig.Profiles,
 		theConfig.PostProcessors,
+		theConfig.ResponseHeadersPostProcessors,
 	).WithEventNotifier(processor)
 
 	wrappedServer := dynamicmetadata.WrapServer(server)

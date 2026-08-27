@@ -336,9 +336,9 @@ func TestReconcile_TwoModelsOneProvider(t *testing.T) {
 	assert.Equal(t, "shared-provider", string(hr1.Spec.Rules[0].BackendRefs[0].Name))
 	assert.Equal(t, "shared-provider", string(hr2.Spec.Rules[0].BackendRefs[0].Name))
 
-	// Per-provider header match on rule 1 uses targetModel + x-ipp-selected-provider
-	assert.Equal(t, "gpt-4o", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
-	assert.Equal(t, "gpt-3.5-turbo", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
+	// Per-provider header match on rule 1 uses CR name + x-ipp-selected-provider
+	assert.Equal(t, "gpt4", hr1.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "gpt35", hr2.Spec.Rules[1].Matches[0].Headers[0].Value)
 
 	// Different path prefixes
 	assert.Equal(t, "/"+ns+"/gpt4", *hr1.Spec.Rules[0].Matches[0].Path.Value)

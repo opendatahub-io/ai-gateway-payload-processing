@@ -31,16 +31,23 @@ import (
 )
 
 func main() {
-	if err := run(
-		ctrl.SetupSignalHandler(),
-		[]func(client.Client, *ctrlbuilder.Builder) error{
+	var controllers []func(client.Client, *ctrlbuilder.Builder) error
+	if os.Getenv("DISABLE_EXTERNAL_MODEL_CONTROLLER") != "true" {
+		controllers = []func(client.Client, *ctrlbuilder.Builder) error{
 			providerController(),
 			modelController(
 				os.Getenv("GATEWAY_NAME"),
 				os.Getenv("GATEWAY_NAMESPACE"),
 			),
 			legacyMigrationController(),
-		},
+		}
+	} else {
+		ctrl.Log.WithName("setup").Info("ExternalModel/ExternalProvider controllers disabled via DISABLE_EXTERNAL_MODEL_CONTROLLER=true")
+	}
+
+	if err := run(
+		ctrl.SetupSignalHandler(),
+		controllers,
 	); err != nil {
 		os.Exit(1)
 	}
