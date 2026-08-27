@@ -57,16 +57,20 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datastore/inmemory"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/modelconfigcollector"
+	requestcostmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestcostmetadata"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/filter/modelgroup"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/maxscore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/random"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/weightedrandom"
+	costguardscorer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/costguard"
 	inflightrequestsscorer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/inflightrequests"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/sessionaffinity"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/basemodelextractor"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/bodyfieldtoheader"
 	modelselectorplugin "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/modelselector"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/profilepicker/single"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/responsehandling/modelnametoheader"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/handlers"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
 	runserver "github.com/llm-d/llm-d-inference-payload-processor/pkg/server"
@@ -82,6 +86,14 @@ var setupLog = ctrl.Log.WithName("setup")
 // It reuses all upstream public APIs but wraps the ext-proc server with
 // dynamicmetadata.WrapServer before registration, enabling plugins to set
 // ProcessingResponse.DynamicMetadata via pseudo-headers.
+//
+// This file is a hand-maintained copy of the upstream runner, required because
+// upstream Runner.Run/AsRunnable offers no hook to wrap the ext-proc server.
+// Copied from github.com/llm-d/llm-d-inference-payload-processor
+// cmd/runner/runner.go @ v0.1.0-rc.4.0.20260814090434-bf71acdf306a (bf71acd).
+// KEEP IN SYNC: when bumping that dependency, re-diff this file against upstream
+// — especially handlers.NewServer's signature and registerInTreePlugins, which
+// gate whether new in-tree plugins and processing phases are wired in.
 func run(ctx context.Context,
 	controllers []func(client.Client, *ctrlbuilder.Builder) error,
 	customCollectors ...prometheus.Collector,
@@ -102,11 +114,6 @@ func run(ctx context.Context,
 		return err
 	}
 
-	flags := make(map[string]any)
-	pflag.VisitAll(func(f *pflag.Flag) {
-		flags[f.Name] = f.Value
-	})
-
 	if opts.Tracing {
 		if err := tracing.InitTracing(ctx, setupLog, "llm-d-ipp"); err != nil {
 			setupLog.Error(err, "failed to initialize tracing")
@@ -114,9 +121,19 @@ func run(ctx context.Context,
 		}
 	}
 
-	setupLog.Info("Flags processed", "flags", flags)
-
 	logutil.InitLogging(&opts.ZapOptions)
+
+	// Dump the full flag set only at DEBUG: values such as --config-text can
+	// embed inline plugin configuration, so keep it out of default-level logs
+	// (CWE-532). Gated after InitLogging so the operator's verbosity applies.
+	// Diverges intentionally from the upstream copy.
+	if setupLog.V(logutil.DEBUG).Enabled() {
+		flags := make(map[string]any)
+		pflag.VisitAll(func(f *pflag.Flag) {
+			flags[f.Name] = f.Value
+		})
+		setupLog.V(logutil.DEBUG).Info("Flags processed", "flags", flags)
+	}
 
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
@@ -237,13 +254,18 @@ func registerInTreePlugins() {
 	plugin.Register(bodyfieldtoheader.BodyFieldToHeaderPluginType, bodyfieldtoheader.BodyFieldToHeaderPluginFactory)
 	plugin.Register(basemodelextractor.BaseModelToHeaderPluginType, basemodelextractor.BaseModelToHeaderPluginFactory)
 	plugin.Register(requestmetadata.PluginType, requestmetadata.ExtractorFactory)
+	plugin.Register(requestcostmetadata.PluginType, requestcostmetadata.ExtractorFactory)
 	plugin.Register(modelconfigcollector.PluginType, modelconfigcollector.DatasourceFactory)
+	// register model selector plugins
+	plugin.Register(modelgroup.ModelGroupFilterType, modelgroup.ModelGroupFilterFactory)
 	plugin.Register(random.RandomPickerType, random.RandomPickerFactory)
 	plugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
 	plugin.Register(weightedrandom.WeightedRandomPickerType, weightedrandom.WeightedRandomPickerFactory)
 	plugin.Register(modelselectorplugin.ModelSelectorPluginType, modelselectorplugin.ModelSelectorPluginFactory)
 	plugin.Register(inflightrequestsscorer.PluginType, inflightrequestsscorer.ScorerFactory)
 	plugin.Register(sessionaffinity.PluginType, sessionaffinity.ScorerFactory)
+	plugin.Register(costguardscorer.PluginType, costguardscorer.ScorerFactory)
+	plugin.Register(modelnametoheader.PluginType, modelnametoheader.PluginFactory)
 }
 
 // newExtProcRunnable creates a controller-runtime Runnable that serves the given
@@ -325,12 +347,13 @@ func createSelfSignedCert() (tls.Certificate, error) {
 	}
 	now := time.Now()
 	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject:      pkix.Name{Organization: []string{"Inference Ext"}},
-		NotBefore:    now.UTC(),
-		NotAfter:     now.Add(time.Hour * 24 * 365 * 10).UTC(),
-		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber:          serialNumber,
+		Subject:               pkix.Name{Organization: []string{"Inference Ext"}},
+		NotBefore:             now.UTC(),
+		NotAfter:              now.Add(time.Hour * 24 * 365 * 10).UTC(),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
 	}
 
 	priv, err := rsa.GenerateKey(rand.Reader, 4096)

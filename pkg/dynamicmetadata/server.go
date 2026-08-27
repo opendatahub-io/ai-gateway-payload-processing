@@ -36,6 +36,14 @@ func (w *wrappedStream) Send(resp *extProcPb.ProcessingResponse) error {
 
 // extractAndInjectMetadata finds the pseudo-header in the response's header
 // mutations, removes it, and populates resp.DynamicMetadata.
+//
+// Only the RequestHeaders response variant is scanned. This is deliberate:
+// plugins set the pseudo-header during the request-headers phase, so it can
+// only ever ride a ProcessingResponse_RequestHeaders. Scanning that one variant
+// also guarantees the pseudo-header is stripped before it reaches Envoy/client.
+// If a plugin ever sets the pseudo-header on another phase (e.g. ResponseHeaders
+// or ResponseBody), this scan must be generalized to those variants — otherwise
+// the raw pseudo-header would leak downstream instead of becoming DynamicMetadata.
 func extractAndInjectMetadata(resp *extProcPb.ProcessingResponse) {
 	reqHeaders, ok := resp.Response.(*extProcPb.ProcessingResponse_RequestHeaders)
 	if !ok || reqHeaders.RequestHeaders == nil ||

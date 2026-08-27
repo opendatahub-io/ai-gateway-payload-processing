@@ -157,6 +157,54 @@ func TestWrapServer(t *testing.T) {
 	require.NotNil(t, wrapped)
 }
 
+// fakeProcessServer captures the response forwarded by wrappedStream.Send. The
+// embedded (nil) interface satisfies the rest of ExternalProcessor_ProcessServer;
+// only Send is exercised by wrappedStream.
+type fakeProcessServer struct {
+	extProcPb.ExternalProcessor_ProcessServer
+	captured *extProcPb.ProcessingResponse
+	sendErr  error
+}
+
+func (f *fakeProcessServer) Send(resp *extProcPb.ProcessingResponse) error {
+	f.captured = resp
+	return f.sendErr
+}
+
+func TestWrappedStreamSend(t *testing.T) {
+	t.Run("strips pseudo-header, injects metadata, and forwards to inner", func(t *testing.T) {
+		fake := &fakeProcessServer{}
+		w := &wrappedStream{ExternalProcessor_ProcessServer: fake}
+
+		resp := makeRequestHeadersResponse(
+			header("x-request-id", "abc123"),
+			header(pseudoHeader, `{"ns":"envoy.lb.subset_hint","key":"x-gateway-destination-endpoint-subset","values":["spoke-east:443","spoke-west:443"]}`),
+		)
+
+		require.NoError(t, w.Send(resp))
+
+		require.NotNil(t, fake.captured, "response must be forwarded to the inner stream")
+
+		hdrs := fake.captured.Response.(*extProcPb.ProcessingResponse_RequestHeaders).
+			RequestHeaders.Response.HeaderMutation.SetHeaders
+		require.Len(t, hdrs, 1, "pseudo-header must be stripped before forwarding")
+		assert.Equal(t, "x-request-id", hdrs[0].Header.Key)
+
+		require.NotNil(t, fake.captured.DynamicMetadata, "DynamicMetadata must be injected on the forwarded response")
+		assertDynamicMetadata(t, fake.captured.DynamicMetadata,
+			"envoy.lb.subset_hint", "x-gateway-destination-endpoint-subset",
+			[]string{"spoke-east:443", "spoke-west:443"})
+	})
+
+	t.Run("forwards inner Send error unchanged", func(t *testing.T) {
+		fake := &fakeProcessServer{sendErr: assert.AnError}
+		w := &wrappedStream{ExternalProcessor_ProcessServer: fake}
+
+		err := w.Send(makeRequestHeadersResponse(header("x-request-id", "abc123")))
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+}
+
 func makeRequestHeadersResponse(headers ...*corev3.HeaderValueOption) *extProcPb.ProcessingResponse {
 	return &extProcPb.ProcessingResponse{
 		Response: &extProcPb.ProcessingResponse_RequestHeaders{
