@@ -299,11 +299,17 @@ func (p *ModelProviderResolverPlugin) propose(ctx context.Context, request *requ
 	return dynamicmetadata.SetEndpointSubset(request, endpoints)
 }
 
-// findRefByEndpoint returns the first ref whose endpoint hostname matches the
-// destination. Ports are stripped from both sides before comparison.
+// findRefByEndpoint returns the first eligible ref whose endpoint hostname
+// matches the destination. Ports are stripped from both sides before comparison.
+// Refs with weight <= 0 are skipped: PROPOSE only advertises eligible spokes, so
+// a stale or spoofed x-gateway-destination-endpoint pointing at a disabled spoke
+// must not route there — it is treated as no match.
 func findRefByEndpoint(refs []*resolvedProviderRef, destination string) *resolvedProviderRef {
 	host := stripPort(destination)
 	for _, ref := range refs {
+		if ref.weight <= 0 {
+			continue
+		}
 		if stripPort(ref.endpoint) == host {
 			return ref
 		}

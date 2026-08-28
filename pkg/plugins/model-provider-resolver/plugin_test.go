@@ -591,8 +591,9 @@ func TestProcessRequest_HubMode_Transform_NoMatch(t *testing.T) {
 
 func TestFindRefByEndpoint(t *testing.T) {
 	refs := []*resolvedProviderRef{
-		{providerName: "east", endpoint: "maas.east.example.com"},
-		{providerName: "west", endpoint: "maas.west.example.com"},
+		{providerName: "east", endpoint: "maas.east.example.com", weight: 1},
+		{providerName: "west", endpoint: "maas.west.example.com", weight: 1},
+		{providerName: "disabled", endpoint: "maas.disabled.example.com", weight: 0},
 	}
 
 	tests := []struct {
@@ -605,6 +606,7 @@ func TestFindRefByEndpoint(t *testing.T) {
 		{"with port", "maas.west.example.com:443", "west", false},
 		{"no match", "maas.central.example.com", "", true},
 		{"empty", "", "", true},
+		{"disabled ref skipped", "maas.disabled.example.com", "", true},
 	}
 
 	for _, tt := range tests {
