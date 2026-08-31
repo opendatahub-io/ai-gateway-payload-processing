@@ -21,6 +21,11 @@ upstreamIpp:
           fieldName: model
           headerName: X-Gateway-Model-Name
       - type: model-provider-resolver
+        # parameters:
+        #   hubMode: true  # Enable for hub mode (cross-cluster routing) deployments
+        # Loop detection (#343) reads CLUSTER_NAME from the IPP pod env.
+        # Unset/empty disables it. Set via Helm --set env[2], not here:
+        # a values.yaml env list is overwritten by README --set env[0]/env[1].
       - type: stream-usage-enforcer
       - type: api-translation
       - type: apikey-injection
@@ -42,3 +47,14 @@ upstreamIpp:
 
   inferenceGateway:
     name: maas-default-gateway
+
+# --- Hub mode (cross-cluster routing) ---
+# Hub mode requires TWO deployments of this chart:
+#   1. Pre-processing:  runs before auth+EPP (PROPOSE phase)
+#   2. Post-processing: runs after EPP (TRANSFORM phase)
+#
+# Each deployment uses different plugin chains and EnvoyFilter anchors.
+# The upstream chart's provider.istio.envoyFilter.operation and
+# anchorSubFilter values control filter ordering per deployment.
+#
+# See deploy/examples/hub-mode/ for ready-to-use values files.

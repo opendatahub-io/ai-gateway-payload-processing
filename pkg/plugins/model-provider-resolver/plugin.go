@@ -21,8 +21,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net"
+	"os"
 	"strings"
 
+	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
+	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -30,13 +36,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
-	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
-	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/dynamicmetadata"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
@@ -52,14 +56,27 @@ const (
 
 var _ requesthandling.RequestProcessor = &ModelProviderResolverPlugin{}
 
+type pluginConfig struct {
+	HubMode bool `json:"hubMode"`
+}
+
 // ModelProviderResolverFactory defines the factory function for ModelProviderResolverPlugin.
-func ModelProviderResolverFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	plugin, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
+func ModelProviderResolverFactory(name string, configJSON json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	var cfg pluginConfig
+	if len(configJSON) > 0 {
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config for plugin '%s': %w", ModelProviderResolverPluginType, err)
+		}
+	}
+
+	p, err := NewModelProviderResolver(handle.ReconcilerBuilder, handle.Client())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin '%s' - %w", ModelProviderResolverPluginType, err)
 	}
+	p.hubMode = cfg.HubMode
+	p.clusterName = strings.TrimSpace(os.Getenv(state.ClusterNameEnv))
 
-	return plugin.WithName(name), nil
+	return p.WithName(name), nil
 }
 
 // NewModelProviderResolver registers store reconcilers for inference.opendatahub.io
@@ -114,9 +131,18 @@ func NewModelProviderResolver(reconcilerBuilder func() *builder.Builder, k8sClie
 // ModelProviderResolverPlugin resolves model names to provider info by watching ExternalModel CRDs.
 // It writes the model, provider and credential reference to CycleState for downstream plugins
 // (api-translation, api-key-injection).
+//
+// The plugin performs routing loop detection per issue #343: incoming
+// X-Origin-Cluster is compared to this cluster's CLUSTER_NAME. A match is a
+// true A→B→A loop-back and is rejected. A different origin (A→B→C) is allowed.
+// On an outgoing remote-maas hop the original origin is preserved, or this
+// cluster's name is injected if the header is absent. Loop detection is
+// disabled when CLUSTER_NAME is unset.
 type ModelProviderResolverPlugin struct {
-	typedName plugin.TypedName
-	store     *infoStore
+	typedName   plugin.TypedName
+	store       *infoStore
+	hubMode     bool
+	clusterName string
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
@@ -131,6 +157,13 @@ func (p *ModelProviderResolverPlugin) WithName(name string) *ModelProviderResolv
 // ProcessRequest reads the model name from the request body, resolves the provider
 // from the store (populated by ExternalModel reconciler), and writes model, provider
 // and credential reference info to CycleState.
+//
+// The method also performs routing loop detection (#343):
+//   - Rejects when X-Origin-Cluster matches CLUSTER_NAME (A→B→A).
+//   - Allows a different origin (A→B→C) and local models.
+//   - Injects/restores X-Origin-Cluster only on remote-maas hops and hub
+//     TRANSFORM (spoke) hops — not on direct third-party APIs.
+//   - Hub PROPOSE does not inject (it is not an outbound hop). TRANSFORM does.
 func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
@@ -178,14 +211,34 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 
 	logger.Info("resolved model by name", "modelName", modelName)
 
+	if err := p.checkRoutingLoop(ctx, cycleState, request); err != nil {
+		return err
+	}
+
+	// Hub mode PROPOSE: set dynamic metadata for EPP subset filtering.
+	// Incoming loop check already ran; PROPOSE is not an outbound hop so
+	// the origin header is not injected here.
+	if p.hubMode && request.Headers["x-gateway-destination-endpoint"] == "" {
+		return p.propose(ctx, request, modelInfo)
+	}
+
 	if inputFormat == "" {
 		logger.Error(nil, "unsupported API path for external model", "model", modelName, "path", relativePath)
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: "unsupported API endpoint"}
 	}
 
-	ref := selectByWeight(modelInfo.refs)
-	if ref == nil {
-		return errcommon.Error{Code: errcommon.BadRequest, Msg: "all providers for model " + modelName + " are disabled (weight 0)"}
+	var ref *resolvedProviderRef
+	if p.hubMode {
+		ref = findRefByEndpoint(modelInfo.refs, request.Headers["x-gateway-destination-endpoint"])
+		if ref == nil {
+			return errcommon.Error{Code: errcommon.BadRequest,
+				Msg: "no ExternalProvider matches destination " + request.Headers["x-gateway-destination-endpoint"]}
+		}
+	} else {
+		ref = selectByWeight(modelInfo.refs)
+		if ref == nil {
+			return errcommon.Error{Code: errcommon.BadRequest, Msg: "all providers for model " + modelName + " are disabled (weight 0)"}
+		}
 	}
 
 	// Drive Envoy routing to the selected provider's backend.
@@ -206,8 +259,82 @@ func (p *ModelProviderResolverPlugin) ProcessRequest(ctx context.Context, cycleS
 	cycleState.Write(state.CredsRefNamespace, ref.secretNamespace)
 	cycleState.Write(state.ModelConfigKey, ref.config)
 
+	p.restoreOrMarkOrigin(ctx, cycleState, request, ref)
+
 	logger.Info("external model resolved", "model", modelName, "provider", ref.provider, "inputFormat", inputFormat, "apiFormat", ref.apiFormat)
 	return nil
+}
+
+// checkRoutingLoop rejects a request whose X-Origin-Cluster matches this
+// cluster's CLUSTER_NAME (A→B→A). A different origin is allowed (A→B→C).
+// Disabled when CLUSTER_NAME is unset. Forbidden (403) is used because
+// errcommon has no LoopDetected/508 code.
+func (p *ModelProviderResolverPlugin) checkRoutingLoop(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
+	if p.clusterName == "" {
+		return nil
+	}
+	origin := originCluster(cycleState, request)
+	if origin == "" || !strings.EqualFold(origin, p.clusterName) {
+		return nil
+	}
+
+	log.FromContext(ctx).V(logutil.DEFAULT).Error(nil,
+		"routing loop detected: request originated from this cluster",
+		"origin", origin, "cluster", p.clusterName)
+	return errcommon.Error{
+		Code: errcommon.Forbidden,
+		Msg:  "routing loop detected: request originated from this cluster",
+	}
+}
+
+func originCluster(cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) string {
+	if cycleState != nil {
+		if captured, err := plugin.ReadCycleStateKey[string](cycleState, state.OriginClusterKey); err == nil {
+			if v := strings.TrimSpace(captured); v != "" {
+				return v
+			}
+		}
+	}
+	for key, value := range request.Headers {
+		if strings.EqualFold(key, state.OriginClusterHeader) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// restoreOrMarkOrigin puts X-Origin-Cluster back on remote-maas / hub
+// TRANSFORM hops after the guard stripped it. The first origin is preserved
+// (so A→B→A still sees A); if absent, this cluster's name is injected.
+// Direct third-party APIs (openai, anthropic, ...) are skipped.
+func (p *ModelProviderResolverPlugin) restoreOrMarkOrigin(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest, ref *resolvedProviderRef) {
+	if !shouldInjectOrigin(ref, p.hubMode) {
+		return
+	}
+	origin := originCluster(cycleState, request)
+	if origin == "" {
+		origin = p.clusterName
+	}
+	if origin == "" {
+		return
+	}
+	request.SetHeader(state.OriginClusterHeader, origin)
+	log.FromContext(ctx).V(logutil.VERBOSE).Info("set origin cluster header",
+		"header", state.OriginClusterHeader, "origin", origin)
+}
+
+// shouldInjectOrigin is true for explicit remote-maas providers (#343) and
+// for hub TRANSFORM (hub→spoke is a cross-cluster hop even when the spoke
+// is typed openai). A non-empty path is not a signal: OpenAI/Anthropic CRs
+// always set path, and must not receive X-Origin-Cluster.
+func shouldInjectOrigin(ref *resolvedProviderRef, hubMode bool) bool {
+	if ref == nil {
+		return false
+	}
+	if hubMode {
+		return true
+	}
+	return strings.EqualFold(ref.provider, provider.RemoteMaaS)
 }
 
 // detectInputAPIFormat determines the client's API format from the request path suffix.
@@ -250,6 +377,49 @@ func selectByWeight(refs []*resolvedProviderRef) *resolvedProviderRef {
 		}
 	}
 	return refs[len(refs)-1]
+}
+
+// propose handles the hub mode PROPOSE phase: collect eligible spoke endpoints
+// and set dynamic metadata for the EPP to filter on. No CycleState is written.
+func (p *ModelProviderResolverPlugin) propose(ctx context.Context, request *requesthandling.InferenceRequest, modelInfo *externalModelInfo) error {
+	var endpoints []string
+	for _, ref := range modelInfo.refs {
+		if ref.weight > 0 {
+			endpoints = append(endpoints, ref.endpoint)
+		}
+	}
+	if len(endpoints) == 0 {
+		return nil
+	}
+
+	log.FromContext(ctx).V(logutil.DEFAULT).Info("hub mode PROPOSE: setting endpoint subset",
+		"model", modelInfo.modelName, "endpoints", endpoints)
+	return dynamicmetadata.SetEndpointSubset(request, endpoints)
+}
+
+// findRefByEndpoint returns the first eligible ref whose endpoint hostname
+// matches the destination. Ports are stripped from both sides before comparison.
+// Refs with weight <= 0 are skipped: PROPOSE only advertises eligible spokes, so
+// a stale or spoofed x-gateway-destination-endpoint pointing at a disabled spoke
+// must not route there — it is treated as no match.
+func findRefByEndpoint(refs []*resolvedProviderRef, destination string) *resolvedProviderRef {
+	host := stripPort(destination)
+	for _, ref := range refs {
+		if ref.weight <= 0 {
+			continue
+		}
+		if stripPort(ref.endpoint) == host {
+			return ref
+		}
+	}
+	return nil
+}
+
+func stripPort(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return hostport
 }
 
 func sanitizePath(relativeUrlPath string) string {

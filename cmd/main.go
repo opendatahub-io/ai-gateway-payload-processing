@@ -26,32 +26,29 @@ import (
 	"os"
 
 	ctrl "sigs.k8s.io/controller-runtime"
-	"github.com/llm-d/llm-d-inference-payload-processor/cmd/runner"
-
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func main() {
-	// Register ai-gateway payload processing plugins with pluggable bbr
-	plugins.RegisterPlugins()
-
-	r := runner.NewRunner().
-		WithExecutableName("ai-gateway-payload-processing")
-
+	var controllers []func(client.Client, *ctrlbuilder.Builder) error
 	if os.Getenv("DISABLE_EXTERNAL_MODEL_CONTROLLER") != "true" {
-		r = r.WithCustomControllers(
+		controllers = []func(client.Client, *ctrlbuilder.Builder) error{
 			providerController(),
 			modelController(
 				os.Getenv("GATEWAY_NAME"),
 				os.Getenv("GATEWAY_NAMESPACE"),
 			),
 			legacyMigrationController(),
-		)
+		}
 	} else {
 		ctrl.Log.WithName("setup").Info("ExternalModel/ExternalProvider controllers disabled via DISABLE_EXTERNAL_MODEL_CONTROLLER=true")
 	}
 
-	if err := r.Run(ctrl.SetupSignalHandler()); err != nil {
+	if err := run(
+		ctrl.SetupSignalHandler(),
+		controllers,
+	); err != nil {
 		os.Exit(1)
 	}
 }

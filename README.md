@@ -21,6 +21,7 @@ kubectl apply -f config/crd/bases/
     ```bash
     export GATEWAY_NAME=maas-default-gateway
     export GATEWAY_NAMESPACE=openshift-ingress
+    export CLUSTER_NAME=cluster-a   # optional; leave unset to disable loop detection
     ```
 
 1.  Clean local copy of upstream chart to avoid using stale version:
@@ -41,7 +42,9 @@ kubectl apply -f config/crd/bases/
     --set upstreamIpp.payloadProcessor.env[0].name=GATEWAY_NAME \
     --set upstreamIpp.payloadProcessor.env[0].value=${GATEWAY_NAME} \
     --set upstreamIpp.payloadProcessor.env[1].name=GATEWAY_NAMESPACE \
-    --set upstreamIpp.payloadProcessor.env[1].value=${GATEWAY_NAMESPACE}
+    --set upstreamIpp.payloadProcessor.env[1].value=${GATEWAY_NAMESPACE} \
+    --set upstreamIpp.payloadProcessor.env[2].name=CLUSTER_NAME \
+    --set upstreamIpp.payloadProcessor.env[2].value=${CLUSTER_NAME}
     ```
 
     > **Important**: The payload processing ext proc is attached to a Gateway.
@@ -57,6 +60,12 @@ kubectl apply -f config/crd/bases/
     The `GATEWAY_NAME` and `GATEWAY_NAMESPACE` environment variables are used by
     the controller reconcilers to set the correct parent ref on HTTPRoutes created
     for ExternalModel CRs.
+
+    `CLUSTER_NAME` is this cluster's identity for routing loop detection
+    (issue #343). Incoming `X-Origin-Cluster` matching this value is rejected
+    with HTTP 403. Leave it unset (or empty) to disable loop detection. Do not
+    put `CLUSTER_NAME` in `values.yaml` as `env[0]` — Helm `--set env[0]` from
+    the install command would replace the whole list.
 
 ## Cleanup
 

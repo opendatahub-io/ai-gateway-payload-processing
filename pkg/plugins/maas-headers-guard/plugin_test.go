@@ -25,6 +25,8 @@ import (
 
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
+
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 func TestFactory(t *testing.T) {
@@ -117,4 +119,40 @@ func TestProcessRequest_CaseInsensitive(t *testing.T) {
 	captured, err := plugin.ReadCycleStateKey[map[string]string](cs, MaaSHeadersKey)
 	require.NoError(t, err)
 	assert.Equal(t, "bob", captured["X-MaaS-Username"])
+}
+
+func TestProcessRequest_StripsAndCapturesOriginCluster(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["x-origin-cluster"] = "cluster-a"
+	req.Headers["content-type"] = "application/json"
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	_, hasHeader := req.Headers["x-origin-cluster"]
+	assert.False(t, hasHeader, "x-origin-cluster must be stripped so it cannot leak upstream")
+	assert.Equal(t, "application/json", req.Headers["content-type"])
+
+	captured, err := plugin.ReadCycleStateKey[string](cs, state.OriginClusterKey)
+	require.NoError(t, err)
+	assert.Equal(t, "cluster-a", captured, "incoming origin must be preserved for the resolver")
+}
+
+func TestProcessRequest_StripsOriginClusterCaseInsensitive(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	cs := plugin.NewCycleState()
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["X-Origin-Cluster"] = "Cluster-A"
+
+	err := instance.(*Plugin).ProcessRequest(context.Background(), cs, req)
+	require.NoError(t, err)
+
+	_, hasHeader := req.Headers["X-Origin-Cluster"]
+	assert.False(t, hasHeader, "mixed-case x-origin-cluster must be stripped")
+
+	captured, err := plugin.ReadCycleStateKey[string](cs, state.OriginClusterKey)
+	require.NoError(t, err)
+	assert.Equal(t, "Cluster-A", captured)
 }

@@ -33,9 +33,10 @@ import (
 )
 
 const (
-	nemoStatusPassed   = "passed"
+	nemoStatusSuccess  = "success"
 	nemoStatusModified = "modified"
 	nemoStatusBlocked  = "blocked"
+	nemoStatusError    = "error"
 
 	defaultTimeoutSec    = 360
 	maxNemoResponseBytes = 1 << 20 // 1 MiB
@@ -48,9 +49,13 @@ type nemoGuardConfig struct {
 }
 
 // nemoResponse is NeMo's JSON response from /v1/guardrail/checks.
+// Possible top-level statuses: "success" (all rails passed), "blocked" (at least
+// one rail blocked), "error" (NeMo internal processing error).
+// All statuses are returned with HTTP 200; the decision is in the JSON body.
 type nemoResponse struct {
-	Status      string                         `json:"status"`
-	RailsStatus map[string]nemoRailStatusEntry `json:"rails_status"`
+	Status         string                         `json:"status"`
+	RailsStatus    map[string]nemoRailStatusEntry `json:"rails_status"`
+	GuardrailsData map[string]any                 `json:"guardrails_data"`
 }
 
 type nemoRailStatusEntry struct {
@@ -123,7 +128,7 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 	status := strings.TrimSpace(nemoResp.Status)
 
 	switch status {
-	case nemoStatusPassed:
+	case nemoStatusSuccess:
 		logger.Info("allowed by NeMo guardrails")
 		return "", nil
 
@@ -140,6 +145,14 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 		railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
 		log.FromContext(ctx).Info("blocked by NeMo guardrails", "railsStatus", railsStatus)
 		return errcommon.Forbidden, fmt.Errorf("blocked by NeMo guardrails")
+
+	case nemoStatusError:
+		errMsg, _ := nemoResp.GuardrailsData["error"].(string)
+		if errMsg == "" {
+			errMsg = "unspecified error"
+		}
+		logger.Error(nil, "NeMo guardrails returned error status", "nemoError", errMsg)
+		return errcommon.ServiceUnavailable, fmt.Errorf("nemo guardrails error: %s", errMsg)
 
 	default:
 		logger.Error(nil, "unknown NeMo guardrails status (fail-closed)", "status", nemoResp.Status)

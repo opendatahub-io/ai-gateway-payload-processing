@@ -26,6 +26,8 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
+
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 const (
@@ -68,6 +70,19 @@ func (p *Plugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleSta
 		captured[key] = value
 		request.RemoveHeader(key)
 		logger.Info("internal header captured and stripped", "header", key)
+	}
+
+	// Capture then strip X-Origin-Cluster. Guard runs before
+	// model-provider-resolver, so a bare strip would drop the hop-2 origin
+	// before the loop check. CycleState preserves it; stripping keeps it off
+	// third-party upstreams until the resolver restores it on remote-maas hops.
+	for key, value := range request.Headers {
+		if !strings.EqualFold(key, state.OriginClusterHeader) {
+			continue
+		}
+		cycleState.Write(state.OriginClusterKey, value)
+		request.RemoveHeader(key)
+		logger.Info("origin cluster header captured and stripped", "header", key)
 	}
 
 	// Strip client auth credentials so they never reach the upstream model.

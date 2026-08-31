@@ -29,6 +29,13 @@ const (
 	EndpointKey       = "endpoint"
 	PathKey           = "path"
 
+	// OriginClusterHeader is injected on outgoing remote-maas hops and used
+	// for loop detection. Guard captures the incoming value into
+	// OriginClusterKey then strips the request header.
+	OriginClusterHeader = "x-origin-cluster"
+	OriginClusterKey    = "x-origin-cluster"
+	ClusterNameEnv      = "CLUSTER_NAME"
+
 	// Metering CycleState keys
 	MeteringUsernameKey     = "metering-username"
 	MeteringGroupKey        = "metering-group"

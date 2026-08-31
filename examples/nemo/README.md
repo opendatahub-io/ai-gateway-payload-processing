@@ -22,9 +22,10 @@ the `status` field in the response. The status values align with NeMo's internal
 
 | Status | Behavior | HTTP |
 |--------|----------|------|
-| `passed` | Request/response proceeds normally | 200 |
+| `success` | Request/response proceeds normally | 200 |
 | `modified` | Content was redacted by NeMo (e.g. PII masked) - the plugin does not support redaction yet, so the request/response passes through with the original content | 200 |
 | `blocked` | Blocked - returns error to the client | 403 |
+| `error` | NeMo internal processing error - fail-closed | 503 |
 
 ## Prerequisites
 
@@ -102,7 +103,7 @@ curl -s http://localhost:8000/v1/guardrail/checks \
   }' | jq .
 ```
 
-Expected: `"passed"`
+Expected: `"success"`
 
 **Blocked request** (PII detected):
 
@@ -177,9 +178,10 @@ User -> Gateway -> IPP -> nemo-request-guard -> NeMo (input rails) -> Model Back
 User <- Gateway <- IPP <- nemo-response-guard <- NeMo (output rails) <----+
 
   NeMo status:
-    "passed"   -> forward request / return response
+    "success"  -> forward request / return response
     "modified" -> forward (original content, redaction not yet applied)
     "blocked"  -> HTTP 403
+    "error"    -> HTTP 503 (fail-closed)
 ```
 
 1. The user sends a request to the Gateway, which forwards it to IPP.
@@ -188,8 +190,9 @@ User <- Gateway <- IPP <- nemo-response-guard <- NeMo (output rails) <----+
 3. NeMo runs all configured **input** rails (PII detection, keyword blocking, etc.)
    and returns a JSON response with a top-level `status` field.
 4. The plugin inspects `status`:
-   - `"passed"` or `"modified"` - the request proceeds to the model backend.
+   - `"success"` or `"modified"` - the request proceeds to the model backend.
    - `"blocked"` - IPP returns HTTP 403.
+   - `"error"` - IPP returns HTTP 503 (NeMo internal error, fail-closed).
    - Any unknown status - IPP returns HTTP 500 (fail-closed).
 5. After the model responds, IPP runs the `nemo-response-guard` plugin.
 6. The response guard extracts assistant messages from all `choices` in the

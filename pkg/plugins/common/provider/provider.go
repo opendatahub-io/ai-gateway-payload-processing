@@ -22,6 +22,8 @@ const (
 	Azure     = "azure"
 	Vertex    = "vertex"
 	Bedrock   = "bedrock"
+	// RemoteMaaS is a cross-cluster MaaS hop (another RHOAI/MaaS gateway).
+	RemoteMaaS = "remote-maas"
 	// to be removed after migrating the api translation + apikey injection plugins mapping
 	AzureOpenAI   = "azure-openai"
 	VertexOpenAI  = "vertex-openai"

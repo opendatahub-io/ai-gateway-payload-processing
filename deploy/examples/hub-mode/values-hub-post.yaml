@@ -1,0 +1,55 @@
+# Hub mode POST-PROCESSING deployment values.
+#
+# Runs AFTER the EPP has picked a destination spoke. Handles the TRANSFORM phase:
+# - model-provider-resolver (hubMode): reads x-gateway-destination-endpoint,
+#   matches to ExternalProvider, writes CycleState
+# - api-translation: transforms request format for the target provider
+# - apikey-injection: injects credentials
+#
+# Deploy with:
+#   helm install ipp-post ./deploy/payload-processing -f deploy/examples/hub-mode/values-hub-post.yaml
+#
+# Set anchorSubFilter to the EPP ext-proc filter name.
+
+upstreamIpp:
+  payloadProcessor:
+    name: payload-processing
+    replicas: 1
+    image:
+      registry: quay.io/opendatahub
+      repository: odh-ai-gateway-payload-processing
+      tag: odh-stable
+      pullPolicy: IfNotPresent
+    port: 9004
+    healthCheckPort: 9005
+    multiNamespace: true
+    flags:
+      v: 3
+    customConfig:
+      plugins:
+      - type: model-provider-resolver
+        parameters:
+          hubMode: true
+      - type: stream-usage-enforcer
+      - type: api-translation
+      - type: apikey-injection
+      profiles:
+      - name: default
+        plugins:
+          request:
+          - pluginRef: model-provider-resolver
+          - pluginRef: stream-usage-enforcer
+          - pluginRef: api-translation
+          - pluginRef: apikey-injection
+          response:
+          - pluginRef: api-translation
+
+  provider:
+    name: istio
+    istio:
+      envoyFilter:
+        operation: INSERT_AFTER
+        anchorSubFilter: ""  # Set to EPP filter name, e.g. "envoy.filters.http.ext_proc.epp-hub"
+
+  inferenceGateway:
+    name: maas-default-gateway
