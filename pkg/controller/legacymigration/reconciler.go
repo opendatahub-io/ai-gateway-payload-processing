@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
 const (
@@ -89,11 +90,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		labelMigratedFrom: req.Name,
 	}
 
+	// Forward legacy port/TLS annotations to the new annotation keys.
+	providerAnnotations := forwardConnectionAnnotations(old.GetAnnotations())
+
 	desiredProvider := &inferencev1alpha1.ExternalProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.Name,
-			Namespace: req.Namespace,
-			Labels:    labels,
+			Name:        req.Name,
+			Namespace:   req.Namespace,
+			Labels:      labels,
+			Annotations: providerAnnotations,
 		},
 		Spec: inferencev1alpha1.ExternalProviderSpec{
 			Provider: providerName,
@@ -154,10 +159,12 @@ func (r *Reconciler) applyProvider(ctx context.Context, desired *inferencev1alph
 		log.FromContext(ctx).Info("skipping ExternalProvider not managed by migration", "name", desired.Name)
 		return nil
 	}
-	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) &&
+		equality.Semantic.DeepEqual(existing.Annotations, desired.Annotations) {
 		return nil
 	}
 	existing.Spec = desired.Spec
+	existing.Annotations = desired.Annotations
 	log.FromContext(ctx).Info("updating ExternalProvider", "name", desired.Name)
 	return r.Update(ctx, existing)
 }
@@ -199,6 +206,29 @@ func ownerReferenceFromLegacy(old *unstructured.Unstructured) metav1.OwnerRefere
 
 func isManagedByMigration(labels map[string]string) bool {
 	return labels != nil && labels[labelManagedBy] == managedByValue
+}
+
+// forwardConnectionAnnotations reads legacy port/TLS annotations from the old
+// CR and returns them with the new annotation keys for the ExternalProvider.
+// Returns nil if no legacy connection annotations are present.
+func forwardConnectionAnnotations(oldAnnotations map[string]string) map[string]string {
+	if oldAnnotations == nil {
+		return nil
+	}
+	var annotations map[string]string
+	if v, ok := oldAnnotations[ctrlcommon.LegacyAnnotationPort]; ok {
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations[ctrlcommon.AnnotationPort] = v
+	}
+	if v, ok := oldAnnotations[ctrlcommon.LegacyAnnotationTLS]; ok {
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations[ctrlcommon.AnnotationTLS] = v
+	}
+	return annotations
 }
 
 func mapProviderToAPIFormat(provider string) string {

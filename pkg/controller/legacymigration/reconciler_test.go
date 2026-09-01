@@ -298,6 +298,96 @@ func TestReconcile_DoesNotOverwriteManualCRs(t *testing.T) {
 	assert.Equal(t, "manual.openai.com", p.Spec.Endpoint, "migration should not overwrite manually created provider")
 }
 
+func TestReconcile_ForwardsPortAndTLSAnnotations(t *testing.T) {
+	ns := createTestNamespace(t)
+
+	// Create a legacy ExternalModel with port/TLS annotations
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "maas.opendatahub.io/v1alpha1",
+		"kind":       "ExternalModel",
+		"metadata": map[string]any{
+			"name":      "my-vllm",
+			"namespace": ns,
+			"annotations": map[string]any{
+				"maas.opendatahub.io/port": "8080",
+				"maas.opendatahub.io/tls":  "false",
+			},
+		},
+		"spec": map[string]any{
+			"provider":    "openai",
+			"endpoint":    "vllm.internal.svc",
+			"targetModel": "my-model",
+			"credentialRef": map[string]any{
+				"name": "my-key",
+			},
+		},
+	}}
+	require.NoError(t, k8sClient.Create(ctx, obj))
+
+	provider := waitForNewProvider(t, "my-vllm", ns)
+	assert.Equal(t, "vllm.internal.svc", provider.Spec.Endpoint)
+
+	// Verify annotations were forwarded with new keys
+	require.NotNil(t, provider.Annotations)
+	assert.Equal(t, "8080", provider.Annotations["inference.opendatahub.io/port"])
+	assert.Equal(t, "false", provider.Annotations["inference.opendatahub.io/tls"])
+}
+
+func TestReconcile_NoLegacyAnnotations(t *testing.T) {
+	ns := createTestNamespace(t)
+	createLegacyExternalModel(t, "no-annot", ns, "openai", "api.openai.com", "gpt-4o", "key1")
+
+	provider := waitForNewProvider(t, "no-annot", ns)
+	// When no legacy annotations, the provider should have nil annotations
+	assert.Nil(t, provider.Annotations)
+}
+
+func TestForwardConnectionAnnotations(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]string
+		expected map[string]string
+	}{
+		{
+			name:     "nil annotations",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "no legacy annotations",
+			input:    map[string]string{"foo": "bar"},
+			expected: nil,
+		},
+		{
+			name:     "port only",
+			input:    map[string]string{"maas.opendatahub.io/port": "8080"},
+			expected: map[string]string{"inference.opendatahub.io/port": "8080"},
+		},
+		{
+			name:     "tls only",
+			input:    map[string]string{"maas.opendatahub.io/tls": "false"},
+			expected: map[string]string{"inference.opendatahub.io/tls": "false"},
+		},
+		{
+			name: "both port and tls",
+			input: map[string]string{
+				"maas.opendatahub.io/port": "9090",
+				"maas.opendatahub.io/tls":  "false",
+			},
+			expected: map[string]string{
+				"inference.opendatahub.io/port": "9090",
+				"inference.opendatahub.io/tls":  "false",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := forwardConnectionAnnotations(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestMapProviderToAPIFormat(t *testing.T) {
 	tests := []struct {
 		provider  string

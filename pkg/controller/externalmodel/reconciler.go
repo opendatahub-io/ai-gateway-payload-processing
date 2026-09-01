@@ -118,6 +118,7 @@ type resolvedRef struct {
 	providerName     string
 	providerEndpoint string
 	targetModel      string
+	port             int32
 }
 
 func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger, model *inferencev1alpha1.ExternalModel) error {
@@ -148,10 +149,17 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 			skipReasons = append(skipReasons, fmt.Sprintf("path %q: %v", ref.Path, err))
 			continue
 		}
+		conn, err := ctrlcommon.GetConnectionSettings(provider.GetAnnotations())
+		if err != nil {
+			logger.Error(err, "invalid connection annotations, skipping", "provider", ref.Ref.Name)
+			skipReasons = append(skipReasons, fmt.Sprintf("ExternalProvider %q: %v", ref.Ref.Name, err))
+			continue
+		}
 		resolved = append(resolved, resolvedRef{
 			providerName:     provider.Name,
 			providerEndpoint: provider.Spec.Endpoint,
 			targetModel:      ref.TargetModel,
+			port:             conn.Port,
 		})
 	}
 
@@ -164,7 +172,6 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		resolved,
 		model.Name,
 		model.Namespace,
-		ctrlcommon.DefaultTLSPort,
 		r.gatewayName(),
 		r.gatewayNamespace(),
 		r.routeTimeout(),
@@ -273,22 +280,22 @@ func commonLabels(modelName string) map[string]string {
 // selectedProviderHeader is the canonical header name from the plugin package.
 const selectedProviderHeader = gatewayapiv1.HTTPHeaderName(providerresolver.SelectedProviderHeader)
 
-func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, port int32, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
+func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
 	gwNamespace := gatewayapiv1.Namespace(gatewayNamespace)
 	pathType := gatewayapiv1.PathMatchPathPrefix
 	pathPrefix := "/" + namespace + "/" + modelName
 	headerType := gatewayapiv1.HeaderMatchExact
-	gwPort := gatewayapiv1.PortNumber(port)
 	timeout := gatewayapiv1.Duration(routeTimeout)
 
 	var rules []gatewayapiv1.HTTPRouteRule
 
 	for _, ref := range refs {
+		refPort := gatewayapiv1.PortNumber(ref.port)
 		backendRefs := []gatewayapiv1.HTTPBackendRef{{
 			BackendRef: gatewayapiv1.BackendRef{
 				BackendObjectReference: gatewayapiv1.BackendObjectReference{
 					Name: gatewayapiv1.ObjectName(ref.providerName),
-					Port: &gwPort,
+					Port: &refPort,
 				},
 			},
 		}}
@@ -328,11 +335,12 @@ func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, port int32,
 	}
 
 	// Fallback rules (no x-ipp-selected-provider): route to refs[0]
+	fallbackPort := gatewayapiv1.PortNumber(refs[0].port)
 	fallbackBackendRefs := []gatewayapiv1.HTTPBackendRef{{
 		BackendRef: gatewayapiv1.BackendRef{
 			BackendObjectReference: gatewayapiv1.BackendObjectReference{
 				Name: gatewayapiv1.ObjectName(refs[0].providerName),
-				Port: &gwPort,
+				Port: &fallbackPort,
 			},
 		},
 	}}
