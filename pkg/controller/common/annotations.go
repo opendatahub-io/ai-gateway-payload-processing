@@ -69,11 +69,14 @@ func GetConnectionSettings(annotations map[string]string) (ConnectionSettings, e
 	}
 
 	if tlsStr, ok := annotations[AnnotationTLS]; ok && tlsStr != "" {
-		tls, err := strconv.ParseBool(tlsStr)
-		if err != nil {
+		switch tlsStr {
+		case "true":
+			settings.TLSEnabled = true
+		case "false":
+			settings.TLSEnabled = false
+		default:
 			return settings, fmt.Errorf("invalid %s annotation %q: must be \"true\" or \"false\"", AnnotationTLS, tlsStr)
 		}
-		settings.TLSEnabled = tls
 	}
 
 	return settings, nil

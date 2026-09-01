@@ -88,11 +88,33 @@ func TestGetConnectionSettings_InvalidPort(t *testing.T) {
 }
 
 func TestGetConnectionSettings_InvalidTLS(t *testing.T) {
-	_, err := GetConnectionSettings(map[string]string{
-		AnnotationTLS: "yes",
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), AnnotationTLS)
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"yes", "yes"},
+		{"no", "no"},
+		{"numeric zero", "0"},
+		{"numeric one", "1"},
+		{"short true", "t"},
+		{"short false", "f"},
+		{"upper TRUE", "TRUE"},
+		{"upper FALSE", "FALSE"},
+		{"upper T", "T"},
+		{"upper F", "F"},
+		{"mixed case True", "True"},
+		{"mixed case False", "False"},
+		{"garbage", "notabool"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GetConnectionSettings(map[string]string{
+				AnnotationTLS: tt.value,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), AnnotationTLS)
+		})
+	}
 }
 
 func TestGetConnectionSettings_ValidPortBoundaries(t *testing.T) {
