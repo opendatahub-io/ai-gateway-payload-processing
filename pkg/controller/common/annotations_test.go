@@ -133,6 +133,28 @@ func TestGetConnectionSettings_ValidPortBoundaries(t *testing.T) {
 	assert.Equal(t, int32(65535), settings.Port)
 }
 
+func TestValidateConnectionSecurity_APIKeyWithTLS(t *testing.T) {
+	err := ValidateConnectionSecurity(ConnectionSettings{Port: 443, TLSEnabled: true}, "apikey")
+	require.NoError(t, err)
+}
+
+func TestValidateConnectionSecurity_APIKeyWithoutTLS(t *testing.T) {
+	err := ValidateConnectionSecurity(ConnectionSettings{Port: 8080, TLSEnabled: false}, "apikey")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "apikey")
+	assert.Contains(t, err.Error(), "cleartext")
+}
+
+func TestValidateConnectionSecurity_NonAPIKeyWithoutTLS(t *testing.T) {
+	err := ValidateConnectionSecurity(ConnectionSettings{Port: 80, TLSEnabled: false}, "sigv4")
+	require.NoError(t, err)
+}
+
+func TestValidateConnectionSecurity_NoAuthWithoutTLS(t *testing.T) {
+	err := ValidateConnectionSecurity(ConnectionSettings{Port: 80, TLSEnabled: false}, "")
+	require.NoError(t, err)
+}
+
 func TestGetConnectionSettings_UnrelatedAnnotations(t *testing.T) {
 	settings, err := GetConnectionSettings(map[string]string{
 		"some-other-annotation": "value",

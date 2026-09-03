@@ -108,6 +108,9 @@ func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger,
 	if err != nil {
 		return fmt.Errorf("invalid connection annotations: %w", err)
 	}
+	if err := ctrlcommon.ValidateConnectionSecurity(conn, provider.Spec.Auth.Type); err != nil {
+		return fmt.Errorf("insecure transport configuration: %w", err)
+	}
 
 	// 1. ExternalName Service
 	svc := buildService(endpoint, name, ns, conn.Port, labels)

@@ -48,6 +48,16 @@ type ConnectionSettings struct {
 	TLSEnabled bool
 }
 
+// ValidateConnectionSecurity returns an error if plaintext transport is used
+// with credential-bearing auth types (e.g. "apikey"), which would expose
+// secrets to network observers (CWE-319).
+func ValidateConnectionSecurity(settings ConnectionSettings, authType string) error {
+	if !settings.TLSEnabled && authType == "apikey" {
+		return fmt.Errorf("plaintext transport (TLS disabled) is not allowed with auth type %q: credentials would be transmitted in cleartext", authType)
+	}
+	return nil
+}
+
 // GetConnectionSettings reads port and TLS settings from annotations.
 // Defaults to port 443 (DefaultTLSPort) and TLS enabled.
 func GetConnectionSettings(annotations map[string]string) (ConnectionSettings, error) {

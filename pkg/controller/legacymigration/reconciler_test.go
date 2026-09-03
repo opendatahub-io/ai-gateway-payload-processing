@@ -342,6 +342,41 @@ func TestReconcile_NoLegacyAnnotations(t *testing.T) {
 	assert.Nil(t, provider.Annotations)
 }
 
+func TestReconcile_RejectsPlaintextWithAPIKey(t *testing.T) {
+	ns := createTestNamespace(t)
+
+	// Create a legacy ExternalModel with TLS disabled (plaintext transport)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "maas.opendatahub.io/v1alpha1",
+		"kind":       "ExternalModel",
+		"metadata": map[string]any{
+			"name":      "insecure-provider",
+			"namespace": ns,
+			"annotations": map[string]any{
+				"maas.opendatahub.io/port": "8080",
+				"maas.opendatahub.io/tls":  "false",
+			},
+		},
+		"spec": map[string]any{
+			"provider":    "openai",
+			"endpoint":    "vllm.internal.svc",
+			"targetModel": "my-model",
+			"credentialRef": map[string]any{
+				"name": "my-key",
+			},
+		},
+	}}
+	require.NoError(t, k8sClient.Create(ctx, obj))
+
+	// Give reconciler time to process
+	time.Sleep(2 * time.Second)
+
+	// The ExternalProvider should NOT be created because TLS=false with apikey auth is rejected
+	p := &inferencev1alpha1.ExternalProvider{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-provider", Namespace: ns}, p)
+	assert.True(t, apierrors.IsNotFound(err), "expected ExternalProvider to not be created for plaintext+apikey")
+}
+
 func TestForwardConnectionAnnotations(t *testing.T) {
 	tests := []struct {
 		name     string
