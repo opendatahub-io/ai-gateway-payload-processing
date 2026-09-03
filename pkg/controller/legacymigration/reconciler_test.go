@@ -388,6 +388,58 @@ func TestForwardConnectionAnnotations(t *testing.T) {
 	}
 }
 
+func TestMergeConnectionAnnotations(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing map[string]string
+		desired  map[string]string
+		expected map[string]string
+	}{
+		{
+			name:     "both nil",
+			existing: nil,
+			desired:  nil,
+			expected: nil,
+		},
+		{
+			name:     "existing nil with desired",
+			existing: nil,
+			desired:  map[string]string{"inference.opendatahub.io/port": "8080"},
+			expected: map[string]string{"inference.opendatahub.io/port": "8080"},
+		},
+		{
+			name:     "preserves non-connection annotations",
+			existing: map[string]string{"other-key": "value", "inference.opendatahub.io/port": "443"},
+			desired:  map[string]string{"inference.opendatahub.io/port": "8080"},
+			expected: map[string]string{"other-key": "value", "inference.opendatahub.io/port": "8080"},
+		},
+		{
+			name:     "removes connection keys when desired is nil",
+			existing: map[string]string{"other-key": "value", "inference.opendatahub.io/port": "8080", "inference.opendatahub.io/tls": "false"},
+			desired:  nil,
+			expected: map[string]string{"other-key": "value"},
+		},
+		{
+			name:     "removes absent connection keys",
+			existing: map[string]string{"inference.opendatahub.io/port": "8080", "inference.opendatahub.io/tls": "false"},
+			desired:  map[string]string{"inference.opendatahub.io/port": "9090"},
+			expected: map[string]string{"inference.opendatahub.io/port": "9090"},
+		},
+		{
+			name:     "returns nil when all annotations removed",
+			existing: map[string]string{"inference.opendatahub.io/port": "8080"},
+			desired:  nil,
+			expected: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mergeConnectionAnnotations(tt.existing, tt.desired)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestMapProviderToAPIFormat(t *testing.T) {
 	tests := []struct {
 		provider  string

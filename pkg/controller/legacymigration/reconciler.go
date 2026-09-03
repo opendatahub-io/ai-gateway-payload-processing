@@ -159,12 +159,13 @@ func (r *Reconciler) applyProvider(ctx context.Context, desired *inferencev1alph
 		log.FromContext(ctx).Info("skipping ExternalProvider not managed by migration", "name", desired.Name)
 		return nil
 	}
+	mergedAnnotations := mergeConnectionAnnotations(existing.Annotations, desired.Annotations)
 	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) &&
-		equality.Semantic.DeepEqual(existing.Annotations, desired.Annotations) {
+		equality.Semantic.DeepEqual(existing.Annotations, mergedAnnotations) {
 		return nil
 	}
 	existing.Spec = desired.Spec
-	existing.Annotations = desired.Annotations
+	existing.Annotations = mergedAnnotations
 	log.FromContext(ctx).Info("updating ExternalProvider", "name", desired.Name)
 	return r.Update(ctx, existing)
 }
@@ -206,6 +207,31 @@ func ownerReferenceFromLegacy(old *unstructured.Unstructured) metav1.OwnerRefere
 
 func isManagedByMigration(labels map[string]string) bool {
 	return labels != nil && labels[labelManagedBy] == managedByValue
+}
+
+// mergeConnectionAnnotations merges connection annotation keys from desired into
+// existing, preserving any non-connection annotations already on the resource.
+func mergeConnectionAnnotations(existing, desired map[string]string) map[string]string {
+	result := make(map[string]string, len(existing))
+	for k, v := range existing {
+		result[k] = v
+	}
+	connectionKeys := []string{ctrlcommon.AnnotationPort, ctrlcommon.AnnotationTLS}
+	for _, key := range connectionKeys {
+		if desired != nil {
+			if v, ok := desired[key]; ok {
+				result[key] = v
+			} else {
+				delete(result, key)
+			}
+		} else {
+			delete(result, key)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // forwardConnectionAnnotations reads legacy port/TLS annotations from the old
