@@ -534,7 +534,7 @@ func TestReconcile_CustomPortAndNoTLS(t *testing.T) {
 	createSecret(t, "vllm-key", ns)
 
 	provider := newExternalProvider("my-vllm", ns, "vllm.internal.svc", "vllm-key")
-	provider.Spec.Auth.Type = "none" // non-credentialed auth allows plaintext transport
+	provider.Spec.Auth.Type = "oauth2" // oauth2 is not blocked on plaintext (CWE-319 applies to apikey/sigv4 only)
 	provider.Annotations = map[string]string{
 		ctrlcommon.AnnotationPort: "8080",
 		ctrlcommon.AnnotationTLS:  "false",
