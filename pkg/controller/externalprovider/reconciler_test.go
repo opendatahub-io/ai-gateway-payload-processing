@@ -307,7 +307,7 @@ func TestBuildService(t *testing.T) {
 }
 
 func TestBuildServiceEntry(t *testing.T) {
-	se := buildServiceEntry("api.openai.com", "my-openai", "models", 443, commonLabels("my-openai"))
+	se := buildServiceEntry("api.openai.com", "my-openai", "models", 443, true, commonLabels("my-openai"))
 
 	assert.Equal(t, "ServiceEntry", se.GetKind())
 	assert.Equal(t, "networking.istio.io/v1", se.GetAPIVersion())
@@ -336,7 +336,7 @@ func TestBuildServiceEntry(t *testing.T) {
 }
 
 func TestBuildServiceEntry_CustomPort(t *testing.T) {
-	se := buildServiceEntry("vllm.internal.svc", "my-vllm", "models", 8443, commonLabels("my-vllm"))
+	se := buildServiceEntry("vllm.internal.svc", "my-vllm", "models", 8443, true, commonLabels("my-vllm"))
 
 	spec, ok := se.Object["spec"].(map[string]any)
 	require.True(t, ok)
@@ -347,8 +347,22 @@ func TestBuildServiceEntry_CustomPort(t *testing.T) {
 	assert.Equal(t, int64(8443), port["number"])
 }
 
+func TestBuildServiceEntry_NoTLS(t *testing.T) {
+	se := buildServiceEntry("vllm.internal.svc", "my-vllm", "models", 8080, false, commonLabels("my-vllm"))
+
+	spec, ok := se.Object["spec"].(map[string]any)
+	require.True(t, ok)
+	ports, ok := spec["ports"].([]any)
+	require.True(t, ok)
+	port, ok := ports[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, int64(8080), port["number"])
+	assert.Equal(t, "http", port["name"])
+	assert.Equal(t, "HTTP", port["protocol"])
+}
+
 func TestBuildDestinationRule(t *testing.T) {
-	dr := buildDestinationRule("api.openai.com", "my-openai", "models", commonLabels("my-openai"))
+	dr := buildDestinationRule("api.openai.com", "my-openai", "models", true, commonLabels("my-openai"))
 
 	assert.Equal(t, "DestinationRule", dr.GetKind())
 	assert.Equal(t, "networking.istio.io/v1", dr.GetAPIVersion())
@@ -367,6 +381,20 @@ func TestBuildDestinationRule(t *testing.T) {
 	assert.Equal(t, "SIMPLE", tls["mode"])
 }
 
+func TestBuildDestinationRule_NoTLS(t *testing.T) {
+	dr := buildDestinationRule("vllm.internal.svc", "my-vllm", "models", false, commonLabels("my-vllm"))
+
+	spec, ok := dr.Object["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "vllm.internal.svc", spec["host"])
+
+	trafficPolicy, ok := spec["trafficPolicy"].(map[string]any)
+	require.True(t, ok)
+	tls, ok := trafficPolicy["tls"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "DISABLE", tls["mode"])
+}
+
 func TestBuildDestinationRule_DifferentProviders(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -380,7 +408,7 @@ func TestBuildDestinationRule_DifferentProviders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dr := buildDestinationRule(tt.endpoint, tt.provider, "models", commonLabels(tt.provider))
+			dr := buildDestinationRule(tt.endpoint, tt.provider, "models", true, commonLabels(tt.provider))
 
 			spec, ok := dr.Object["spec"].(map[string]any)
 			require.True(t, ok)
@@ -499,6 +527,70 @@ func TestReconcile_MissingSecret(t *testing.T) {
 	svc := &corev1.Service{}
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: "no-secret", Namespace: ns}, svc)
 	assert.True(t, apierrors.IsNotFound(err), "Service should not exist when secret is missing")
+}
+
+func TestReconcile_CustomPortAndNoTLS(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "vllm-key", ns)
+
+	provider := newExternalProvider("my-vllm", ns, "vllm.internal.svc", "vllm-key")
+	provider.Spec.Auth.Type = "oauth2" // oauth2 is not blocked on plaintext (CWE-319 applies to apikey/sigv4 only)
+	provider.Annotations = map[string]string{
+		ctrlcommon.AnnotationPort: "8080",
+		ctrlcommon.AnnotationTLS:  "false",
+	}
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	waitForPhase(t, "my-vllm", ns, "Ready")
+
+	// Verify Service uses custom port
+	svc := &corev1.Service{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "my-vllm", Namespace: ns}, svc))
+	assert.Equal(t, corev1.ServiceTypeExternalName, svc.Spec.Type)
+	assert.Equal(t, "vllm.internal.svc", svc.Spec.ExternalName)
+	assert.Equal(t, int32(8080), svc.Spec.Ports[0].Port)
+
+	// Verify ServiceEntry uses HTTP protocol
+	se := getUnstructured(t, serviceEntryGVK, "my-vllm", ns)
+	seSpec := se.Object["spec"].(map[string]any)
+	ports := seSpec["ports"].([]any)
+	port := ports[0].(map[string]any)
+	assert.Equal(t, int64(8080), port["number"])
+	assert.Equal(t, "http", port["name"])
+	assert.Equal(t, "HTTP", port["protocol"])
+
+	// Verify DestinationRule uses DISABLE TLS mode
+	dr := getUnstructured(t, destinationRuleGVK, "my-vllm", ns)
+	drSpec := dr.Object["spec"].(map[string]any)
+	tp := drSpec["trafficPolicy"].(map[string]any)
+	tlsCfg := tp["tls"].(map[string]any)
+	assert.Equal(t, "DISABLE", tlsCfg["mode"])
+}
+
+func TestReconcile_APIKeyWithTLSDisabled(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "insecure-key", ns)
+
+	provider := newExternalProvider("insecure-ep", ns, "api.example.com", "insecure-key")
+	provider.Annotations = map[string]string{
+		ctrlcommon.AnnotationTLS: "false",
+	}
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	// Should reach Failed phase because plaintext+apikey is rejected
+	waitForPhase(t, "insecure-ep", ns, "Failed")
+
+	// Verify condition message references insecure transport
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-ep", Namespace: ns}, provider))
+	require.Len(t, provider.Status.Conditions, 1)
+	assert.Equal(t, metav1.ConditionFalse, provider.Status.Conditions[0].Status)
+	assert.Equal(t, "InsecureTransport", provider.Status.Conditions[0].Reason)
+	assert.Contains(t, provider.Status.Conditions[0].Message, "apikey")
+
+	// Networking resources should NOT be created
+	svc := &corev1.Service{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-ep", Namespace: ns}, svc)
+	assert.True(t, apierrors.IsNotFound(err), "Service should not exist when transport is insecure")
 }
 
 func TestReconcile_TwoProviders(t *testing.T) {

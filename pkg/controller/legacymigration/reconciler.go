@@ -29,8 +29,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
+	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
 )
 
 const (
@@ -89,11 +91,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		labelMigratedFrom: req.Name,
 	}
 
+	// Forward legacy port/TLS annotations to the new annotation keys.
+	providerAnnotations := forwardConnectionAnnotations(old.GetAnnotations())
+
+	// Reject plaintext transport for credentialed providers (CWE-319).
+	conn, err := ctrlcommon.GetConnectionSettings(providerAnnotations)
+	if err != nil {
+		return ctrl.Result{}, reconcile.TerminalError(fmt.Errorf("invalid connection annotations on legacy CR %s/%s: %w", req.Namespace, req.Name, err))
+	}
+	if err := ctrlcommon.ValidateConnectionSecurity(conn, "apikey"); err != nil {
+		logger.Info("rejecting legacy migration: insecure transport configuration",
+			"name", req.Name, "namespace", req.Namespace, "error", err.Error())
+		return ctrl.Result{}, nil
+	}
+
 	desiredProvider := &inferencev1alpha1.ExternalProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.Name,
-			Namespace: req.Namespace,
-			Labels:    labels,
+			Name:        req.Name,
+			Namespace:   req.Namespace,
+			Labels:      labels,
+			Annotations: providerAnnotations,
 		},
 		Spec: inferencev1alpha1.ExternalProviderSpec{
 			Provider: providerName,
@@ -154,10 +171,13 @@ func (r *Reconciler) applyProvider(ctx context.Context, desired *inferencev1alph
 		log.FromContext(ctx).Info("skipping ExternalProvider not managed by migration", "name", desired.Name)
 		return nil
 	}
-	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+	mergedAnnotations := mergeConnectionAnnotations(existing.Annotations, desired.Annotations)
+	if equality.Semantic.DeepEqual(existing.Spec, desired.Spec) &&
+		equality.Semantic.DeepEqual(existing.Annotations, mergedAnnotations) {
 		return nil
 	}
 	existing.Spec = desired.Spec
+	existing.Annotations = mergedAnnotations
 	log.FromContext(ctx).Info("updating ExternalProvider", "name", desired.Name)
 	return r.Update(ctx, existing)
 }
@@ -199,6 +219,54 @@ func ownerReferenceFromLegacy(old *unstructured.Unstructured) metav1.OwnerRefere
 
 func isManagedByMigration(labels map[string]string) bool {
 	return labels != nil && labels[labelManagedBy] == managedByValue
+}
+
+// mergeConnectionAnnotations merges connection annotation keys from desired into
+// existing, preserving any non-connection annotations already on the resource.
+func mergeConnectionAnnotations(existing, desired map[string]string) map[string]string {
+	result := make(map[string]string, len(existing))
+	for k, v := range existing {
+		result[k] = v
+	}
+	connectionKeys := []string{ctrlcommon.AnnotationPort, ctrlcommon.AnnotationTLS}
+	for _, key := range connectionKeys {
+		if desired != nil {
+			if v, ok := desired[key]; ok {
+				result[key] = v
+			} else {
+				delete(result, key)
+			}
+		} else {
+			delete(result, key)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// forwardConnectionAnnotations reads legacy port/TLS annotations from the old
+// CR and returns them with the new annotation keys for the ExternalProvider.
+// Returns nil if no legacy connection annotations are present.
+func forwardConnectionAnnotations(oldAnnotations map[string]string) map[string]string {
+	if oldAnnotations == nil {
+		return nil
+	}
+	var annotations map[string]string
+	if v, ok := oldAnnotations[ctrlcommon.LegacyAnnotationPort]; ok {
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations[ctrlcommon.AnnotationPort] = v
+	}
+	if v, ok := oldAnnotations[ctrlcommon.LegacyAnnotationTLS]; ok {
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations[ctrlcommon.AnnotationTLS] = v
+	}
+	return annotations
 }
 
 func mapProviderToAPIFormat(provider string) string {
