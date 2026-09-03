@@ -90,14 +90,14 @@ func TestExternalModelDeepCopy(t *testing.T) {
 // not in Go structs. These tests verify the regex patterns themselves are correct.
 
 func TestNameReferencePattern(t *testing.T) {
-	pattern := regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$`)
+	pattern := regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
 
-	valid := []string{"my-openai", "a", "openai-key-v2", "a1b2"}
+	valid := []string{"my-openai", "a", "openai-key-v2", "a1b2", "glm5.1-w8a8-key", "a.b", "a.b.c", "has.dot"}
 	for _, name := range valid {
 		assert.True(t, pattern.MatchString(name), "should accept %q", name)
 	}
 
-	invalid := []string{"My-OpenAI", "UPPERCASE", "-leading-dash", "trailing-", "has/slash", "has.dot", "has space"}
+	invalid := []string{"My-OpenAI", "UPPERCASE", "-leading-dash", "trailing-", "has/slash", "has space", "a..b", "a.-b", "a-.b", ".leading-dot", "trailing-dot."}
 	for _, name := range invalid {
 		assert.False(t, pattern.MatchString(name), "should reject %q", name)
 	}
