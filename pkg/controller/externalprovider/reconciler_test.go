@@ -534,6 +534,7 @@ func TestReconcile_CustomPortAndNoTLS(t *testing.T) {
 	createSecret(t, "vllm-key", ns)
 
 	provider := newExternalProvider("my-vllm", ns, "vllm.internal.svc", "vllm-key")
+	provider.Spec.Auth.Type = "none" // non-credentialed auth allows plaintext transport
 	provider.Annotations = map[string]string{
 		ctrlcommon.AnnotationPort: "8080",
 		ctrlcommon.AnnotationTLS:  "false",
@@ -564,6 +565,32 @@ func TestReconcile_CustomPortAndNoTLS(t *testing.T) {
 	tp := drSpec["trafficPolicy"].(map[string]any)
 	tlsCfg := tp["tls"].(map[string]any)
 	assert.Equal(t, "DISABLE", tlsCfg["mode"])
+}
+
+func TestReconcile_APIKeyWithTLSDisabled(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "insecure-key", ns)
+
+	provider := newExternalProvider("insecure-ep", ns, "api.example.com", "insecure-key")
+	provider.Annotations = map[string]string{
+		ctrlcommon.AnnotationTLS: "false",
+	}
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	// Should reach Failed phase because plaintext+apikey is rejected
+	waitForPhase(t, "insecure-ep", ns, "Failed")
+
+	// Verify condition message references insecure transport
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-ep", Namespace: ns}, provider))
+	require.Len(t, provider.Status.Conditions, 1)
+	assert.Equal(t, metav1.ConditionFalse, provider.Status.Conditions[0].Status)
+	assert.Equal(t, "InsecureTransport", provider.Status.Conditions[0].Reason)
+	assert.Contains(t, provider.Status.Conditions[0].Message, "apikey")
+
+	// Networking resources should NOT be created
+	svc := &corev1.Service{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-ep", Namespace: ns}, svc)
+	assert.True(t, apierrors.IsNotFound(err), "Service should not exist when transport is insecure")
 }
 
 func TestReconcile_TwoProviders(t *testing.T) {

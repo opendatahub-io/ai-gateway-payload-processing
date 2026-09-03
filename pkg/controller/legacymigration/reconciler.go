@@ -29,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
@@ -96,7 +97,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Reject plaintext transport for credentialed providers (CWE-319).
 	conn, err := ctrlcommon.GetConnectionSettings(providerAnnotations)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("invalid connection annotations on legacy CR %s/%s: %w", req.Namespace, req.Name, err)
+		return ctrl.Result{}, reconcile.TerminalError(fmt.Errorf("invalid connection annotations on legacy CR %s/%s: %w", req.Namespace, req.Name, err))
 	}
 	if err := ctrlcommon.ValidateConnectionSecurity(conn, "apikey"); err != nil {
 		logger.Info("rejecting legacy migration: insecure transport configuration",

@@ -49,10 +49,10 @@ type ConnectionSettings struct {
 }
 
 // ValidateConnectionSecurity returns an error if plaintext transport is used
-// with credential-bearing auth types (e.g. "apikey"), which would expose
-// secrets to network observers (CWE-319).
+// with credential-bearing auth types (e.g. "apikey", "sigv4"), which would
+// expose secrets to network observers (CWE-319).
 func ValidateConnectionSecurity(settings ConnectionSettings, authType string) error {
-	if !settings.TLSEnabled && authType == "apikey" {
+	if !settings.TLSEnabled && (authType == "apikey" || authType == "sigv4") {
 		return fmt.Errorf("plaintext transport (TLS disabled) is not allowed with auth type %q: credentials would be transmitted in cleartext", authType)
 	}
 	return nil

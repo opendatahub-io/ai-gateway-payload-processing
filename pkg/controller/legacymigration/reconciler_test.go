@@ -301,7 +301,8 @@ func TestReconcile_DoesNotOverwriteManualCRs(t *testing.T) {
 func TestReconcile_ForwardsPortAndTLSAnnotations(t *testing.T) {
 	ns := createTestNamespace(t)
 
-	// Create a legacy ExternalModel with port/TLS annotations
+	// Create a legacy ExternalModel with port/TLS annotations.
+	// Uses tls=true to avoid plaintext+apikey rejection (CWE-319).
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "maas.opendatahub.io/v1alpha1",
 		"kind":       "ExternalModel",
@@ -310,7 +311,7 @@ func TestReconcile_ForwardsPortAndTLSAnnotations(t *testing.T) {
 			"namespace": ns,
 			"annotations": map[string]any{
 				"maas.opendatahub.io/port": "8080",
-				"maas.opendatahub.io/tls":  "false",
+				"maas.opendatahub.io/tls":  "true",
 			},
 		},
 		"spec": map[string]any{
@@ -330,7 +331,7 @@ func TestReconcile_ForwardsPortAndTLSAnnotations(t *testing.T) {
 	// Verify annotations were forwarded with new keys
 	require.NotNil(t, provider.Annotations)
 	assert.Equal(t, "8080", provider.Annotations["inference.opendatahub.io/port"])
-	assert.Equal(t, "false", provider.Annotations["inference.opendatahub.io/tls"])
+	assert.Equal(t, "true", provider.Annotations["inference.opendatahub.io/tls"])
 }
 
 func TestReconcile_NoLegacyAnnotations(t *testing.T) {
@@ -368,12 +369,16 @@ func TestReconcile_RejectsPlaintextWithAPIKey(t *testing.T) {
 	}}
 	require.NoError(t, k8sClient.Create(ctx, obj))
 
-	// Give reconciler time to process
-	time.Sleep(2 * time.Second)
+	// Invoke Reconcile directly instead of relying on the controller loop
+	reconciler := &Reconciler{Client: k8sClient}
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "insecure-provider", Namespace: ns},
+	})
+	require.NoError(t, err, "Reconcile should return nil error for plaintext+apikey (terminal rejection)")
 
 	// The ExternalProvider should NOT be created because TLS=false with apikey auth is rejected
 	p := &inferencev1alpha1.ExternalProvider{}
-	err := k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-provider", Namespace: ns}, p)
+	err = k8sClient.Get(ctx, types.NamespacedName{Name: "insecure-provider", Namespace: ns}, p)
 	assert.True(t, apierrors.IsNotFound(err), "expected ExternalProvider to not be created for plaintext+apikey")
 }
 

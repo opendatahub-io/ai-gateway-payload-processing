@@ -89,7 +89,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileResources(ctx, logger, provider); err != nil {
+	// Validate connection annotations before reconciling resources.
+	// These are user-configuration errors that will not resolve on retry.
+	conn, err := ctrlcommon.GetConnectionSettings(provider.GetAnnotations())
+	if err != nil {
+		msg := fmt.Sprintf("invalid connection annotations: %s", err)
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InvalidAnnotations", msg)
+		return ctrl.Result{}, nil
+	}
+	if err := ctrlcommon.ValidateConnectionSecurity(conn, provider.Spec.Auth.Type); err != nil {
+		msg := fmt.Sprintf("insecure transport configuration: %s", err)
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InsecureTransport", msg)
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.reconcileResources(ctx, logger, provider, conn); err != nil {
 		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
 		return ctrl.Result{}, err
 	}
@@ -98,19 +112,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider) error {
+func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider, conn ctrlcommon.ConnectionSettings) error {
 	name := provider.Name
 	ns := provider.Namespace
 	endpoint := provider.Spec.Endpoint
 	labels := commonLabels(name)
-
-	conn, err := ctrlcommon.GetConnectionSettings(provider.GetAnnotations())
-	if err != nil {
-		return fmt.Errorf("invalid connection annotations: %w", err)
-	}
-	if err := ctrlcommon.ValidateConnectionSecurity(conn, provider.Spec.Auth.Type); err != nil {
-		return fmt.Errorf("insecure transport configuration: %w", err)
-	}
 
 	// 1. ExternalName Service
 	svc := buildService(endpoint, name, ns, conn.Port, labels)

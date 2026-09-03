@@ -145,8 +145,20 @@ func TestValidateConnectionSecurity_APIKeyWithoutTLS(t *testing.T) {
 	assert.Contains(t, err.Error(), "cleartext")
 }
 
-func TestValidateConnectionSecurity_NonAPIKeyWithoutTLS(t *testing.T) {
+func TestValidateConnectionSecurity_SigV4WithoutTLS(t *testing.T) {
 	err := ValidateConnectionSecurity(ConnectionSettings{Port: 80, TLSEnabled: false}, "sigv4")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sigv4")
+	assert.Contains(t, err.Error(), "cleartext")
+}
+
+func TestValidateConnectionSecurity_SigV4WithTLS(t *testing.T) {
+	err := ValidateConnectionSecurity(ConnectionSettings{Port: 443, TLSEnabled: true}, "sigv4")
+	require.NoError(t, err)
+}
+
+func TestValidateConnectionSecurity_NonCredentialedWithoutTLS(t *testing.T) {
+	err := ValidateConnectionSecurity(ConnectionSettings{Port: 80, TLSEnabled: false}, "none")
 	require.NoError(t, err)
 }
 
