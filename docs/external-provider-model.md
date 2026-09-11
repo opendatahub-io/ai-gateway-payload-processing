@@ -65,10 +65,14 @@ spec:
   provider: openai
   endpoint: vllm.internal.svc
   auth:
-    type: apikey
+    type: oauth2
     secretRef:
-      name: vllm-key
+      name: vllm-sa
 ```
+
+> **Note:** Disabling TLS is not allowed with `apikey` or `sigv4` auth types.
+> Plaintext transport would expose credentials to network observers (CWE-319).
+> Use `oauth2` auth when connecting to internal backends over plain HTTP.
 
 When TLS is disabled, the ServiceEntry protocol switches from HTTPS to HTTP and the
 DestinationRule TLS mode changes from `SIMPLE` to `DISABLE`.
@@ -84,7 +88,6 @@ to the new annotation keys during migration.
 | `apikey` | HTTP header auth (API key) | `api-key` |
 | `sigv4` | AWS SigV4 request signing | `aws-access-key-id`, `aws-secret-access-key`, `aws-session-token` (optional) |
 | `oauth2` | GCP service account → OAuth2 Bearer token | `gcp-service-account-json` |
-| `none` | Strip client auth, inject nothing (mTLS routes) | — |
 
 ### Credential Secret
 
@@ -313,3 +316,4 @@ spec:
 | `unsupported format combination: openai-chat → azure-openai` | Wrong `apiFormat` value | Use `openai-chat` for Azure OpenAI, not `azure-openai` |
 | `invalid inference.opendatahub.io/port annotation` | Port annotation not a valid integer 1–65535 | Fix the annotation value |
 | `invalid inference.opendatahub.io/tls annotation` | TLS annotation not exactly `"true"` or `"false"` | Use lowercase `"true"` or `"false"` (not `"True"`, `"1"`, etc.) |
+| `insecure transport configuration: plaintext transport (TLS disabled) is not allowed with auth type "apikey"` | TLS disabled with `apikey` or `sigv4` auth | Enable TLS (`"true"`) or switch to `oauth2` auth — plaintext transport exposes credentials (CWE-319) |
