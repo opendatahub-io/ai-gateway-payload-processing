@@ -157,7 +157,7 @@ func TestValidateConnectionSecurity_SigV4WithTLS(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateConnectionSecurity_NonCredentialedWithoutTLS(t *testing.T) {
+func TestValidateConnectionSecurity_NoneStringWithoutTLS(t *testing.T) {
 	// Any non-empty auth type is blocked on plaintext transport (CWE-319).
 	err := ValidateConnectionSecurity(ConnectionSettings{Port: 80, TLSEnabled: false}, "none")
 	require.Error(t, err)

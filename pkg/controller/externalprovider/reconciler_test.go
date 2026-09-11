@@ -529,15 +529,15 @@ func TestReconcile_MissingSecret(t *testing.T) {
 	assert.True(t, apierrors.IsNotFound(err), "Service should not exist when secret is missing")
 }
 
-func TestReconcile_CustomPortAndNoTLS(t *testing.T) {
+func TestReconcile_CustomPort(t *testing.T) {
 	ns := createTestNamespace(t)
 	createSecret(t, "vllm-key", ns)
 
 	provider := newExternalProvider("my-vllm", ns, "vllm.internal.svc", "vllm-key")
-	provider.Spec.Auth.Type = "" // empty auth type: no credentials, so plaintext transport is allowed
+	provider.Spec.Auth.Type = "apikey" // valid CRD enum value
 	provider.Annotations = map[string]string{
 		ctrlcommon.AnnotationPort: "8080",
-		ctrlcommon.AnnotationTLS:  "false",
+		ctrlcommon.AnnotationTLS:  "true",
 	}
 	require.NoError(t, k8sClient.Create(ctx, provider))
 
@@ -550,21 +550,21 @@ func TestReconcile_CustomPortAndNoTLS(t *testing.T) {
 	assert.Equal(t, "vllm.internal.svc", svc.Spec.ExternalName)
 	assert.Equal(t, int32(8080), svc.Spec.Ports[0].Port)
 
-	// Verify ServiceEntry uses HTTP protocol
+	// Verify ServiceEntry uses HTTPS protocol with custom port
 	se := getUnstructured(t, serviceEntryGVK, "my-vllm", ns)
 	seSpec := se.Object["spec"].(map[string]any)
 	ports := seSpec["ports"].([]any)
 	port := ports[0].(map[string]any)
 	assert.Equal(t, int64(8080), port["number"])
-	assert.Equal(t, "http", port["name"])
-	assert.Equal(t, "HTTP", port["protocol"])
+	assert.Equal(t, "https", port["name"])
+	assert.Equal(t, "HTTPS", port["protocol"])
 
-	// Verify DestinationRule uses DISABLE TLS mode
+	// Verify DestinationRule uses SIMPLE TLS mode
 	dr := getUnstructured(t, destinationRuleGVK, "my-vllm", ns)
 	drSpec := dr.Object["spec"].(map[string]any)
 	tp := drSpec["trafficPolicy"].(map[string]any)
 	tlsCfg := tp["tls"].(map[string]any)
-	assert.Equal(t, "DISABLE", tlsCfg["mode"])
+	assert.Equal(t, "SIMPLE", tlsCfg["mode"])
 }
 
 func TestReconcile_APIKeyWithTLSDisabled(t *testing.T) {
