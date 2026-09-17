@@ -84,9 +84,10 @@ data:
 > itself. See the [NeMo YAML schema](https://docs.nvidia.com/nemo/guardrails/latest/configure-rails/yaml-schema/index.html)
 > for all available options.
 
-## Step 2: Verify NeMo is Working
+## Step 2: Verify NeMo is Working (pre-TLS sanity check)
 
-Port-forward to the NeMo pod and test with `curl`:
+Before enabling TLS (Step 3), verify that NeMo is responding correctly by
+port-forwarding to the pod and testing with `curl` over plaintext:
 
 ```bash
 kubectl port-forward pod/${NEMO_POD} 8000:8000 -n ${GUARDRAILS_NS}
@@ -118,7 +119,27 @@ curl -s http://localhost:8000/v1/guardrail/checks \
 
 Expected: `"blocked"`
 
-## Step 3: Configure the IPP Plugins
+## Step 3: Enable TLS on the NeMo Service
+
+The NeMo plugins **require HTTPS** - plaintext `http://` URLs are rejected at
+startup. This ensures guardrail traffic is always encrypted, in line with
+FIPS 140-3 requirements. The HTTP client enforces TLS 1.2 as the minimum
+protocol version.
+
+Before configuring the plugins, make sure the NeMo Guardrails service is
+reachable over HTTPS with a valid TLS certificate. How you provision the
+certificate depends on your environment (e.g. platform-managed service
+certificates, cert-manager, or a TLS-terminating sidecar).
+
+The IPP pod must trust the CA that signed the NeMo certificate. Typically this
+is handled by the platform's trust store. If needed, you can set the
+`SSL_CERT_DIR` environment variable to a directory containing CA certificates.
+
+> **Note:** Avoid using `SSL_CERT_FILE` with a single CA file - Go replaces the
+> entire system root pool when this variable is set, which would drop trust for
+> all other CAs. Use `SSL_CERT_DIR` or a combined bundle file instead.
+
+## Step 4: Configure the IPP Plugins
 
 Add one or both NeMo guard plugins to IPP's deployment args. The `--plugin` format
 is `<type>:<name>:<json-config>`:
@@ -126,13 +147,13 @@ is `<type>:<name>:<json-config>`:
 ### Request Guard (input rails)
 
 ```text
---plugin nemo-request-guard:nemo-input:{"nemoURL":"http://nemo-guardrails.nemo-guardrails.svc:8000/v1/guardrail/checks","timeoutSeconds":10}
+--plugin nemo-request-guard:nemo-input:{"nemoURL":"https://nemo-guardrails.nemo-guardrails.svc:8443/v1/guardrail/checks","timeoutSeconds":10}
 ```
 
 ### Response Guard (output rails)
 
 ```text
---plugin nemo-response-guard:nemo-output:{"nemoURL":"http://nemo-guardrails.nemo-guardrails.svc:8000/v1/guardrail/checks","timeoutSeconds":10}
+--plugin nemo-response-guard:nemo-output:{"nemoURL":"https://nemo-guardrails.nemo-guardrails.svc:8443/v1/guardrail/checks","timeoutSeconds":10}
 ```
 
 ### Configuration Fields
@@ -141,7 +162,7 @@ Both plugins share the same configuration schema:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `nemoURL` | Yes | - | Full URL to POST guardrail check requests to (e.g. `http://nemo:8000/v1/guardrail/checks`). The plugin expects the `/v1/guardrail/checks` response schema but the URL itself is fully configurable. |
+| `nemoURL` | Yes | - | Full **HTTPS** URL to POST guardrail check requests to (e.g. `https://nemo:8443/v1/guardrail/checks`). Only `https://` is accepted - plaintext `http://` URLs are rejected at startup. The plugin expects the `/v1/guardrail/checks` response schema but the URL itself is fully configurable. |
 | `timeoutSeconds` | No | `360` | How long IPP waits for a NeMo response |
 
 The `nemoURL` is the **full endpoint URL** - the plugin POSTs directly to this URL
@@ -156,9 +177,9 @@ containers:
   - name: bbr
     args:
       - "--plugin"
-      - "nemo-request-guard:nemo-input:{\"nemoURL\":\"http://nemo-guardrails.nemo-guardrails.svc:8000/v1/guardrail/checks\",\"timeoutSeconds\":10}"
+      - "nemo-request-guard:nemo-input:{\"nemoURL\":\"https://nemo-guardrails.nemo-guardrails.svc:8443/v1/guardrail/checks\",\"timeoutSeconds\":10}"
       - "--plugin"
-      - "nemo-response-guard:nemo-output:{\"nemoURL\":\"http://nemo-guardrails.nemo-guardrails.svc:8000/v1/guardrail/checks\",\"timeoutSeconds\":10}"
+      - "nemo-response-guard:nemo-output:{\"nemoURL\":\"https://nemo-guardrails.nemo-guardrails.svc:8443/v1/guardrail/checks\",\"timeoutSeconds\":10}"
 ```
 
 ### ext_proc Note for Response Guard
