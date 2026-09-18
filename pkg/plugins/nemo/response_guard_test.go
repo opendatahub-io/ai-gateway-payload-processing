@@ -44,13 +44,28 @@ func TestNewNemoResponseGuardPlugin(t *testing.T) {
 	}{
 		{
 			name:        "valid config",
-			nemoURL:     "http://nemo:8000/v1/guardrail/checks",
+			nemoURL:     "https://nemo:8000/v1/guardrail/checks",
 			timeout:     30,
-			wantNemoURL: "http://nemo:8000/v1/guardrail/checks",
+			wantNemoURL: "https://nemo:8000/v1/guardrail/checks",
 		},
 		{
 			name:    "missing nemoURL — error",
 			nemoURL: "",
+			wantErr: true,
+		},
+		{
+			name:    "http scheme — error",
+			nemoURL: "http://nemo:8000/v1/guardrail/checks",
+			wantErr: true,
+		},
+		{
+			name:    "single-slash typo — error",
+			nemoURL: "https:/nemo:8443/v1/guardrail/checks",
+			wantErr: true,
+		},
+		{
+			name:    "no host — error",
+			nemoURL: "https:///v1/guardrail/checks",
 			wantErr: true,
 		},
 	}
@@ -70,7 +85,7 @@ func TestNewNemoResponseGuardPlugin(t *testing.T) {
 }
 
 func TestNemoResponseGuardTypedName(t *testing.T) {
-	p, err := NewNemoResponseGuardPlugin("http://nemo:8000/v1/guardrail/checks", 30)
+	p, err := NewNemoResponseGuardPlugin("https://nemo:8000/v1/guardrail/checks", 30)
 	require.NoError(t, err)
 
 	assert.Equal(t, NemoResponseGuardPluginType, p.TypedName().Name)
@@ -311,16 +326,19 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			baseURL := "http://unreachable-should-not-be-called:9999"
+			baseURL := "https://unreachable-should-not-be-called:9999"
 			var srv *httptest.Server
 			if tt.serverHandler != nil {
-				srv = httptest.NewServer(tt.serverHandler)
+				srv = httptest.NewTLSServer(tt.serverHandler)
 				defer srv.Close()
 				baseURL = srv.URL
 			}
 
 			p, err := NewNemoResponseGuardPlugin(baseURL, 30)
 			require.NoError(t, err)
+			if srv != nil {
+				trustTestServer(t, p.httpClient, srv)
+			}
 
 			resp := requesthandling.NewInferenceResponse()
 			for k, v := range tt.body {
@@ -349,7 +367,7 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 // TestNemoResponseGuardSendsCorrectPayload verifies the request sent to NeMo matches the expected format.
 func TestNemoResponseGuardSendsCorrectPayload(t *testing.T) {
 	var capturedReq map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedReq))
 		require.NoError(t, json.NewEncoder(w).Encode(nemoAllowedJSON()))
 	}))
@@ -357,6 +375,7 @@ func TestNemoResponseGuardSendsCorrectPayload(t *testing.T) {
 
 	p, err := NewNemoResponseGuardPlugin(srv.URL, 30)
 	require.NoError(t, err)
+	trustTestServer(t, p.httpClient, srv)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["choices"] = []any{
@@ -378,7 +397,7 @@ func TestNemoResponseGuardSendsCorrectPayload(t *testing.T) {
 // TestNemoResponseGuardForwardsModel verifies the model field from the response body is forwarded to NeMo.
 func TestNemoResponseGuardForwardsModel(t *testing.T) {
 	var capturedReq map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedReq))
 		require.NoError(t, json.NewEncoder(w).Encode(nemoAllowedJSON()))
 	}))
@@ -386,6 +405,7 @@ func TestNemoResponseGuardForwardsModel(t *testing.T) {
 
 	p, err := NewNemoResponseGuardPlugin(srv.URL, 30)
 	require.NoError(t, err)
+	trustTestServer(t, p.httpClient, srv)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["model"] = "gpt-4"
@@ -403,7 +423,7 @@ func TestNemoResponseGuardForwardsModel(t *testing.T) {
 // TestNemoResponseGuardBaseURLTrailingSlash ensures a trailing slash in nemoURL doesn't double up.
 func TestNemoResponseGuardBaseURLTrailingSlash(t *testing.T) {
 	var calledPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calledPath = r.URL.Path
 		require.NoError(t, json.NewEncoder(w).Encode(nemoAllowedJSON()))
 	}))
@@ -411,6 +431,7 @@ func TestNemoResponseGuardBaseURLTrailingSlash(t *testing.T) {
 
 	p, err := NewNemoResponseGuardPlugin(srv.URL+"//", 30)
 	require.NoError(t, err)
+	trustTestServer(t, p.httpClient, srv)
 
 	resp := requesthandling.NewInferenceResponse()
 	resp.Body["choices"] = []any{
@@ -426,7 +447,7 @@ func TestNemoResponseGuardBaseURLTrailingSlash(t *testing.T) {
 
 // TestNemoResponseGuardFactory verifies the factory parses JSON and sets the instance name.
 func TestNemoResponseGuardFactory(t *testing.T) {
-	params := json.RawMessage(`{"nemoURL":"http://nemo:8000/v1/guardrail/checks"}`)
+	params := json.RawMessage(`{"nemoURL":"https://nemo:8000/v1/guardrail/checks"}`)
 	p, err := NemoResponseGuardFactory("my-output-guard", params, nil)
 	require.NoError(t, err)
 	require.NotNil(t, p)

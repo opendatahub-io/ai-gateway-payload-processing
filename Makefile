@@ -19,11 +19,15 @@ CGO_ENABLED ?= 1
 
 ifeq ($(GO_STRICTFIPS),true)
   GOEXPERIMENT ?= strictfipsruntime
+  GODEBUG ?= fips140=only
 endif
 
 GO_ENV := CGO_ENABLED=$(CGO_ENABLED)
 ifdef GOEXPERIMENT
   GO_ENV += GOEXPERIMENT=$(GOEXPERIMENT)
+endif
+ifdef GODEBUG
+  GO_ENV += GODEBUG=$(GODEBUG)
 endif
 
 DOCKER_BUILDX_CMD ?= docker buildx

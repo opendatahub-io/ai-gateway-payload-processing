@@ -41,6 +41,46 @@ spec:
     # example: project: my-gcp-project
 ```
 
+### Port and TLS annotations
+
+By default, the reconciler creates Istio networking resources with port 443 and TLS mode
+`SIMPLE`. To connect to backends on a different port or over plain HTTP, set these
+annotations on the ExternalProvider:
+
+| Annotation | Default | Description |
+|------------|---------|-------------|
+| `inference.opendatahub.io/port` | `443` | Backend port (1–65535) |
+| `inference.opendatahub.io/tls` | `"true"` | TLS origination — `"true"` (SIMPLE) or `"false"` (DISABLE) |
+
+```yaml
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: my-vllm
+  namespace: llm
+  annotations:
+    inference.opendatahub.io/port: "8080"
+    inference.opendatahub.io/tls: "false"
+spec:
+  provider: openai
+  endpoint: vllm.internal.svc
+  auth:
+    type: oauth2
+    secretRef:
+      name: vllm-sa
+```
+
+> **Note:** Disabling TLS is not allowed with `apikey` or `sigv4` auth types.
+> Plaintext transport would expose credentials to network observers (CWE-319).
+> Use `oauth2` auth when connecting to internal backends over plain HTTP.
+
+When TLS is disabled, the ServiceEntry protocol switches from HTTPS to HTTP and the
+DestinationRule TLS mode changes from `SIMPLE` to `DISABLE`.
+
+Legacy `maas.opendatahub.io/port` and `maas.opendatahub.io/tls` annotations on the
+old `maas.opendatahub.io/v1alpha1 ExternalModel` CRD are automatically forwarded
+to the new annotation keys during migration.
+
 ### Auth types
 
 | Type | Description | Secret fields |
@@ -48,7 +88,6 @@ spec:
 | `apikey` | HTTP header auth (API key) | `api-key` |
 | `sigv4` | AWS SigV4 request signing | `aws-access-key-id`, `aws-secret-access-key`, `aws-session-token` (optional) |
 | `oauth2` | GCP service account → OAuth2 Bearer token | `gcp-service-account-json` |
-| `none` | Strip client auth, inject nothing (mTLS routes) | — |
 
 ### Credential Secret
 
@@ -275,3 +314,6 @@ spec:
 | `authType credentials not found` | Secret missing `ipp-managed` label | `kubectl label secret <name> inference.llm-d.ai/ipp-managed=true` |
 | `path has unresolved placeholders [location]` | Config key missing from provider and model | Add `location: <value>` to ExternalProvider config |
 | `unsupported format combination: openai-chat → azure-openai` | Wrong `apiFormat` value | Use `openai-chat` for Azure OpenAI, not `azure-openai` |
+| `invalid inference.opendatahub.io/port annotation` | Port annotation not a valid integer 1–65535 | Fix the annotation value |
+| `invalid inference.opendatahub.io/tls annotation` | TLS annotation not exactly `"true"` or `"false"` | Use lowercase `"true"` or `"false"` (not `"True"`, `"1"`, etc.) |
+| `insecure transport configuration: plaintext transport (TLS disabled) is not allowed with auth type "apikey"` | TLS disabled with `apikey` or `sigv4` auth | Enable TLS (`"true"`) or switch to `oauth2` auth — plaintext transport exposes credentials (CWE-319) |

@@ -124,8 +124,17 @@ func createTestNamespace(t *testing.T) string {
 
 func createExternalProvider(t *testing.T, name, namespace, endpoint string) {
 	t.Helper()
+	createExternalProviderWithAnnotations(t, name, namespace, endpoint, nil)
+}
+
+func createExternalProviderWithAnnotations(t *testing.T, name, namespace, endpoint string, annotations map[string]string) {
+	t.Helper()
 	provider := &inferencev1alpha1.ExternalProvider{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Annotations: annotations,
+		},
 		Spec: inferencev1alpha1.ExternalProviderSpec{
 			Provider: "openai",
 			Endpoint: endpoint,
@@ -351,6 +360,40 @@ func TestReconcile_TwoModelsOneProvider(t *testing.T) {
 	assert.Equal(t, "gpt35", hr2.OwnerReferences[0].Name)
 }
 
+func TestReconcile_CustomPortProvider(t *testing.T) {
+	ns := createTestNamespace(t)
+	createExternalProviderWithAnnotations(t, "vllm-provider", ns, "vllm.internal.svc", map[string]string{
+		ctrlcommon.AnnotationPort: "8080",
+		ctrlcommon.AnnotationTLS:  "false",
+	})
+
+	model := newExternalModel("vllm-model", ns, "vllm-provider", "my-model")
+	require.NoError(t, k8sClient.Create(ctx, model))
+
+	waitForModelPhase(t, "vllm-model", ns, "Ready")
+
+	// Verify HTTPRoute uses custom port in backend ref
+	hr := &gatewayapiv1.HTTPRoute{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "vllm-model", Namespace: ns}, hr))
+
+	require.Len(t, hr.Spec.Rules, 4)
+	assert.Equal(t, gatewayapiv1.PortNumber(8080), *hr.Spec.Rules[0].BackendRefs[0].Port)
+}
+
+func TestBuildHTTPRoute_CustomPort(t *testing.T) {
+	refs := []resolvedRef{{
+		providerName: "my-vllm", providerEndpoint: "vllm.internal.svc", targetModel: "my-model", port: 8080,
+	}}
+	hr := buildHTTPRoute(refs, "model1", "models",
+		"default-gateway", "openshift-ingress", "300s", commonLabels("model1"))
+
+	require.Len(t, hr.Spec.Rules, 4)
+	// Per-provider rule
+	assert.Equal(t, gatewayapiv1.PortNumber(8080), *hr.Spec.Rules[0].BackendRefs[0].Port)
+	// Fallback rule
+	assert.Equal(t, gatewayapiv1.PortNumber(8080), *hr.Spec.Rules[2].BackendRefs[0].Port)
+}
+
 // --- resource builder tests (folded from resources_test.go) ---
 
 func TestCommonLabels(t *testing.T) {
@@ -362,9 +405,9 @@ func TestCommonLabels(t *testing.T) {
 
 func TestBuildHTTPRoute_SingleProvider(t *testing.T) {
 	refs := []resolvedRef{{
-		providerName: "my-openai", providerEndpoint: "api.openai.com", targetModel: "gpt-4o",
+		providerName: "my-openai", providerEndpoint: "api.openai.com", targetModel: "gpt-4o", port: 443,
 	}}
-	hr := buildHTTPRoute(refs, "gpt4", "models", 443,
+	hr := buildHTTPRoute(refs, "gpt4", "models",
 		"default-gateway", "openshift-ingress", "300s", commonLabels("gpt4"))
 
 	assert.Equal(t, "gpt4", hr.Name)
@@ -389,10 +432,10 @@ func TestBuildHTTPRoute_SingleProvider(t *testing.T) {
 
 func TestBuildHTTPRoute_MultiProvider(t *testing.T) {
 	refs := []resolvedRef{
-		{providerName: "anthropic", providerEndpoint: "api.anthropic.com", targetModel: "claude-opus-4-8"},
-		{providerName: "sim-vertex", providerEndpoint: "sim.example.com", targetModel: "claude-opus-4-8"},
+		{providerName: "anthropic", providerEndpoint: "api.anthropic.com", targetModel: "claude-opus-4-8", port: 443},
+		{providerName: "sim-vertex", providerEndpoint: "sim.example.com", targetModel: "claude-opus-4-8", port: 443},
 	}
-	hr := buildHTTPRoute(refs, "claude", "models", 443,
+	hr := buildHTTPRoute(refs, "claude", "models",
 		"my-gateway", "gateway-ns", "300s", commonLabels("claude"))
 
 	// 6 rules: 2 per-provider x 2 + 2 fallback
