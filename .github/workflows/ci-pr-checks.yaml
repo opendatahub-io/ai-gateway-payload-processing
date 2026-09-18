@@ -65,3 +65,26 @@ jobs:
       - name: Run make test
         shell: bash
         run: make test
+
+  # Runs unit tests with GO_STRICTFIPS=true using the same image tag as the Dockerfile builder.
+  test-unit-fips:
+    name: Unit tests (FIPS)
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.src == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: registry.access.redhat.com/ubi9/go-toolset:1.26
+      options: --user root
+    permissions:
+      contents: read
+    env:
+      HOME: /root
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Run make test-unit with FIPS
+        run: make test-unit GO_STRICTFIPS=true

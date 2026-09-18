@@ -19,11 +19,13 @@ package nemo
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -72,15 +74,29 @@ func newNemoGuardBase(nemoURL string, timeoutSeconds int) (*nemoGuardBase, error
 	if nemoURL == "" {
 		return nil, errors.New("nemoURL is required")
 	}
+	parsed, err := url.ParseRequestURI(nemoURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid nemoURL: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("nemoURL must use https:// scheme, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return nil, errors.New("nemoURL must include a host")
+	}
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = defaultTimeoutSec * time.Second
 	}
 
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+
 	return &nemoGuardBase{
 		nemoURL: nemoURL,
 		httpClient: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: tr,
 		},
 	}, nil
 }

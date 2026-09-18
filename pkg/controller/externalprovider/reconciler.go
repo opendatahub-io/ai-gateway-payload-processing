@@ -89,7 +89,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileResources(ctx, logger, provider); err != nil {
+	// Validate connection annotations before reconciling resources.
+	// These are user-configuration errors that will not resolve on retry.
+	conn, err := ctrlcommon.GetConnectionSettings(provider.GetAnnotations())
+	if err != nil {
+		msg := fmt.Sprintf("invalid connection annotations: %s", err)
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InvalidAnnotations", msg)
+		return ctrl.Result{}, nil
+	}
+	if err := ctrlcommon.ValidateConnectionSecurity(conn, provider.Spec.Auth.Type); err != nil {
+		msg := fmt.Sprintf("insecure transport configuration: %s", err)
+		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InsecureTransport", msg)
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.reconcileResources(ctx, logger, provider, conn); err != nil {
 		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
 		return ctrl.Result{}, err
 	}
@@ -98,15 +112,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider) error {
+func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider, conn ctrlcommon.ConnectionSettings) error {
 	name := provider.Name
 	ns := provider.Namespace
 	endpoint := provider.Spec.Endpoint
 	labels := commonLabels(name)
-	port := ctrlcommon.DefaultTLSPort
 
 	// 1. ExternalName Service
-	svc := buildService(endpoint, name, ns, port, labels)
+	svc := buildService(endpoint, name, ns, conn.Port, labels)
 	if err := controllerutil.SetControllerReference(provider, svc, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner on Service: %w", err)
 	}
@@ -115,14 +128,14 @@ func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger,
 	}
 
 	// 2. ServiceEntry
-	se := buildServiceEntry(endpoint, name, ns, port, labels)
+	se := buildServiceEntry(endpoint, name, ns, conn.Port, conn.TLSEnabled, labels)
 	setUnstructuredOwner(provider, se)
 	if err := r.applyUnstructured(ctx, logger, se); err != nil {
 		return fmt.Errorf("failed to apply ServiceEntry: %w", err)
 	}
 
-	// 3. DestinationRule (TLS origination)
-	dr := buildDestinationRule(endpoint, name, ns, labels)
+	// 3. DestinationRule (TLS origination when TLS is enabled)
+	dr := buildDestinationRule(endpoint, name, ns, conn.TLSEnabled, labels)
 	setUnstructuredOwner(provider, dr)
 	if err := r.applyUnstructured(ctx, logger, dr); err != nil {
 		return fmt.Errorf("failed to apply DestinationRule: %w", err)
@@ -132,6 +145,8 @@ func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger,
 		"service", name,
 		"serviceEntry", name,
 		"destinationRule", name,
+		"port", conn.Port,
+		"tls", conn.TLSEnabled,
 	)
 	return nil
 }
@@ -275,13 +290,20 @@ func buildService(endpoint, name, namespace string, port int32, labels map[strin
 	}
 }
 
-func buildServiceEntry(endpoint, name, namespace string, port int32, labels map[string]string) *unstructured.Unstructured {
+func buildServiceEntry(endpoint, name, namespace string, port int32, tlsEnabled bool, labels map[string]string) *unstructured.Unstructured {
 	se := &unstructured.Unstructured{}
 	se.SetAPIVersion("networking.istio.io/v1")
 	se.SetKind("ServiceEntry")
 	se.SetName(name)
 	se.SetNamespace(namespace)
 	se.SetLabels(labels)
+
+	protocol := "HTTPS"
+	portName := "https"
+	if !tlsEnabled {
+		protocol = "HTTP"
+		portName = "http"
+	}
 
 	se.Object["spec"] = map[string]any{
 		"hosts":      []any{endpoint},
@@ -290,15 +312,15 @@ func buildServiceEntry(endpoint, name, namespace string, port int32, labels map[
 		"ports": []any{
 			map[string]any{
 				"number":   int64(port),
-				"name":     "https",
-				"protocol": "HTTPS",
+				"name":     portName,
+				"protocol": protocol,
 			},
 		},
 	}
 	return se
 }
 
-func buildDestinationRule(endpoint, name, namespace string, labels map[string]string) *unstructured.Unstructured {
+func buildDestinationRule(endpoint, name, namespace string, tlsEnabled bool, labels map[string]string) *unstructured.Unstructured {
 	dr := &unstructured.Unstructured{}
 	dr.SetAPIVersion("networking.istio.io/v1")
 	dr.SetKind("DestinationRule")
@@ -306,11 +328,16 @@ func buildDestinationRule(endpoint, name, namespace string, labels map[string]st
 	dr.SetNamespace(namespace)
 	dr.SetLabels(labels)
 
+	tlsMode := "SIMPLE"
+	if !tlsEnabled {
+		tlsMode = "DISABLE"
+	}
+
 	dr.Object["spec"] = map[string]any{
 		"host": endpoint,
 		"trafficPolicy": map[string]any{
 			"tls": map[string]any{
-				"mode": "SIMPLE",
+				"mode": tlsMode,
 			},
 		},
 	}
