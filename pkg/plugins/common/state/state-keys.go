@@ -37,11 +37,13 @@ const (
 	ClusterNameEnv      = "CLUSTER_NAME"
 
 	// Metering CycleState keys
-	MeteringUsernameKey     = "metering-username"
-	MeteringGroupKey        = "metering-group"
-	MeteringSubscriptionKey = "metering-subscription"
-	MeteringModelKey        = "metering-model"
-	MeteringRequestTimeKey  = "metering-request-time"
-	MeteringLastUsageKey    = "metering-last-usage"
-	MeteringUserAgentKey    = "metering-user-agent"
+	MeteringUsernameKey       = "metering-username"
+	MeteringGroupKey          = "metering-group"
+	MeteringSubscriptionKey   = "metering-subscription"
+	MeteringModelKey          = "metering-model"
+	MeteringRequestTimeKey    = "metering-request-time"
+	MeteringLastUsageKey      = "metering-last-usage"
+	MeteringUserAgentKey      = "metering-user-agent"
+	MeteringOrganizationIDKey = "metering-organization-id"
+	MeteringCostCenterKey     = "metering-cost-center"
 )
