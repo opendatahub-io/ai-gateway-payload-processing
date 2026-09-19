@@ -20,12 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 const (
@@ -97,13 +97,14 @@ func (p *NemoRequestGuardPlugin) WithName(name string) *NemoRequestGuardPlugin {
 // conveyed through the response body "status" field: "passed" means the request passed
 // all rails, "modified" means content was redacted (currently passed through as-is),
 // and "blocked" means the request is blocked.
-func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *plugin.CycleState, request *requesthandling.InferenceRequest) error {
+func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
 	model, ok := request.Body["model"].(string)
 	if !ok {
 		model = ""
 	}
 
-	messages, err := extractMessages(request.Body)
+	inputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.InputAPIFormatKey)
+	messages, err := extractMessages(request.Body, inputFormat)
 	if err != nil {
 		return errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("malformed request body: %v", err)}
 	}
@@ -130,66 +131,4 @@ func (p *NemoRequestGuardPlugin) ProcessRequest(ctx context.Context, _ *plugin.C
 		return errcommon.Error{Code: code, Msg: callErr.Error()}
 	}
 	return nil
-}
-
-// extractMessages returns user-supplied text as a message slice suitable for NeMo's
-// OpenAI-compatible chat endpoint. It supports two payload formats:
-//
-//  1. OpenAI chat: top-level "messages" array → forwards all messages.
-//  2. MCP JSON-RPC: {"jsonrpc":"2.0","params":{"arguments":{…}}} → concatenates
-//     all string argument values into a single user message.
-//
-// Returns (nil, nil) when no content is found.
-func extractMessages(body map[string]any) ([]any, error) {
-	if raw, ok := body["messages"]; ok {
-		return extractOpenAIMessages(raw)
-	}
-	if _, ok := body["jsonrpc"]; ok {
-		return extractMCPArguments(body)
-	}
-	return nil, nil // not an inference request (e.g. API key management, model listing)
-}
-
-// extractOpenAIMessages parses an OpenAI-style "messages" value. All messages are forwarded
-// so NeMo can evaluate the full conversation context.
-func extractOpenAIMessages(raw any) ([]any, error) {
-	slice, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("messages is not an array")
-	}
-	if len(slice) == 0 {
-		return nil, nil
-	}
-	return slice, nil
-}
-
-// extractMCPArguments extracts text from an MCP JSON-RPC tools/call
-// payload. String values inside params.arguments are sorted by key and joined
-// into a single "user" message so NeMo can evaluate them with input rails.
-func extractMCPArguments(body map[string]any) ([]any, error) {
-	params, ok := body["params"].(map[string]any)
-	if !ok {
-		return nil, nil
-	}
-	args, ok := params["arguments"].(map[string]any)
-	if !ok {
-		return nil, nil
-	}
-
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var parts []string
-	for _, k := range keys {
-		if s, ok := args[k].(string); ok {
-			parts = append(parts, s)
-		}
-	}
-	if len(parts) == 0 {
-		return nil, nil
-	}
-	return []any{map[string]string{"role": "user", "content": strings.Join(parts, "\n")}}, nil
 }
