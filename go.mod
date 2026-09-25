@@ -10,8 +10,8 @@ require (
 	github.com/onsi/gomega v1.43.0
 	github.com/stretchr/testify v1.12.1
 	k8s.io/api v0.35.8
-	k8s.io/apimachinery v0.35.8
-	k8s.io/kubectl v0.35.6
+	k8s.io/apimachinery v0.35.9
+	k8s.io/kubectl v0.35.8
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/gateway-api v1.5.1
 )
