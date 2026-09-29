@@ -1,12 +1,8 @@
-# Dockerfile has specific requirement to put this ARG at the beginning:
-# https://docs.docker.com/engine/reference/builder/#understand-how-arg-and-from-interact
-ARG GOLANG_VERSION=1.26
-
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 
 ## Multistage build
-FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/go-toolset:$GOLANG_VERSION AS builder
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/go-toolset@sha256:0a4666f7a4eb0644c97a73cba198eb268691b270d97831822689e7a2088f87be AS builder
 ARG CGO_ENABLED=1
 ARG TARGETOS
 ARG TARGETARCH
@@ -33,7 +29,7 @@ RUN VERSION_PKG="$(go list -f '{{.ImportPath}}' github.com/llm-d/llm-d-inference
 USER 1001
 
 # Multistage deploy
-FROM --platform=$TARGETPLATFORM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:463cae32c6f6f5594b11a5c22de275016bd8545ce58a6373388e8b24f13fc15c
+FROM --platform=$TARGETPLATFORM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8ebe2ad8fdf3cab3e5a53c1edc69194c98209cfadab24b884f4ad9ebcf7bbbfc
 
 WORKDIR /
 COPY --from=builder /bbr /bbr
