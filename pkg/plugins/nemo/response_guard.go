@@ -24,6 +24,8 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
 
 const (
@@ -94,8 +96,9 @@ func (p *NemoResponseGuardPlugin) WithName(name string) *NemoResponseGuardPlugin
 // conveyed through the response body "status" field: "passed" means the response passed
 // all rails, "modified" means content was redacted (currently passed through as-is),
 // and "blocked" means the response is blocked.
-func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, _ *plugin.CycleState, response *requesthandling.InferenceResponse) error {
-	messages, err := extractAssistantMessages(response.Body)
+func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse) error {
+	inputFormat, _ := plugin.ReadCycleStateKey[apiformat.APIFormat](cycleState, state.InputAPIFormatKey)
+	messages, err := extractAssistantMessages(response.Body, inputFormat)
 	if err != nil {
 		return errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("malformed response body: %v", err)}
 	}
@@ -122,80 +125,4 @@ func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, _ *plugin
 		return errcommon.Error{Code: code, Msg: callErr.Error()}
 	}
 	return nil
-}
-
-// extractAssistantMessages extracts assistant content from a response body.
-// It supports two payload formats:
-// 1. OpenAI chat (via "choices"): choices (fail closed), and nil when no content is found.
-// 2. MCP JSON-RPC: {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Hello"}]}}
-//
-// Returns (nil, nil) when no content is found.
-func extractAssistantMessages(body map[string]any) ([]map[string]string, error) {
-	if raw, ok := body["choices"]; ok {
-		return extractOpenAIAssistantMessagesFromChoices(raw)
-	}
-	if _, ok := body["jsonrpc"]; ok {
-		return extractMCPTextContent(body)
-	}
-	return nil, nil
-}
-
-// extractOpenAIAssistantMessagesFromChoices parses OpenAI-style choices into assistant messages.
-func extractOpenAIAssistantMessagesFromChoices(raw any) ([]map[string]string, error) {
-	choiceSlice, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("choices field has unsupported type")
-	}
-	if len(choiceSlice) == 0 {
-		return nil, nil
-	}
-
-	var messages []map[string]string
-	for i, choice := range choiceSlice {
-		choiceMap, ok := choice.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("choice[%d] has unsupported type", i)
-		}
-		msg, ok := choiceMap["message"].(map[string]any)
-		if !ok {
-			msg, ok = choiceMap["delta"].(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("choice[%d] has no message or delta field", i)
-			}
-		}
-		rawContent, exists := msg["content"]
-		if !exists || rawContent == nil {
-			continue
-		}
-		content, ok := rawContent.(string)
-		if !ok {
-			return nil, fmt.Errorf("choice[%d] content is not a string", i)
-		}
-		if content == "" {
-			continue
-		}
-		messages = append(messages, map[string]string{"role": "assistant", "content": content})
-	}
-	return messages, nil
-}
-
-// extractMCPTextContent parses MCP text content into assistant messages.
-func extractMCPTextContent(body map[string]any) ([]map[string]string, error) {
-	result, _ := body["result"].(map[string]any)
-	contentSlice, _ := result["content"].([]any)
-	var messages []map[string]string
-	for _, item := range contentSlice {
-		entry, _ := item.(map[string]any)
-		if entry["type"] != "text" {
-			continue
-		}
-		text, ok := entry["text"].(string)
-		if !ok {
-			return nil, fmt.Errorf("mcp text content is not a string")
-		}
-		if text != "" {
-			messages = append(messages, map[string]string{"role": "assistant", "content": text})
-		}
-	}
-	return messages, nil
 }
