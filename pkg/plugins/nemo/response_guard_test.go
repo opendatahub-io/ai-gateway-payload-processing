@@ -327,7 +327,7 @@ func TestNemoResponseGuardProcessResponse(t *testing.T) {
 		{
 			name: "allow: OpenResponses output passes NeMo",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewEncoder(w).Encode(map[string]any{"status": "passed"}); err != nil {
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": "success"}); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 				}
 			},
