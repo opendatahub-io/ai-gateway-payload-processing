@@ -131,7 +131,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		Spec: inferencev1alpha1.ExternalModelSpec{
 			ExternalProviderRefs: []inferencev1alpha1.ExternalProviderRef{
 				{
-					Ref:         inferencev1alpha1.NameReference{Name: req.Name},
+					Ref:         inferencev1alpha1.ExternalProviderReference{Name: req.Name},
 					TargetModel: targetModel,
 					APIFormat:   mapProviderToAPIFormat(providerName),
 					Path:        mapProviderToDefaultPath(providerName),

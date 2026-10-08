@@ -54,12 +54,7 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	if errors.IsNotFound(err) || !model.GetDeletionTimestamp().IsZero() {
-		// On deletion, use the CRD name as fallback since spec may be empty.
-		deleteName := model.Spec.ModelName
-		if deleteName == "" {
-			deleteName = req.Name
-		}
-		r.store.deleteModel(deleteName)
+		r.store.deleteModel(req.NamespacedName)
 		logger.Info("ExternalModel removed from store", "name", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, nil
 	}
@@ -71,9 +66,14 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// Resolve all refs whose providers are available in the store.
 	var resolved []*resolvedProviderRef
+	unsupportedNamespace := false
 	for i := range model.Spec.ExternalProviderRefs {
-		resolvedRef, err := r.resolveRef(req.Namespace, &model.Spec.ExternalProviderRefs[i])
+		ref := &model.Spec.ExternalProviderRefs[i]
+		resolvedRef, err := r.resolveRef(req.Namespace, ref)
 		if err != nil {
+			if ref.Ref.Namespace != "" && ref.Ref.Namespace != req.Namespace {
+				unsupportedNamespace = true
+			}
 			logger.Error(err, "failed to resolve ref, skipping", "provider", model.Spec.ExternalProviderRefs[i].Ref.Name)
 			continue
 		}
@@ -81,17 +81,25 @@ func (r *externalModelReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	if len(resolved) == 0 {
+		if unsupportedNamespace {
+			// Stop serving a previously cached local provider after an update to
+			// an unsupported foreign namespace.
+			r.store.deleteModel(req.NamespacedName)
+		}
 		logger.Info("no ExternalProvider available for any ref, requeuing")
 		return ctrl.Result{RequeueAfter: providerRequeueDelay}, nil
 	}
 
-	r.store.addOrUpdateModel(modelName, &externalModelInfo{modelName: modelName, refs: resolved})
+	r.store.addOrUpdateModel(modelName, &externalModelInfo{owner: req.NamespacedName, modelName: modelName, refs: resolved})
 	logger.Info("updated model store", "modelName", modelName, "resolvedRefs", len(resolved))
 	return ctrl.Result{}, nil
 }
 
 // resolveRef resolves a single ExternalProviderRef to provider info.
 func (r *externalModelReconciler) resolveRef(namespace string, ref *inferencev1alpha1.ExternalProviderRef) (*resolvedProviderRef, error) {
+	if ref.Ref.Namespace != "" && ref.Ref.Namespace != namespace {
+		return nil, fmt.Errorf("cross-namespace ExternalProvider reference %q is not supported", ref.Ref.Namespace+"/"+ref.Ref.Name)
+	}
 	providerKey := types.NamespacedName{Namespace: namespace, Name: ref.Ref.Name}
 	providerInfo, found := r.store.getProvider(providerKey)
 	if !found {

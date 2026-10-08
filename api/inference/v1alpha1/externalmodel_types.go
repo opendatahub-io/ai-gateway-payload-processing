@@ -54,13 +54,25 @@ type ExternalModelSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	ExternalProviderRefs []ExternalProviderRef `json:"externalProviderRefs"`
+
+	// GatewayRefs explicitly selects the Praxis gateways that serve this model.
+	// Omission retains tenant-local resolution; it does not select a global gateway.
+	// Names are distinct across namespaces. An explicit empty list is invalid.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	// +listType=map
+	// +listMapKey=namespace
+	// +listMapKey=name
+	GatewayRefs []NamespacedObjectReference `json:"gatewayRefs,omitempty"`
 }
 
 // ExternalProviderRef binds this model to a specific provider with translation config.
 type ExternalProviderRef struct {
-	// Ref identifies the ExternalProvider CR (must be in the same namespace).
+	// Ref identifies the ExternalProvider CR. An omitted namespace means the
+	// ExternalModel namespace.
 	// +kubebuilder:validation:Required
-	Ref NameReference `json:"ref"`
+	Ref ExternalProviderReference `json:"ref"`
 
 	// TargetModel is the provider-specific model identifier.
 	// e.g. "gpt-4o", "anthropic.claude-3-opus", "claude-sonnet-4-5-20241022".
@@ -94,7 +106,8 @@ type ExternalProviderRef struct {
 	Config map[string]string `json:"config,omitempty"`
 
 	// Auth overrides the ExternalProvider authentication for this model-provider binding.
-	// If not set, the ExternalProvider auth is used.
+	// Its Secret is in the ExternalModel namespace. If not set, the
+	// ExternalProvider auth and its provider-local Secret are used.
 	// +optional
 	Auth *AuthConfig `json:"auth,omitempty"`
 
@@ -122,11 +135,54 @@ type ExternalModelStatus struct {
 	// HTTPRouteName is the name of the HTTPRoute created by the controller
 	// for this ExternalModel. Consumers (e.g., maas-controller) can read this
 	// to attach policies without assuming naming conventions.
+	// Retained for legacy models and a single gateway attachment whose route is
+	// in the model namespace. Empty for multiple attachments or another route namespace.
 	// +optional
 	HTTPRouteName string `json:"httpRouteName,omitempty"`
 
+	// ObservedGeneration is the latest spec generation processed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// OverlayDigest is the content digest distributed to Praxis. It attests to
+	// distribution, not to request-time serving.
+	// +optional
+	OverlayDigest string `json:"overlayDigest,omitempty"`
+
+	// OverlayGeneration is the monotonic source generation distributed to Praxis.
+	// +optional
+	OverlayGeneration uint64 `json:"overlayGeneration,omitempty"`
+
 	// Conditions represent the latest available observations of the model's state.
 	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Gateways reports reconciliation and distribution readiness per gateway.
+	// Aggregate Ready requires all requested attachments; an independently ready
+	// attachment remains usable during partial failure. Readiness does not attest
+	// to successful inference requests.
+	// +optional
+	// +listType=map
+	// +listMapKey=namespace
+	// +listMapKey=name
+	Gateways []ExternalModelGatewayStatus `json:"gateways,omitempty"`
+}
+
+// ExternalModelGatewayStatus is the result for one gateway attachment.
+type ExternalModelGatewayStatus struct {
+	// Name and Namespace identify the Gateway, not the route.
+	NamespacedObjectReference `json:",inline"`
+
+	// HTTPRouteRef identifies the HTTPRoute for this attachment, when available.
+	// +optional
+	HTTPRouteRef *NamespacedObjectReference `json:"httpRouteRef,omitempty"`
+
+	// Conditions describe this attachment. Each condition's observedGeneration
+	// identifies the ExternalModel generation it reflects. Missing, stale or
+	// failed status must not fall back to another gateway's result.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 

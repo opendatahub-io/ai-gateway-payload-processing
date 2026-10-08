@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/provider"
 )
@@ -48,30 +49,37 @@ func TestModelStore_GetByName_NotFound(t *testing.T) {
 	assert.False(t, found)
 }
 
-func TestModelStore_DeleteByName(t *testing.T) {
+func TestModelStore_DeleteByOwner(t *testing.T) {
 	store := newInfoStore()
-	store.addOrUpdateModel("claude-opus-4-8", &externalModelInfo{
-		modelName: "claude-opus-4-8",
-		refs:      []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}},
-	})
+	owner := types.NamespacedName{Namespace: "models", Name: "model"}
+	for _, name := range []string{"old-alias", "current-alias"} {
+		store.addOrUpdateModel(name, &externalModelInfo{owner: owner, modelName: name})
+	}
+	other := &externalModelInfo{owner: types.NamespacedName{Namespace: "other", Name: owner.Name}, modelName: "other-alias"}
+	store.addOrUpdateModel(other.modelName, other)
 
-	_, foundBefore := store.getModelByName("claude-opus-4-8")
-	assert.True(t, foundBefore)
-
-	store.deleteModel("claude-opus-4-8")
-	_, foundAfter := store.getModelByName("claude-opus-4-8")
-	assert.False(t, foundAfter)
+	store.deleteModel(owner)
+	for _, name := range []string{"old-alias", "current-alias"} {
+		_, found := store.getModelByName(name)
+		assert.False(t, found, "all aliases owned by the deleted resource must be removed")
+	}
+	info, found := store.getModelByName(other.modelName)
+	assert.True(t, found)
+	assert.Same(t, other, info)
 }
 
 func TestModelStore_UniqueByModelName(t *testing.T) {
 	store := newInfoStore()
+	owner := types.NamespacedName{Namespace: "models", Name: "first"}
 	store.addOrUpdateModel("shared-model", &externalModelInfo{
+		owner:     owner,
 		modelName: "shared-model",
 		refs:      []*resolvedProviderRef{{provider: provider.OpenAI, weight: 1}},
 	})
 
 	// Same modelName overwrites — no namespace isolation
 	store.addOrUpdateModel("shared-model", &externalModelInfo{
+		owner:     types.NamespacedName{Namespace: owner.Namespace, Name: "second"},
 		modelName: "shared-model",
 		refs:      []*resolvedProviderRef{{provider: provider.Anthropic, weight: 1}},
 	})
@@ -79,4 +87,9 @@ func TestModelStore_UniqueByModelName(t *testing.T) {
 	info, found := store.getModelByName("shared-model")
 	assert.True(t, found)
 	assert.Equal(t, provider.Anthropic, info.refs[0].provider, "last write wins")
+
+	store.deleteModel(owner)
+	after, found := store.getModelByName("shared-model")
+	assert.True(t, found, "the replaced owner must not delete the current owner's mapping")
+	assert.Same(t, info, after)
 }

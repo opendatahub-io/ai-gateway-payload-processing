@@ -61,7 +61,7 @@ func newTestModel(name, ns string, refs ...inferencev1alpha1.ExternalProviderRef
 
 func newRef(providerName, targetModel, apiFormat, path string) inferencev1alpha1.ExternalProviderRef {
 	return inferencev1alpha1.ExternalProviderRef{
-		Ref:         inferencev1alpha1.NameReference{Name: providerName},
+		Ref:         inferencev1alpha1.ExternalProviderReference{Name: providerName},
 		TargetModel: targetModel,
 		APIFormat:   apiFormat,
 		Path:        path,
@@ -136,20 +136,32 @@ func TestModelReconciler_ModelNameOverride(t *testing.T) {
 
 func TestModelReconciler_DeletedCR(t *testing.T) {
 	key := types.NamespacedName{Namespace: "models", Name: "deleted"}
-	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{}}
+	for _, modelName := range []string{key.Name, "custom-alias"} {
+		for _, deleting := range []bool{false, true} {
+			t.Run(modelName+"/"+map[bool]string{false: "deleted", true: "deleting"}[deleting], func(t *testing.T) {
+				reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{}}
+				if deleting {
+					model := newTestModel(key.Name, key.Namespace)
+					model.Spec.ModelName = modelName
+					model.DeletionTimestamp = ptr.To(metav1.Now())
+					reader.objects[key] = model
+				}
 
-	store := newInfoStore()
-	store.addOrUpdateModel(key.Name, &externalModelInfo{modelName: key.Name, refs: []*resolvedProviderRef{
-		{provider: "openai", targetModel: "gpt-4o", weight: 1},
-	}})
+				store := newInfoStore()
+				store.addOrUpdateModel(modelName, &externalModelInfo{owner: key, modelName: modelName, refs: []*resolvedProviderRef{
+					{provider: "openai", targetModel: "gpt-4o", weight: 1},
+				}})
 
-	r := &externalModelReconciler{Reader: reader, store: store}
-	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
-	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
+				r := &externalModelReconciler{Reader: reader, store: store}
+				result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+				require.NoError(t, err)
+				assert.Equal(t, ctrl.Result{}, result)
 
-	_, found := store.getModelByName(key.Name)
-	assert.False(t, found, "store entry should be removed on delete")
+				_, found := store.getModelByName(modelName)
+				assert.False(t, found, "store entry should be removed on delete")
+			})
+		}
+	}
 }
 
 func TestModelReconciler_ProviderNotAvailable(t *testing.T) {
@@ -424,6 +436,115 @@ func TestModelReconciler_UnresolvedPlaceholderSkipsRef(t *testing.T) {
 
 	_, found := store.getModelByName(key.Name)
 	assert.False(t, found, "model should not be stored when path has unresolved placeholders")
+}
+
+func TestModelReconciler_ProviderNamespace(t *testing.T) {
+	for _, namespace := range []string{"", "models", "shared"} {
+		t.Run("namespace="+namespace, func(t *testing.T) {
+			key := types.NamespacedName{Namespace: "models", Name: "model"}
+			ref := newRef("provider", "gpt", "openai-chat", "/v1/chat/completions")
+			ref.Ref.Namespace = namespace
+			reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+				key: newTestModel(key.Name, key.Namespace, ref),
+			}}
+			store := newInfoStore()
+			for _, ns := range []string{"models", "shared"} {
+				store.addOrUpdateProvider(types.NamespacedName{Namespace: ns, Name: "provider"},
+					&providerInfo{provider: "openai", endpoint: ns + ".example.com"})
+			}
+			r := &externalModelReconciler{Reader: reader, store: store}
+			_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+			require.NoError(t, err)
+			info, found := store.getModelByName(key.Name)
+			if namespace == "shared" {
+				assert.False(t, found, "foreign references must not select either provider without authorization")
+			} else {
+				require.True(t, found)
+				require.Len(t, info.refs, 1)
+				assert.Equal(t, "models.example.com", info.refs[0].endpoint)
+			}
+		})
+	}
+}
+
+func TestModelReconciler_ProviderNamespaceUpdate(t *testing.T) {
+	for _, change := range []string{"foreign reference", "provider removed"} {
+		t.Run(change, func(t *testing.T) {
+			key := types.NamespacedName{Namespace: "models", Name: "model"}
+			providerKey := types.NamespacedName{Namespace: key.Namespace, Name: "provider"}
+			model := newTestModel(key.Name, key.Namespace, newRef("provider", "gpt", "openai-chat", "/v1/chat/completions"))
+			reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{key: model}}
+			store := newInfoStore()
+			store.addOrUpdateProvider(providerKey, &providerInfo{provider: "openai", endpoint: "local.example.com"})
+			r := &externalModelReconciler{Reader: reader, store: store}
+			req := ctrl.Request{NamespacedName: key}
+			_, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+
+			if change == "foreign reference" {
+				model.Spec.ExternalProviderRefs[0].Ref.Namespace = "shared"
+			} else {
+				store.deleteProvider(providerKey)
+			}
+			result, err := r.Reconcile(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, providerRequeueDelay, result.RequeueAfter)
+			_, found := store.getModelByName(key.Name)
+			if change == "foreign reference" {
+				assert.False(t, found, "explicit unsupported reference must stop serving the cached local provider")
+			} else {
+				assert.True(t, found, "transient provider unavailability must keep the last-known-good entry")
+			}
+		})
+	}
+}
+
+func TestModelReconciler_CleanupPreservesOtherOwners(t *testing.T) {
+	for _, namespace := range []string{"team-a", "team-b"} {
+		for _, cleanup := range []string{"foreign-reference", "deleted", "deleting"} {
+			t.Run(namespace+"/"+cleanup, func(t *testing.T) {
+				ownerKey := types.NamespacedName{Namespace: "team-a", Name: "owner-model"}
+				otherKey := types.NamespacedName{Namespace: namespace, Name: "shared-model"}
+				owner := newTestModel(ownerKey.Name, ownerKey.Namespace,
+					newRef("provider", "gpt", "openai-chat", "/v1/chat/completions"))
+				owner.Spec.ModelName = otherKey.Name
+				other := newTestModel(otherKey.Name, otherKey.Namespace,
+					newRef("provider", "gpt", "openai-chat", "/v1/chat/completions"))
+				other.Spec.ModelName = owner.Spec.ModelName
+				reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+					ownerKey: owner,
+					otherKey: other,
+				}}
+				store := newInfoStore()
+				store.addOrUpdateProvider(types.NamespacedName{Namespace: ownerKey.Namespace, Name: "provider"},
+					&providerInfo{provider: "openai", endpoint: "owner.example.com"})
+				r := &externalModelReconciler{Reader: reader, store: store}
+				_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: ownerKey})
+				require.NoError(t, err)
+				before, found := store.getModelByName(owner.Spec.ModelName)
+				require.True(t, found)
+
+				switch cleanup {
+				case "foreign-reference":
+					other.Spec.ExternalProviderRefs[0].Ref.Namespace = "foreign-providers"
+				case "deleted":
+					delete(reader.objects, otherKey)
+				case "deleting":
+					other.DeletionTimestamp = ptr.To(metav1.Now())
+				}
+				result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: otherKey})
+				require.NoError(t, err)
+				if cleanup == "foreign-reference" {
+					assert.Equal(t, providerRequeueDelay, result.RequeueAfter)
+				} else {
+					assert.Equal(t, ctrl.Result{}, result)
+				}
+				after, found := store.getModelByName(owner.Spec.ModelName)
+				require.True(t, found, "cleanup must preserve another ExternalModel's mapping")
+				assert.Same(t, before, after)
+			})
+		}
+	}
 }
 
 func TestMergeConfig(t *testing.T) {

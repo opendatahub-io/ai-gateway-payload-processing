@@ -16,17 +16,19 @@ limitations under the License.
 
 package v1alpha1
 
-// AuthConfig defines the authentication method for an ExternalProvider.
+// AuthConfig defines provider authentication or a per-model override.
 type AuthConfig struct {
 	// Type identifies the auth type for this provider.
 	// e.g. "apikey" (header based), "sigv4", etc.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=apikey;sigv4;oauth2
+	// "simple" is retained for installed-schema compatibility.
+	// +kubebuilder:validation:Enum=apikey;simple;sigv4;oauth2
 	Type string `json:"type"`
 
 	// SecretRef references a Kubernetes Secret containing the provider API key.
-	// The Secret must be in the same namespace as the ExternalProvider
-	// and must contain a data key "api-key" with the credential value.
+	// Provider-level auth uses the ExternalProvider namespace. A per-model
+	// override uses the ExternalModel namespace, even for a provider in another
+	// namespace. The Secret must contain a data key "api-key" with the credential value.
 	// +kubebuilder:validation:Required
 	SecretRef NameReference `json:"secretRef"`
 }
@@ -34,9 +36,46 @@ type AuthConfig struct {
 // NameReference is a reference to a Kubernetes resource by name.
 // The referenced resource must be in the same namespace.
 type NameReference struct {
+	// The pattern retains names accepted by the installed schema for compatibility.
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9\.\-]*[a-z0-9])?$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$`
 	Name string `json:"name"`
+}
+
+// ExternalProviderReference identifies an ExternalProvider. An omitted
+// Namespace means the ExternalModel namespace.
+type ExternalProviderReference struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// Namespace is the ExternalProvider namespace. Cross-namespace references
+	// require authorization in the provider namespace before serving.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// NamespacedObjectReference identifies a Gateway or HTTPRoute by its full identity.
+type NamespacedObjectReference struct {
+	// Name is the resource name, a Kubernetes DNS subdomain.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`
+	Name string `json:"name"`
+
+	// Namespace is the resource namespace, a Kubernetes DNS label.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Namespace string `json:"namespace"`
 }

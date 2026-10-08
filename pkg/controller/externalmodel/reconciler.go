@@ -128,7 +128,13 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 
 	var resolved []resolvedRef
 	var skipReasons []string
+	unsupportedNamespace := false
 	for _, ref := range model.Spec.ExternalProviderRefs {
+		if ref.Ref.Namespace != "" && ref.Ref.Namespace != model.Namespace {
+			unsupportedNamespace = true
+			skipReasons = append(skipReasons, fmt.Sprintf("cross-namespace ExternalProvider reference %q is not supported", ref.Ref.Namespace+"/"+ref.Ref.Name))
+			continue
+		}
 		provider := &inferencev1alpha1.ExternalProvider{}
 		providerKey := types.NamespacedName{Name: ref.Ref.Name, Namespace: model.Namespace}
 		if err := r.Get(ctx, providerKey, provider); err != nil {
@@ -164,6 +170,14 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 	}
 
 	if len(resolved) == 0 {
+		// A foreign reference is an explicit spec change, not a transient
+		// readiness failure, so withdraw the route instead of keeping last-known-good.
+		if unsupportedNamespace {
+			if err := r.deleteOwnedHTTPRoute(ctx, model); err != nil {
+				return fmt.Errorf("failed to remove stale HTTPRoute: %w", err)
+			}
+			model.Status.HTTPRouteName = ""
+		}
 		return fmt.Errorf("ExternalModel %q: no provider refs resolved successfully: %s", model.Name, strings.Join(skipReasons, "; "))
 	}
 
@@ -196,6 +210,18 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 		"targetModel", resolved[0].targetModel,
 	)
 	return nil
+}
+
+// deleteOwnedHTTPRoute deletes the HTTPRoute only if this ExternalModel controls it.
+func (r *Reconciler) deleteOwnedHTTPRoute(ctx context.Context, model *inferencev1alpha1.ExternalModel) error {
+	route := &gatewayapiv1.HTTPRoute{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(model), route); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if route.Labels[ctrlcommon.LabelManagedBy] != managedByValue || !metav1.IsControlledBy(route, model) {
+		return nil
+	}
+	return client.IgnoreNotFound(r.Delete(ctx, route, client.Preconditions{UID: &route.UID}))
 }
 
 func (r *Reconciler) setStatus(ctx context.Context, logger logr.Logger, model *inferencev1alpha1.ExternalModel, phase string, condStatus metav1.ConditionStatus, reason, message string) {
