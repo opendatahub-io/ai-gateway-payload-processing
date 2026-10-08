@@ -93,7 +93,7 @@ func (p *NemoResponseGuardPlugin) WithName(name string) *NemoResponseGuardPlugin
 // blocks the content.
 //
 // NeMo always returns HTTP 200 for both allowed and blocked responses. The decision is
-// conveyed through the response body "status" field: "passed" means the response passed
+// conveyed through the response body "status" field: "success" means the response passed
 // all rails, "modified" means content was redacted (currently passed through as-is),
 // and "blocked" means the response is blocked.
 func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse) error {
