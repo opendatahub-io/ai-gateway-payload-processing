@@ -18,6 +18,16 @@ This separation allows:
 - **Explicit API format selection** — declare which translation the gateway applies
 - **Path placeholder substitution** — parameterize provider-specific URL paths via config
 
+## Shared inference API schema
+
+`ai-gateway-controller` owns the inference API; see its
+[schema extension design](https://github.com/opendatahub-io/ai-gateway-controller/blob/main/DESIGN.md#inference-api-schema-extension).
+This repo keeps a local type mirror, following
+[ADR D2](https://github.com/opendatahub-io/architecture-decision-records/pull/165).
+The [schema fixture](../api/inference/v1alpha1/testdata/README.md) describes how
+to synchronize it. IPP does not serve the new gateway attachments, and it rejects
+provider references to another namespace instead of resolving a local provider.
+
 ## ExternalProvider
 
 An ExternalProvider represents a single provider account or endpoint. Multiple ExternalModels

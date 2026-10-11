@@ -55,18 +55,21 @@ spec:
             description: ExternalProviderSpec defines the desired state of ExternalProvider.
             properties:
               auth:
-                description: Auth configures how to authenticate with the provider.
+                description: |-
+                  Auth configures how to authenticate with the provider.
+                  Its Secret is in this ExternalProvider's namespace.
                 properties:
                   secretRef:
                     description: |-
                       SecretRef references a Kubernetes Secret containing the provider API key.
-                      The Secret must be in the same namespace as the ExternalProvider
-                      and must contain a data key "api-key" with the credential value.
+                      Provider-level auth uses the ExternalProvider namespace. A per-model
+                      override uses the ExternalModel namespace, even for a provider in another
+                      namespace. The Secret must contain a data key "api-key" with the credential value.
                     properties:
                       name:
                         maxLength: 253
                         minLength: 1
-                        pattern: ^[a-z0-9]([a-z0-9\.\-]*[a-z0-9])?$
+                        pattern: ^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$
                         type: string
                     required:
                     - name
@@ -75,8 +78,10 @@ spec:
                     description: |-
                       Type identifies the auth type for this provider.
                       e.g. "apikey" (header based), "sigv4", etc.
+                      "simple" is retained for installed-schema compatibility.
                     enum:
                     - apikey
+                    - simple
                     - sigv4
                     - oauth2
                     type: string
@@ -172,6 +177,11 @@ spec:
                   - type
                   type: object
                 type: array
+              observedGeneration:
+                description: ObservedGeneration is the latest spec generation processed
+                  by the controller.
+                format: int64
+                type: integer
               phase:
                 description: |-
                   Phase represents the current reconciliation phase.

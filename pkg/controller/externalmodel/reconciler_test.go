@@ -156,7 +156,7 @@ func newExternalModel(name, namespace, providerName, targetModel string) *infere
 		Spec: inferencev1alpha1.ExternalModelSpec{
 			ExternalProviderRefs: []inferencev1alpha1.ExternalProviderRef{
 				{
-					Ref:         inferencev1alpha1.NameReference{Name: providerName},
+					Ref:         inferencev1alpha1.ExternalProviderReference{Name: providerName},
 					TargetModel: targetModel,
 					APIFormat:   "openai",
 					Path:        "/v1/chat/completions",
@@ -225,6 +225,72 @@ func TestReconcile_CreatesHTTPRoute(t *testing.T) {
 	assert.Equal(t, "gpt4", model.Status.HTTPRouteName)
 }
 
+func TestReconcile_ProviderNamespace(t *testing.T) {
+	for _, scope := range []string{"omitted", "local", "foreign"} {
+		t.Run(scope, func(t *testing.T) {
+			ns := createTestNamespace(t)
+			foreign := createTestNamespace(t)
+			createExternalProvider(t, "provider", ns, "local.example.com")
+			createExternalProvider(t, "provider", foreign, "foreign.example.com")
+			model := newExternalModel("model", ns, "provider", "gpt")
+			switch scope {
+			case "local":
+				model.Spec.ExternalProviderRefs[0].Ref.Namespace = ns
+			case "foreign":
+				model.Spec.ExternalProviderRefs[0].Ref.Namespace = foreign
+			}
+			require.NoError(t, k8sClient.Create(ctx, model))
+			var route gatewayapiv1.HTTPRoute
+			if scope == "foreign" {
+				waitForModelPhase(t, model.Name, ns, "Failed")
+				assert.True(t, apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &route)))
+				require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), model))
+				assert.Contains(t, model.Status.Conditions[0].Message, "cross-namespace ExternalProvider reference")
+			} else {
+				waitForModelPhase(t, model.Name, ns, "Ready")
+				require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &route))
+				assert.Equal(t, "local.example.com", route.Spec.Rules[0].Filters[0].RequestHeaderModifier.Set[0].Value)
+			}
+		})
+	}
+}
+
+func TestReconcile_ProviderNamespaceUpdate(t *testing.T) {
+	for _, change := range []string{"foreign reference", "provider not ready"} {
+		t.Run(change, func(t *testing.T) {
+			ns := createTestNamespace(t)
+			createExternalProvider(t, "provider", ns, "local.example.com")
+			model := newExternalModel("model", ns, "provider", "gpt")
+			require.NoError(t, k8sClient.Create(ctx, model))
+			waitForModelPhase(t, model.Name, ns, "Ready")
+
+			if change == "foreign reference" {
+				require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), model))
+				old := model.DeepCopy()
+				model.Spec.ExternalProviderRefs[0].Ref.Namespace = createTestNamespace(t)
+				require.NoError(t, k8sClient.Patch(ctx, model, client.MergeFrom(old)))
+			} else {
+				provider := &inferencev1alpha1.ExternalProvider{}
+				require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "provider", Namespace: ns}, provider))
+				provider.Status.Phase = "Failed"
+				require.NoError(t, k8sClient.Status().Update(ctx, provider))
+			}
+			waitForModelPhase(t, model.Name, ns, "Failed")
+
+			var route gatewayapiv1.HTTPRoute
+			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &route)
+			require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), model))
+			if change == "foreign reference" {
+				assert.True(t, apierrors.IsNotFound(err), "explicit unsupported reference must withdraw the route")
+				assert.Empty(t, model.Status.HTTPRouteName)
+			} else {
+				require.NoError(t, err, "transient readiness failure must keep the last-known-good route")
+				assert.Equal(t, model.Name, model.Status.HTTPRouteName)
+			}
+		})
+	}
+}
+
 func TestReconcile_MissingProvider(t *testing.T) {
 	ns := createTestNamespace(t)
 	// Intentionally do NOT create the provider
@@ -249,7 +315,7 @@ func TestReconcile_UnresolvedPathPlaceholder(t *testing.T) {
 		Spec: inferencev1alpha1.ExternalModelSpec{
 			ExternalProviderRefs: []inferencev1alpha1.ExternalProviderRef{
 				{
-					Ref:         inferencev1alpha1.NameReference{Name: "my-vertex"},
+					Ref:         inferencev1alpha1.ExternalProviderReference{Name: "my-vertex"},
 					TargetModel: "gemini-pro",
 					APIFormat:   "openai-chat",
 					Path:        "/v1/projects/{project}/locations/{location}/chat/completions",

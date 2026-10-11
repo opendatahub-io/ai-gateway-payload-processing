@@ -119,7 +119,7 @@ download-test-crds: ## Download Istio and Gateway API CRDs for envtest.
 test-unit: envtest download-test-crds ## Run unit tests. Optional: COVERAGE=true (or 1) for go tool cover summary.
 	@set -e; \
 	kubebuilder_assets_path="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"; \
-	$(GO_ENV) KUBEBUILDER_ASSETS="$$kubebuilder_assets_path" go test ./pkg/... -race -count=1 -coverprofile=cover.out; \
+	$(GO_ENV) KUBEBUILDER_ASSETS="$$kubebuilder_assets_path" go test ./api/... ./pkg/... -race -count=1 -coverprofile=cover.out; \
 	if [ "$(COVERAGE)" = "true" ] || [ "$(COVERAGE)" = "1" ]; then \
 		go tool cover -func=cover.out; \
 	fi; \
