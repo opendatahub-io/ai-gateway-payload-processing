@@ -450,7 +450,7 @@ func TestBuildHTTPRoute_CustomPort(t *testing.T) {
 	refs := []resolvedRef{{
 		providerName: "my-vllm", providerEndpoint: "vllm.internal.svc", targetModel: "my-model", port: 8080,
 	}}
-	hr := buildHTTPRoute(refs, "model1", "models",
+	hr := buildHTTPRoute(refs, "model1", "model1", "models",
 		"default-gateway", "openshift-ingress", "300s", commonLabels("model1"))
 
 	require.Len(t, hr.Spec.Rules, 4)
@@ -473,7 +473,7 @@ func TestBuildHTTPRoute_SingleProvider(t *testing.T) {
 	refs := []resolvedRef{{
 		providerName: "my-openai", providerEndpoint: "api.openai.com", targetModel: "gpt-4o", port: 443,
 	}}
-	hr := buildHTTPRoute(refs, "gpt4", "models",
+	hr := buildHTTPRoute(refs, "gpt4", "gpt4", "models",
 		"default-gateway", "openshift-ingress", "300s", commonLabels("gpt4"))
 
 	assert.Equal(t, "gpt4", hr.Name)
@@ -501,7 +501,7 @@ func TestBuildHTTPRoute_MultiProvider(t *testing.T) {
 		{providerName: "anthropic", providerEndpoint: "api.anthropic.com", targetModel: "claude-opus-4-8", port: 443},
 		{providerName: "sim-vertex", providerEndpoint: "sim.example.com", targetModel: "claude-opus-4-8", port: 443},
 	}
-	hr := buildHTTPRoute(refs, "claude", "models",
+	hr := buildHTTPRoute(refs, "claude", "claude", "models",
 		"my-gateway", "gateway-ns", "300s", commonLabels("claude"))
 
 	// 6 rules: 2 per-provider x 2 + 2 fallback
@@ -518,4 +518,41 @@ func TestBuildHTTPRoute_MultiProvider(t *testing.T) {
 	// Fallback rules (4,5) point to refs[0] (anthropic)
 	assert.Empty(t, hr.Spec.Rules[4].Matches[0].Headers)
 	assert.Equal(t, "anthropic", string(hr.Spec.Rules[4].BackendRefs[0].Name))
+}
+
+func TestBuildHTTPRoute_ClientModelName(t *testing.T) {
+	refs := []resolvedRef{{
+		providerName: "my-openai", providerEndpoint: "api.openai.com", targetModel: "gpt-4o", port: 443,
+	}}
+	hr := buildHTTPRoute(refs, "gpt4", "openai/gpt-4o", "models",
+		"default-gateway", "openshift-ingress", "300s", commonLabels("gpt4"))
+
+	// Route identity and per-model path prefix stay on the CR name.
+	assert.Equal(t, "gpt4", hr.Name)
+	assert.Equal(t, "/models/gpt4", *hr.Spec.Rules[0].Matches[0].Path.Value)
+
+	// Header matches use the client-facing name (per-provider rule 1, fallback rule 3).
+	for _, i := range []int{1, 3} {
+		headers := hr.Spec.Rules[i].Matches[0].Headers
+		require.NotEmpty(t, headers, "rule %d", i)
+		assert.Equal(t, "X-Gateway-Model-Name", string(headers[0].Name), "rule %d", i)
+		assert.Equal(t, "openai/gpt-4o", headers[0].Value, "rule %d", i)
+	}
+}
+
+func TestReconcile_SpecModelName(t *testing.T) {
+	ns := createTestNamespace(t)
+	createExternalProvider(t, "my-openai", ns, "api.openai.com")
+
+	model := newExternalModel("gpt4", ns, "my-openai", "gpt-4o")
+	model.Spec.ModelName = "openai/gpt-4o"
+	require.NoError(t, k8sClient.Create(ctx, model))
+
+	waitForModelPhase(t, "gpt4", ns, "Ready")
+
+	hr := &gatewayapiv1.HTTPRoute{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "gpt4", Namespace: ns}, hr))
+	require.Len(t, hr.Spec.Rules, 4)
+	assert.Equal(t, "openai/gpt-4o", hr.Spec.Rules[1].Matches[0].Headers[0].Value)
+	assert.Equal(t, "openai/gpt-4o", hr.Spec.Rules[3].Matches[0].Headers[0].Value)
 }

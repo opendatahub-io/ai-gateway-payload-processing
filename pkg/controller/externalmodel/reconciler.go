@@ -185,6 +185,7 @@ func (r *Reconciler) reconcileHTTPRoute(ctx context.Context, logger logr.Logger,
 	hr := buildHTTPRoute(
 		resolved,
 		model.Name,
+		clientModelName(model),
 		model.Namespace,
 		r.gatewayName(),
 		r.gatewayNamespace(),
@@ -306,7 +307,21 @@ func commonLabels(modelName string) map[string]string {
 // selectedProviderHeader is the canonical header name from the plugin package.
 const selectedProviderHeader = gatewayapiv1.HTTPHeaderName(providerresolver.SelectedProviderHeader)
 
-func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
+// clientModelName is the name clients put in the request "model" field and
+// that body-field-to-header copies into X-Gateway-Model-Name. The resolver
+// keys its store by this same value, so the HTTPRoute header match must use
+// it rather than metadata.name or the two never agree when spec.modelName is set.
+func clientModelName(model *inferencev1alpha1.ExternalModel) string {
+	if model.Spec.ModelName != "" {
+		return model.Spec.ModelName
+	}
+	return model.Name
+}
+
+// buildHTTPRoute builds the HTTPRoute for an ExternalModel. modelName is the
+// CR name (route name, labels, per-model path prefix); clientModelName is the
+// value matched against X-Gateway-Model-Name.
+func buildHTTPRoute(refs []resolvedRef, modelName, clientModelName, namespace string, gatewayName, gatewayNamespace, routeTimeout string, labels map[string]string) *gatewayapiv1.HTTPRoute {
 	gwNamespace := gatewayapiv1.Namespace(gatewayNamespace)
 	pathType := gatewayapiv1.PathMatchPathPrefix
 	pathPrefix := "/" + namespace + "/" + modelName
@@ -350,7 +365,7 @@ func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, gatewayName
 			Matches: []gatewayapiv1.HTTPRouteMatch{{
 				Path: &gatewayapiv1.HTTPPathMatch{Type: &pathType, Value: func() *string { s := "/"; return &s }()},
 				Headers: []gatewayapiv1.HTTPHeaderMatch{
-					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: modelName},
+					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: clientModelName},
 					{Name: selectedProviderHeader, Type: &headerType, Value: ref.providerName},
 				},
 			}},
@@ -391,7 +406,7 @@ func buildHTTPRoute(refs []resolvedRef, modelName, namespace string, gatewayName
 		gatewayapiv1.HTTPRouteRule{
 			Matches: []gatewayapiv1.HTTPRouteMatch{{
 				Headers: []gatewayapiv1.HTTPHeaderMatch{
-					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: modelName},
+					{Name: "X-Gateway-Model-Name", Type: &headerType, Value: clientModelName},
 				},
 			}},
 			BackendRefs: fallbackBackendRefs,
