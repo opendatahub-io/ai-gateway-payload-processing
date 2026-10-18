@@ -7,9 +7,15 @@
 #   ./test/e2e/scripts/setup-kind.sh
 #
 # Environment variables:
-#   KIND_CLUSTER_NAME    - Kind cluster name (default: bbr-e2e)
-#   ISTIO_VERSION        - Istio version (default: 1.27.0-alpha.0)
+#   KIND_CLUSTER_NAME    - Kind cluster name (default: ipp-e2e)
+#   ISTIO_VERSION        - Istio version (default: 1.29.2)
 #   E2E_SIMULATOR_ENDPOINT - Simulator IP (default: 3.147.232.199)
+#   GATEWAY_TLS_SECRET   - If set, add an HTTPS listener (port 443) using this TLS Secret
+#   GATEWAY_PARAMS_CONFIGMAP - If set, reference this ConfigMap via spec.infrastructure.parametersRef
+#   CLUSTER_NAME         - If set, passed to the IPP pod env (routing loop detection)
+#   SKIP_IMAGE_BUILD     - If "true", reuse the already-built IPP image (still kind-loaded)
+#
+# This file can also be sourced for its functions (setup-kind-cross-cluster.sh does).
 
 set -euo pipefail
 
@@ -19,8 +25,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-ipp-e2e}"
 ISTIO_VERSION="${ISTIO_VERSION:-1.29.2}"
 SIMULATOR_ENDPOINT="${E2E_SIMULATOR_ENDPOINT:-3.147.232.199}"
-GATEWAY_NAMESPACE="default"
-GATEWAY_NAME="e2e-gateway"
+GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-default}"
+GATEWAY_NAME="${GATEWAY_NAME:-e2e-gateway}"
+IPP_IMAGE_TAG="quay.io/opendatahub/odh-ai-gateway-payload-processing:latest"
 
 # ─── Install tools ───────────────────────────────────────────────────────────
 
@@ -34,13 +41,18 @@ install_kind() {
 }
 
 install_istioctl() {
+    local istio_dir="$PROJECT_ROOT/bin/istio-${ISTIO_VERSION}"
+    if [[ -x "$istio_dir/bin/istioctl" ]]; then
+        export PATH="$istio_dir/bin:$PATH"
+    fi
     if command -v istioctl &>/dev/null; then
         echo "istioctl already installed: $(istioctl version --remote=false 2>/dev/null || echo 'unknown')"
         return
     fi
-    echo "Installing istioctl ${ISTIO_VERSION}..."
-    curl -sL https://istio.io/downloadIstio | ISTIO_VERSION="$ISTIO_VERSION" sh -
-    export PATH="$PWD/istio-${ISTIO_VERSION}/bin:$PATH"
+    echo "Installing istioctl ${ISTIO_VERSION} into $PROJECT_ROOT/bin..."
+    mkdir -p "$PROJECT_ROOT/bin"
+    (cd "$PROJECT_ROOT/bin" && curl -sL https://istio.io/downloadIstio | ISTIO_VERSION="$ISTIO_VERSION" sh -)
+    export PATH="$istio_dir/bin:$PATH"
 }
 
 # ─── Cluster setup ───────────────────────────────────────────────────────────
@@ -92,6 +104,28 @@ install_external_model_crd() {
 
 create_gateway() {
     echo "Creating Gateway '${GATEWAY_NAME}'..."
+    local infrastructure="" https_listener=""
+    if [[ -n "${GATEWAY_PARAMS_CONFIGMAP:-}" ]]; then
+        infrastructure="  infrastructure:
+    parametersRef:
+      group: \"\"
+      kind: ConfigMap
+      name: ${GATEWAY_PARAMS_CONFIGMAP}
+"
+    fi
+    if [[ -n "${GATEWAY_TLS_SECRET:-}" ]]; then
+        https_listener="  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: ${GATEWAY_TLS_SECRET}
+    allowedRoutes:
+      namespaces:
+        from: All
+"
+    fi
     kubectl apply -f - <<EOF
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -100,37 +134,54 @@ metadata:
   namespace: ${GATEWAY_NAMESPACE}
 spec:
   gatewayClassName: istio
-  listeners:
+${infrastructure}  listeners:
   - name: http
     port: 80
     protocol: HTTP
     allowedRoutes:
       namespaces:
         from: All
+${https_listener}
 EOF
 
-    echo "Waiting for Gateway to be programmed..."
-    kubectl wait --for=condition=Programmed "gateway/${GATEWAY_NAME}" \
-        -n "$GATEWAY_NAMESPACE" --timeout=120s || {
-        echo "WARNING: Gateway not programmed after 120s, continuing..."
-    }
+    # Kind has no LoadBalancer, so the Gateway never reports Programmed;
+    # the generated Deployment being available is the usable signal.
+    echo "Waiting for Gateway deployment..."
+    for _ in $(seq 1 60); do
+        kubectl get deployment "${GATEWAY_NAME}-istio" -n "$GATEWAY_NAMESPACE" &>/dev/null && break
+        sleep 2
+    done
+    kubectl rollout status deployment/"${GATEWAY_NAME}-istio" \
+        -n "$GATEWAY_NAMESPACE" --timeout=180s
     echo "Gateway ready"
 }
 
-deploy_ipp() {
-    echo "Deploying IPP via Helm chart..."
-
-    local image_tag="quay.io/opendatahub/odh-ai-gateway-payload-processing:latest"
-
-    # Always build from source to ensure E2E tests run against the current code.
-    # The quay.io image may not include changes from the PR being tested.
+build_ipp_image() {
     echo "  Building IPP image from source..."
     local platform="linux/amd64"
     if [[ "$(uname -m)" == "arm64" ]]; then
         platform="linux/arm64"
     fi
-    docker build -t "$image_tag" --platform "$platform" "$PROJECT_ROOT"
+    docker build -t "$IPP_IMAGE_TAG" --platform "$platform" "$PROJECT_ROOT"
+}
+
+deploy_ipp() {
+    echo "Deploying IPP via Helm chart..."
+
+    local image_tag="$IPP_IMAGE_TAG"
+
+    # Build from source so E2E tests run against the current code; the
+    # quay.io image may not include the PR being tested.
+    if [[ "${SKIP_IMAGE_BUILD:-}" != "true" ]]; then
+        build_ipp_image
+    fi
     kind load docker-image "$image_tag" --name "$KIND_CLUSTER_NAME"
+
+    local extra_env=()
+    if [[ -n "${CLUSTER_NAME:-}" ]]; then
+        extra_env=(--set upstreamIpp.payloadProcessor.env[2].name=CLUSTER_NAME
+                   --set upstreamIpp.payloadProcessor.env[2].value="$CLUSTER_NAME")
+    fi
 
     helm install payload-processing "$PROJECT_ROOT/deploy/payload-processing" \
         --namespace "$GATEWAY_NAMESPACE" \
@@ -141,6 +192,7 @@ deploy_ipp() {
         --set upstreamIpp.payloadProcessor.env[0].value="$GATEWAY_NAME" \
         --set upstreamIpp.payloadProcessor.env[1].name=GATEWAY_NAMESPACE \
         --set upstreamIpp.payloadProcessor.env[1].value="$GATEWAY_NAMESPACE" \
+        "${extra_env[@]}"
 
     # Disable sidecar injection on IPP pod
     kubectl patch deployment payload-processing -n "$GATEWAY_NAMESPACE" --type=merge \
@@ -186,4 +238,6 @@ main() {
     echo "  Run: make test-e2e"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
