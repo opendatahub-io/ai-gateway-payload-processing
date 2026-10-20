@@ -36,11 +36,20 @@ import (
 func providerController() func(client.Client, *ctrlbuilder.Builder) error {
 	return func(c client.Client, b *ctrlbuilder.Builder) error {
 		utilruntime.Must(inferencev1alpha1.AddToScheme(c.Scheme()))
-
-		return b.
+		reconciler := &externalprovider.Reconciler{Client: c, Scheme: c.Scheme()}
+		watchTenantConfig, err := reconciler.ConfigureTenantConfig(c.RESTMapper())
+		if err != nil {
+			return err
+		}
+		controllerBuilder := b.
 			For(&inferencev1alpha1.ExternalProvider{}).
-			Named("external-provider-controller").
-			Complete(&externalprovider.Reconciler{Client: c, Scheme: c.Scheme()})
+			Named("external-provider-controller")
+		if watchTenantConfig {
+			tenantConfig := &unstructured.Unstructured{}
+			tenantConfig.SetGroupVersionKind(externalprovider.TenantConfigGVK)
+			controllerBuilder = controllerBuilder.Watches(tenantConfig, handler.EnqueueRequestsFromMapFunc(reconciler.MapTenantConfigToProviders))
+		}
+		return controllerBuilder.Complete(reconciler)
 	}
 }
 

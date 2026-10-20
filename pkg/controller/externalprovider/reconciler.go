@@ -19,6 +19,8 @@ package externalprovider
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -44,9 +46,17 @@ import (
 )
 
 const (
-	labelExternalProvider = "inference.opendatahub.io/external-provider"
-	managedByValue        = "ipp-external-provider-reconciler"
+	labelExternalProvider    = "inference.opendatahub.io/external-provider"
+	managedByValue           = "ipp-external-provider-reconciler"
+	tenantConfigName         = "default-tenant"
+	backendAnnotation        = "maas.opendatahub.io/payload-processing-type"
+	praxisBackend            = "praxis"
+	ippBackend               = "ipp"
+	tenantConfigPollInterval = 30 * time.Second
 )
+
+// TenantConfigGVK identifies the namespace's dataplane selection resource.
+var TenantConfigGVK = schema.GroupVersionKind{Group: "maas.opendatahub.io", Version: "v1alpha1", Kind: "MaasTenantConfig"}
 
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders,verbs=get;list;watch
 //+kubebuilder:rbac:groups=inference.opendatahub.io,resources=externalproviders/status,verbs=get;update;patch
@@ -55,13 +65,74 @@ const (
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=networking.istio.io,resources=serviceentries,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=networking.istio.io,resources=destinationrules,verbs=get;list;watch;create;update;delete
+//+kubebuilder:rbac:groups=maas.opendatahub.io,resources=maastenantconfigs,verbs=get;list;watch
 
 // Reconciler watches ExternalProvider CRs and creates the shared Istio
 // networking resources (Service, ServiceEntry, DestinationRule) for each
 // external provider endpoint.
 type Reconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme                *runtime.Scheme
+	noTenantConfigWatch   bool
+	tenantConfigMapper    meta.RESTMapper
+	tenantConfigMu        sync.Mutex
+	tenantConfigAvailable bool
+	nextTenantConfigProbe time.Time
+}
+
+// ConfigureTenantConfig checks whether the MaaS selection API is installed.
+// Standalone IPP deployments without that CRD keep writing provider status.
+func (r *Reconciler) ConfigureTenantConfig(mapper meta.RESTMapper) (bool, error) {
+	r.tenantConfigMapper = mapper
+	_, err := mapper.RESTMapping(TenantConfigGVK.GroupKind(), TenantConfigGVK.Version)
+	if err == nil {
+		r.noTenantConfigWatch = false
+		r.tenantConfigAvailable = true
+		return true, nil
+	}
+	if meta.IsNoMatchError(err) {
+		r.noTenantConfigWatch = true
+		r.tenantConfigAvailable = false
+		return false, nil
+	}
+	return false, fmt.Errorf("discover MaasTenantConfig API: %w", err)
+}
+
+// A controller started before the CRD exists has no MaasTenantConfig watch.
+// Periodic provider reconciles refresh discovery and read the config once the
+// API appears. One probe per interval avoids a discovery request per provider.
+func (r *Reconciler) tenantConfigInstalled() (bool, error) {
+	if !r.noTenantConfigWatch {
+		return true, nil
+	}
+	r.tenantConfigMu.Lock()
+	defer r.tenantConfigMu.Unlock()
+	if r.tenantConfigAvailable {
+		return true, nil
+	}
+	if time.Now().Before(r.nextTenantConfigProbe) {
+		return false, nil
+	}
+	if resettable, ok := r.tenantConfigMapper.(meta.ResettableRESTMapper); ok {
+		resettable.Reset()
+	}
+	_, err := r.tenantConfigMapper.RESTMapping(TenantConfigGVK.GroupKind(), TenantConfigGVK.Version)
+	if meta.IsNoMatchError(err) {
+		r.nextTenantConfigProbe = time.Now().Add(tenantConfigPollInterval)
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("rediscover MaasTenantConfig API: %w", err)
+	}
+	r.tenantConfigAvailable = true
+	return true, nil
+}
+
+func (r *Reconciler) reconciledResult() ctrl.Result {
+	if r.noTenantConfigWatch {
+		return ctrl.Result{RequeueAfter: tenantConfigPollInterval}
+	}
+	return ctrl.Result{}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -81,11 +152,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if provider.Status.Phase == "" {
-		r.setStatus(ctx, logger, provider, "Pending", metav1.ConditionFalse, "Reconciling", "Reconciliation in progress")
+		if err := r.setStatus(ctx, provider, "Pending", metav1.ConditionFalse, "Reconciling", "Reconciliation in progress"); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	if err := r.validateSecretRef(ctx, provider); err != nil {
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
+		if statusErr := r.setStatus(ctx, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error()); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -94,22 +169,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	conn, err := ctrlcommon.GetConnectionSettings(provider.GetAnnotations())
 	if err != nil {
 		msg := fmt.Sprintf("invalid connection annotations: %s", err)
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InvalidAnnotations", msg)
-		return ctrl.Result{}, nil
+		if err := r.setStatus(ctx, provider, "Failed", metav1.ConditionFalse, "InvalidAnnotations", msg); err != nil {
+			return ctrl.Result{}, err
+		}
+		return r.reconciledResult(), nil
 	}
 	if err := ctrlcommon.ValidateConnectionSecurity(conn, provider.Spec.Auth.Type); err != nil {
 		msg := fmt.Sprintf("insecure transport configuration: %s", err)
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InsecureTransport", msg)
-		return ctrl.Result{}, nil
+		if err := r.setStatus(ctx, provider, "Failed", metav1.ConditionFalse, "InsecureTransport", msg); err != nil {
+			return ctrl.Result{}, err
+		}
+		return r.reconciledResult(), nil
 	}
 
 	if err := r.reconcileResources(ctx, logger, provider, conn); err != nil {
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
+		if statusErr := r.setStatus(ctx, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error()); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
 		return ctrl.Result{}, err
 	}
 
-	r.setStatus(ctx, logger, provider, "Ready", metav1.ConditionTrue, "Reconciled", "All resources created successfully")
-	return ctrl.Result{}, nil
+	if err := r.setStatus(ctx, provider, "Ready", metav1.ConditionTrue, "Reconciled", "All resources created successfully"); err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.reconciledResult(), nil
 }
 
 func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider, conn ctrlcommon.ConnectionSettings) error {
@@ -166,7 +249,15 @@ func (r *Reconciler) validateSecretRef(ctx context.Context, provider *inferencev
 	return nil
 }
 
-func (r *Reconciler) setStatus(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider, phase string, condStatus metav1.ConditionStatus, reason, message string) {
+func (r *Reconciler) setStatus(ctx context.Context, provider *inferencev1alpha1.ExternalProvider, phase string, condStatus metav1.ConditionStatus, reason, message string) error {
+	owned, err := r.statusOwnedByIPP(ctx, provider.Namespace)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return nil
+	}
+
 	provider.Status.Phase = phase
 	meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
 		Type:               ctrlcommon.ConditionTypeReady,
@@ -175,9 +266,45 @@ func (r *Reconciler) setStatus(ctx context.Context, logger logr.Logger, provider
 		Reason:             reason,
 		Message:            message,
 	})
-	if err := r.Status().Update(ctx, provider); err != nil {
-		logger.Error(err, "failed to update ExternalProvider status")
+	return r.Status().Update(ctx, provider)
+}
+
+// A missing MaasTenantConfig is served by Praxis. For an existing config,
+// only an explicit IPP selection gives IPP provider status ownership.
+func (r *Reconciler) statusOwnedByIPP(ctx context.Context, namespace string) (bool, error) {
+	installed, err := r.tenantConfigInstalled()
+	if err != nil {
+		return false, err
 	}
+	if !installed {
+		return true, nil
+	}
+	config := &unstructured.Unstructured{}
+	config.SetGroupVersionKind(TenantConfigGVK)
+	if err := r.Get(ctx, types.NamespacedName{Name: tenantConfigName, Namespace: namespace}, config); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get MaasTenantConfig for namespace %q: %w", namespace, err)
+	}
+	return config.GetAnnotations()[backendAnnotation] == ippBackend, nil
+}
+
+// MapTenantConfigToProviders revisits every provider when namespace ownership changes.
+func (r *Reconciler) MapTenantConfigToProviders(ctx context.Context, config client.Object) []ctrl.Request {
+	if config.GetName() != tenantConfigName {
+		return nil
+	}
+	providers := &inferencev1alpha1.ExternalProviderList{}
+	if err := r.List(ctx, providers, client.InNamespace(config.GetNamespace())); err != nil {
+		log.FromContext(ctx).Error(err, "failed to list ExternalProviders after MaasTenantConfig change", "namespace", config.GetNamespace())
+		return nil
+	}
+	requests := make([]ctrl.Request, 0, len(providers.Items))
+	for _, provider := range providers.Items {
+		requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Name: provider.Name, Namespace: provider.Namespace}})
+	}
+	return requests
 }
 
 func setUnstructuredOwner(owner *inferencev1alpha1.ExternalProvider, obj *unstructured.Unstructured) {
@@ -239,6 +366,10 @@ func (r *Reconciler) applyUnstructured(ctx context.Context, logger logr.Logger, 
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	watchTenantConfig, err := r.ConfigureTenantConfig(mgr.GetRESTMapper())
+	if err != nil {
+		return err
+	}
 	managedByPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchLabels: map[string]string{ctrlcommon.LabelManagedBy: managedByValue},
 	})
@@ -253,14 +384,17 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	drObj.SetGroupVersionKind(schema.GroupVersionKind{Group: "networking.istio.io", Version: "v1", Kind: "DestinationRule"})
 
 	ownerHandler := handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &inferencev1alpha1.ExternalProvider{})
-
-	return ctrl.NewControllerManagedBy(mgr).
+	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&inferencev1alpha1.ExternalProvider{}).
 		Owns(&corev1.Service{}, builder.WithPredicates(managedByPredicate)).
 		Watches(seObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
-		Watches(drObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
-		Named("external-provider-reconciler").
-		Complete(r)
+		Watches(drObj, ownerHandler, builder.WithPredicates(managedByPredicate))
+	if watchTenantConfig {
+		tenantConfig := &unstructured.Unstructured{}
+		tenantConfig.SetGroupVersionKind(TenantConfigGVK)
+		controllerBuilder = controllerBuilder.Watches(tenantConfig, handler.EnqueueRequestsFromMapFunc(r.MapTenantConfigToProviders))
+	}
+	return controllerBuilder.Named("external-provider-reconciler").Complete(r)
 }
 
 func commonLabels(providerName string) map[string]string {

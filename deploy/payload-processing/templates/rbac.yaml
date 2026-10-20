@@ -11,9 +11,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
-  # model-provider-resolver plugin: watches ExternalModel and ExternalProvider CRDs
+  # model-provider-resolver plugin and provider status selection
   - apiGroups: ["maas.opendatahub.io"]
-    resources: ["externalmodels"]
+    resources: ["externalmodels", "maastenantconfigs"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders", "externalmodels"]
@@ -59,9 +59,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch"]
-  # model-provider-resolver plugin: watches ExternalModel and ExternalProvider CRDs
+  # model-provider-resolver plugin and provider status selection
   - apiGroups: ["maas.opendatahub.io"]
-    resources: ["externalmodels"]
+    resources: ["externalmodels", "maastenantconfigs"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["inference.opendatahub.io"]
     resources: ["externalproviders", "externalmodels"]

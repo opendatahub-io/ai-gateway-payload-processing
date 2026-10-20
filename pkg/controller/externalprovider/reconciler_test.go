@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,10 +46,11 @@ import (
 )
 
 var (
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	cancel    context.CancelFunc
+	k8sClient   client.Client
+	cacheClient client.Client
+	testEnv     *envtest.Environment
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	serviceEntryGVK = schema.GroupVersionKind{
 		Group: "networking.istio.io", Version: "v1", Kind: "ServiceEntry",
@@ -71,6 +73,7 @@ func TestMain(m *testing.M) {
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "..", "config", "crd", "bases"),
 			filepath.Join("..", "..", "..", "test", "testdata", "crds", "istio"),
+			filepath.Join("..", "..", "..", "test", "fixtures", "maas"),
 		},
 		Scheme: scheme,
 	}
@@ -92,6 +95,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	cacheClient = mgr.GetClient()
 
 	if err := (&Reconciler{
 		Client: mgr.GetClient(),
@@ -118,6 +122,12 @@ func TestMain(m *testing.M) {
 // --- helpers ---
 
 func createTestNamespace(t *testing.T) string {
+	ns := createNamespace(t)
+	createTenantConfig(t, ns, "ipp")
+	return ns
+}
+
+func createNamespace(t *testing.T) string {
 	t.Helper()
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "test-ep-"},
@@ -127,6 +137,16 @@ func createTestNamespace(t *testing.T) string {
 		_ = k8sClient.Delete(ctx, ns)
 	})
 	return ns.Name
+}
+
+func createTenantConfig(t *testing.T, namespace, backend string) {
+	t.Helper()
+	config := &unstructured.Unstructured{}
+	config.SetGroupVersionKind(TenantConfigGVK)
+	config.SetName(tenantConfigName)
+	config.SetNamespace(namespace)
+	config.SetAnnotations(map[string]string{backendAnnotation: backend})
+	require.NoError(t, k8sClient.Create(ctx, config))
 }
 
 func createSecret(t *testing.T, name, namespace string) {
@@ -171,7 +191,188 @@ func getUnstructured(t *testing.T, gvk schema.GroupVersionKind, name, namespace 
 	return obj
 }
 
+func getProvider(t *testing.T, name, namespace string) *inferencev1alpha1.ExternalProvider {
+	t.Helper()
+	provider := &inferencev1alpha1.ExternalProvider{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, provider))
+	return provider
+}
+
+func waitForBackend(t *testing.T, namespace string, ownedByIPP bool) {
+	t.Helper()
+	reconciler := &Reconciler{Client: cacheClient}
+	require.Eventually(t, func() bool {
+		owned, err := reconciler.statusOwnedByIPP(ctx, namespace)
+		return err == nil && owned == ownedByIPP
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
 // --- test cases ---
+
+type delayedTenantConfigMapper struct {
+	apimeta.RESTMapper
+	published    bool
+	discoverable bool
+	resets       int
+}
+
+func (m *delayedTenantConfigMapper) RESTMapping(gk schema.GroupKind, versions ...string) (*apimeta.RESTMapping, error) {
+	if !m.discoverable {
+		return nil, &apimeta.NoKindMatchError{GroupKind: gk, SearchedVersions: versions}
+	}
+	return m.RESTMapper.RESTMapping(gk, versions...)
+}
+
+func (m *delayedTenantConfigMapper) Reset() {
+	m.resets++
+	m.discoverable = m.published
+}
+
+func TestTenantConfigCRDArrivesAfterStartup(t *testing.T) {
+	ns := createNamespace(t)
+	createTenantConfig(t, ns, praxisBackend)
+	baseMapper := apimeta.NewDefaultRESTMapper(nil)
+	baseMapper.Add(TenantConfigGVK, apimeta.RESTScopeNamespace)
+	mapper := &delayedTenantConfigMapper{RESTMapper: baseMapper}
+	reconciler := &Reconciler{Client: k8sClient}
+
+	watch, err := reconciler.ConfigureTenantConfig(mapper)
+	require.NoError(t, err)
+	assert.False(t, watch)
+	assert.Equal(t, tenantConfigPollInterval, reconciler.reconciledResult().RequeueAfter)
+	owned, err := reconciler.statusOwnedByIPP(ctx, ns)
+	require.NoError(t, err)
+	assert.True(t, owned)
+	assert.Equal(t, 1, mapper.resets)
+
+	// Advance the discovery interval without sleeping; the next periodic
+	// reconcile must see the new API and the Praxis selection.
+	mapper.published = true
+	reconciler.nextTenantConfigProbe = time.Time{}
+	owned, err = reconciler.statusOwnedByIPP(ctx, ns)
+	require.NoError(t, err)
+	assert.False(t, owned)
+	assert.Equal(t, 2, mapper.resets)
+	assert.Equal(t, tenantConfigPollInterval, reconciler.reconciledResult().RequeueAfter)
+
+	config := getUnstructured(t, TenantConfigGVK, tenantConfigName, ns)
+	config.SetAnnotations(map[string]string{backendAnnotation: "ipp"})
+	require.NoError(t, k8sClient.Update(ctx, config))
+	owned, err = reconciler.statusOwnedByIPP(ctx, ns)
+	require.NoError(t, err)
+	assert.True(t, owned)
+	assert.Equal(t, 2, mapper.resets)
+}
+
+func TestStatusOwnedByIPPRequiresExplicitSelection(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantOwned   bool
+	}{
+		{name: "missing annotation"},
+		{name: "empty annotation", annotations: map[string]string{backendAnnotation: ""}},
+		{name: "praxis", annotations: map[string]string{backendAnnotation: praxisBackend}},
+		{name: "case variant", annotations: map[string]string{backendAnnotation: "IPP"}},
+		{name: "invalid value", annotations: map[string]string{backendAnnotation: "ippp"}},
+		{name: "future backend", annotations: map[string]string{backendAnnotation: "other"}},
+		{name: "ipp", annotations: map[string]string{backendAnnotation: ippBackend}, wantOwned: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createNamespace(t)
+			config := &unstructured.Unstructured{}
+			config.SetGroupVersionKind(TenantConfigGVK)
+			config.SetName(tenantConfigName)
+			config.SetNamespace(ns)
+			config.SetAnnotations(tt.annotations)
+			require.NoError(t, k8sClient.Create(ctx, config))
+
+			owned, err := (&Reconciler{Client: k8sClient}).statusOwnedByIPP(ctx, ns)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOwned, owned)
+		})
+	}
+}
+
+func TestReconcile_NoStatusWithoutTenantConfig(t *testing.T) {
+	ns := createNamespace(t)
+	createSecret(t, "key", ns)
+	provider := newExternalProvider("unreferenced", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	require.Eventually(t, func() bool {
+		service := &corev1.Service{}
+		return k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: ns}, service) == nil
+	}, 10*time.Second, 100*time.Millisecond)
+	require.Equal(t, "", getProvider(t, provider.Name, ns).Status.Phase)
+	require.Empty(t, getProvider(t, provider.Name, ns).Status.Conditions)
+
+	// A config arriving after the provider must enqueue it for an IPP status update.
+	createTenantConfig(t, ns, "ipp")
+	waitForPhase(t, provider.Name, ns, "Ready")
+}
+
+func TestReconcile_TenantSelectionChangesStatusOwnership(t *testing.T) {
+	ns := createNamespace(t)
+	createTenantConfig(t, ns, praxisBackend)
+	createSecret(t, "key", ns)
+	provider := newExternalProvider("legacy-provider", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	// A model without gatewayRefs uses the legacy shape, but the namespace's
+	// dataplane selection still decides who writes the provider status.
+	model := &inferencev1alpha1.ExternalModel{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-model", Namespace: ns},
+		Spec: inferencev1alpha1.ExternalModelSpec{
+			ExternalProviderRefs: []inferencev1alpha1.ExternalProviderRef{{
+				Ref:         inferencev1alpha1.ExternalProviderReference{Name: provider.Name},
+				TargetModel: "gpt-4o",
+				APIFormat:   "openai-chat",
+				Path:        "/v1/chat/completions",
+			}},
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, model))
+
+	require.Eventually(t, func() bool {
+		service := &corev1.Service{}
+		return k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: ns}, service) == nil
+	}, 10*time.Second, 100*time.Millisecond)
+	require.Empty(t, getProvider(t, provider.Name, ns).Status.Phase)
+	require.Empty(t, getProvider(t, provider.Name, ns).Status.Conditions)
+
+	config := getUnstructured(t, TenantConfigGVK, tenantConfigName, ns)
+	config.SetAnnotations(map[string]string{backendAnnotation: "ipp"})
+	require.NoError(t, k8sClient.Update(ctx, config))
+	waitForPhase(t, provider.Name, ns, "Ready")
+
+	config = getUnstructured(t, TenantConfigGVK, tenantConfigName, ns)
+	config.SetAnnotations(map[string]string{backendAnnotation: praxisBackend})
+	require.NoError(t, k8sClient.Update(ctx, config))
+	waitForBackend(t, ns, false)
+
+	provider = getProvider(t, provider.Name, ns)
+	provider.Status.Phase = "Pending"
+	require.NoError(t, k8sClient.Status().Update(ctx, provider))
+	provider = getProvider(t, provider.Name, ns)
+	provider.Spec.Endpoint = "api.anthropic.com"
+	require.NoError(t, k8sClient.Update(ctx, provider))
+	require.Eventually(t, func() bool {
+		service := &corev1.Service{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: provider.Name, Namespace: ns}, service); err != nil {
+			return false
+		}
+		return service.Spec.ExternalName == "api.anthropic.com"
+	}, 10*time.Second, 100*time.Millisecond)
+	require.Equal(t, "Pending", getProvider(t, provider.Name, ns).Status.Phase)
+
+	config = getUnstructured(t, TenantConfigGVK, tenantConfigName, ns)
+	config.SetAnnotations(map[string]string{backendAnnotation: "ipp"})
+	require.NoError(t, k8sClient.Update(ctx, config))
+	waitForPhase(t, provider.Name, ns, "Ready")
+}
 
 func TestReconcile_CreatesResources(t *testing.T) {
 	ns := createTestNamespace(t)

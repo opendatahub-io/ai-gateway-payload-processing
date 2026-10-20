@@ -69,6 +69,7 @@ var _ = ginkgo.AfterSuite(func() {
 func setupInfra() {
 	ginkgo.By("Creating test namespace")
 	createNamespace(nsName)
+	selectIPPTenantConfig()
 
 	ginkgo.By("Creating curl client pod")
 	kubectlApplyLiteral(fmt.Sprintf(`
@@ -173,6 +174,29 @@ func createNamespace(name string) {
 	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
+}
+
+func selectIPPTenantConfig() {
+	// The standalone Kind setup has no MaaS CRD. Where MaaS is installed,
+	// explicitly select IPP before creating providers in this test namespace.
+	cmd := exec.Command(kubectlBin, "get", "crd", "maastenantconfigs.maas.opendatahub.io", "--ignore-not-found", "-o", "name")
+	output, err := cmd.Output()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	if strings.TrimSpace(string(output)) == "" {
+		return
+	}
+
+	ginkgo.By("Selecting IPP for the test namespace")
+	kubectlApplyLiteral(fmt.Sprintf(`
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaasTenantConfig
+metadata:
+  name: default-tenant
+  namespace: %s
+  annotations:
+    maas.opendatahub.io/payload-processing-type: ipp
+spec: {}
+`, nsName))
 }
 
 func kubectlApplyLiteral(yamlContent string) {
