@@ -7,6 +7,7 @@
 #   1. Checks if stable is behind main
 #   2. Verifies there are no merge conflicts (strict — fails on any conflict)
 #   3. Creates/updates a PR from main → stable only if merge is clean
+#   4. Labels the PR with tide/merge-method-merge so Tide uses a merge commit
 
 name: Promote Main to Stable
 
@@ -121,6 +122,9 @@ jobs:
             [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::Failed to parse PR number from: $PR_URL"; exit 1; }
             echo "Created new promotion PR #${PR_NUMBER}"
           fi
+
+          # Ensure Tide merges this PR with a merge commit (not the default squash)
+          gh pr edit "$PR_NUMBER" --add-label "tide/merge-method-merge"
 
           echo "## Promote Main to Stable — PR Created" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
