@@ -156,3 +156,18 @@ func TestProcessRequest_StripsOriginClusterCaseInsensitive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Cluster-A", captured)
 }
+
+func TestProcessRequest_StripsIncomingRoutingHeaders(t *testing.T) {
+	instance, _ := Factory("test", nil, nil)
+	req := requesthandling.NewInferenceRequest()
+	// As forwarded by the previous cluster on a cross-cluster hop.
+	req.Headers["x-gateway-model-name"] = "remote-echo"
+	req.Headers["X-Ipp-Selected-Provider"] = "cluster-b"
+	req.Headers["content-type"] = "application/json"
+
+	require.NoError(t, instance.(*Plugin).ProcessRequest(context.Background(), plugin.NewCycleState(), req))
+
+	assert.NotContains(t, req.Headers, "x-gateway-model-name")
+	assert.NotContains(t, req.Headers, "X-Ipp-Selected-Provider")
+	assert.Contains(t, req.Headers, "content-type")
+}

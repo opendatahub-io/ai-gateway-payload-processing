@@ -141,6 +141,23 @@ test-e2e-junit: ## Run E2E tests with JUnit XML report output.
 test-e2e-setup: ## Set up Kind cluster with Istio and BBR for E2E testing.
 	./test/e2e/scripts/setup-kind.sh
 
+.PHONY: test-e2e-cross-cluster-setup
+test-e2e-cross-cluster-setup: ## Set up two Kind clusters for the cross-cluster routing E2E.
+	./test/e2e/scripts/setup-kind-cross-cluster.sh
+
+.PHONY: test-e2e-cross-cluster
+test-e2e-cross-cluster: ## Run the cross-cluster routing E2E (requires test-e2e-cross-cluster-setup).
+	@set -a; . ./bin/cross-cluster.env; set +a; \
+	go test ./test/e2e/crosscluster/ -v -ginkgo.v -count=1 -timeout=20m \
+		$(if $(E2E_JUNIT_REPORT),-ginkgo.junit-report=$(E2E_JUNIT_REPORT),)
+
+.PHONY: test-e2e-cross-cluster-teardown
+test-e2e-cross-cluster-teardown: ## Delete the cross-cluster E2E Kind clusters and echo backend.
+	kind delete cluster --name $${E2E_CC_CLUSTER_A:-ipp-e2e-a} || true
+	kind delete cluster --name $${E2E_CC_CLUSTER_B:-ipp-e2e-b} || true
+	docker rm -f ipp-e2e-echo >/dev/null 2>&1 || true
+	rm -f ./bin/cross-cluster.env
+
 .PHONY: test
 test: test-unit ## Run unit tests (alias for test-unit).
 

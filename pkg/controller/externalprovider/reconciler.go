@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 	ctrlcommon "github.com/opendatahub-io/ai-gateway-payload-processing/pkg/controller/common"
@@ -80,12 +81,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
+	// When only AGC-managed ExternalModels reference this
+	// provider, its status belongs to AGC. Transport resources are still
+	// reconciled, but status writes are suppressed so IPP cannot fight AGC's
+	// status on the same object. Providers referenced by at least one
+	// IPP-reconciled model — or by no model at all — keep existing behavior.
+	statusSuppressed, err := r.referencedByAGCOnly(ctx, provider)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	setStatus := func(phase string, condStatus metav1.ConditionStatus, reason, message string) {
+		if statusSuppressed {
+			return
+		}
+		r.setStatus(ctx, logger, provider, phase, condStatus, reason, message)
+	}
+
 	if provider.Status.Phase == "" {
-		r.setStatus(ctx, logger, provider, "Pending", metav1.ConditionFalse, "Reconciling", "Reconciliation in progress")
+		setStatus("Pending", metav1.ConditionFalse, "Reconciling", "Reconciliation in progress")
 	}
 
 	if err := r.validateSecretRef(ctx, provider); err != nil {
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
+		setStatus("Failed", metav1.ConditionFalse, "SecretNotFound", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -94,22 +111,80 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	conn, err := ctrlcommon.GetConnectionSettings(provider.GetAnnotations())
 	if err != nil {
 		msg := fmt.Sprintf("invalid connection annotations: %s", err)
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InvalidAnnotations", msg)
+		setStatus("Failed", metav1.ConditionFalse, "InvalidAnnotations", msg)
 		return ctrl.Result{}, nil
 	}
 	if err := ctrlcommon.ValidateConnectionSecurity(conn, provider.Spec.Auth.Type); err != nil {
 		msg := fmt.Sprintf("insecure transport configuration: %s", err)
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "InsecureTransport", msg)
+		setStatus("Failed", metav1.ConditionFalse, "InsecureTransport", msg)
 		return ctrl.Result{}, nil
 	}
 
 	if err := r.reconcileResources(ctx, logger, provider, conn); err != nil {
-		r.setStatus(ctx, logger, provider, "Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
+		setStatus("Failed", metav1.ConditionFalse, "ReconcileFailed", err.Error())
 		return ctrl.Result{}, err
 	}
 
-	r.setStatus(ctx, logger, provider, "Ready", metav1.ConditionTrue, "Reconciled", "All resources created successfully")
+	setStatus("Ready", metav1.ConditionTrue, "Reconciled", "All resources created successfully")
 	return ctrl.Result{}, nil
+}
+
+// referencedByAGCOnly reports whether the provider is referenced exclusively
+// by AGC-managed ExternalModels. References invisible to this controller
+// (e.g. models in other namespaces when the cache is namespace-scoped) do
+// not suppress status writes; the check fails open to legacy behavior.
+func (r *Reconciler) referencedByAGCOnly(ctx context.Context, provider *inferencev1alpha1.ExternalProvider) (bool, error) {
+	modelList := &inferencev1alpha1.ExternalModelList{}
+	if err := r.List(ctx, modelList); err != nil {
+		return false, fmt.Errorf("failed to list ExternalModels: %w", err)
+	}
+	agcOnly := false
+	for i := range modelList.Items {
+		model := &modelList.Items[i]
+		if !modelReferencesProvider(model, provider) {
+			continue
+		}
+		if ctrlcommon.IsAGCManaged(model) {
+			agcOnly = true
+		} else {
+			return false, nil
+		}
+	}
+	return agcOnly, nil
+}
+
+// modelReferencesProvider reports whether the model's provider refs resolve
+// to the given provider: an omitted ref namespace means the model namespace.
+func modelReferencesProvider(model *inferencev1alpha1.ExternalModel, provider *inferencev1alpha1.ExternalProvider) bool {
+	for _, ref := range model.Spec.ExternalProviderRefs {
+		namespace := ref.Ref.Namespace
+		if namespace == "" {
+			namespace = model.Namespace
+		}
+		if namespace == provider.Namespace && ref.Ref.Name == provider.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// MapModelToProviders returns reconcile requests for the ExternalProviders
+// referenced by the changed ExternalModel. The reference set determines
+// whether IPP may write provider status, so model changes
+// must re-evaluate the referenced providers.
+func (r *Reconciler) MapModelToProviders(ctx context.Context, obj client.Object) []reconcile.Request {
+	model := obj.(*inferencev1alpha1.ExternalModel)
+	requests := make([]reconcile.Request, 0, len(model.Spec.ExternalProviderRefs))
+	for _, ref := range model.Spec.ExternalProviderRefs {
+		namespace := ref.Ref.Namespace
+		if namespace == "" {
+			namespace = model.Namespace
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: ref.Ref.Name, Namespace: namespace},
+		})
+	}
+	return requests
 }
 
 func (r *Reconciler) reconcileResources(ctx context.Context, logger logr.Logger, provider *inferencev1alpha1.ExternalProvider, conn ctrlcommon.ConnectionSettings) error {
@@ -259,6 +334,12 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}, builder.WithPredicates(managedByPredicate)).
 		Watches(seObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
 		Watches(drObj, ownerHandler, builder.WithPredicates(managedByPredicate)).
+		Watches(&inferencev1alpha1.ExternalModel{},
+			handler.EnqueueRequestsFromMapFunc(r.MapModelToProviders),
+			// The status-suppression decision reads only model spec, so
+			// filter status-only updates (create, delete and spec changes
+			// still pass).
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("external-provider-reconciler").
 		Complete(r)
 }

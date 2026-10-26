@@ -453,11 +453,13 @@ func TestModelReconciler_ProviderNamespace(t *testing.T) {
 					&providerInfo{provider: "openai", endpoint: ns + ".example.com"})
 			}
 			r := &externalModelReconciler{Reader: reader, store: store}
-			_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+			result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
 			require.NoError(t, err)
 			info, found := store.getModelByName(key.Name)
 			if namespace == "shared" {
-				assert.False(t, found, "foreign references must not select either provider without authorization")
+				// AGC-managed shape (RHOAIENG-99761): excluded from the store.
+				assert.False(t, found, "AGC-managed models must not enter the store")
+				assert.Equal(t, ctrl.Result{}, result, "AGC-managed models must not requeue")
 			} else {
 				require.True(t, found)
 				require.Len(t, info.refs, 1)
@@ -488,12 +490,15 @@ func TestModelReconciler_ProviderNamespaceUpdate(t *testing.T) {
 			}
 			result, err := r.Reconcile(context.Background(), req)
 			require.NoError(t, err)
-			assert.Equal(t, providerRequeueDelay, result.RequeueAfter)
 			_, found := store.getModelByName(key.Name)
 			if change == "foreign reference" {
-				assert.False(t, found, "explicit unsupported reference must stop serving the cached local provider")
+				// AGC-managed edit (RHOAIENG-99761): stop serving the cached
+				// local provider without requeuing.
+				assert.False(t, found, "AGC-managed edit must stop serving the cached local provider")
+				assert.Equal(t, ctrl.Result{}, result, "AGC-managed models must not requeue")
 			} else {
 				assert.True(t, found, "transient provider unavailability must keep the last-known-good entry")
+				assert.Equal(t, providerRequeueDelay, result.RequeueAfter)
 			}
 		})
 	}
@@ -534,17 +539,189 @@ func TestModelReconciler_CleanupPreservesOtherOwners(t *testing.T) {
 				}
 				result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: otherKey})
 				require.NoError(t, err)
-				if cleanup == "foreign-reference" {
-					assert.Equal(t, providerRequeueDelay, result.RequeueAfter)
-				} else {
-					assert.Equal(t, ctrl.Result{}, result)
-				}
+				assert.Equal(t, ctrl.Result{}, result, "cleanup and AGC-managed exclusion must not requeue")
 				after, found := store.getModelByName(owner.Spec.ModelName)
 				require.True(t, found, "cleanup must preserve another ExternalModel's mapping")
 				assert.Same(t, before, after)
 			})
 		}
 	}
+}
+
+func TestModelReconciler_AGCManagedGatewayRefs(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "model"}
+	model := newTestModel(key.Name, key.Namespace, newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions"))
+	model.Spec.GatewayRefs = []inferencev1alpha1.NamespacedObjectReference{
+		{Name: "tenant-gateway", Namespace: "gateway-ns"},
+	}
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{key: model}}
+	store := newInfoStore()
+	store.addOrUpdateProvider(types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com"})
+	r := &externalModelReconciler{Reader: reader, store: store}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result, "AGC-managed models must not requeue")
+	_, found := store.getModelByName(key.Name)
+	assert.False(t, found, "AGC-managed models must not enter the store")
+}
+
+func TestModelReconciler_AGCManagedEditRemovesCachedEntry(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "model"}
+	model := newTestModel(key.Name, key.Namespace, newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions"))
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{key: model}}
+	store := newInfoStore()
+	store.addOrUpdateProvider(types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com"})
+	r := &externalModelReconciler{Reader: reader, store: store}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	_, found := store.getModelByName(key.Name)
+	require.True(t, found, "legacy shape must populate the store")
+
+	model.Spec.GatewayRefs = []inferencev1alpha1.NamespacedObjectReference{
+		{Name: "tenant-gateway", Namespace: "gateway-ns"},
+	}
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result, "AGC-managed models must not requeue")
+	_, found = store.getModelByName(key.Name)
+	assert.False(t, found, "edit to the AGC-managed shape must remove the cached entry")
+}
+
+func TestModelReconciler_AGCManagedDoesNotDisplaceTenantModel(t *testing.T) {
+	// A tenant model owns the client-facing modelName "shared-name"...
+	tenantKey := types.NamespacedName{Namespace: "tenant", Name: "tenant-model"}
+	tenant := newTestModel(tenantKey.Name, tenantKey.Namespace, newRef("provider", "gpt", "openai-chat", "/v1/chat/completions"))
+	tenant.Spec.ModelName = "shared-name"
+
+	// ...and an AGC-managed model in another namespace claims the same name.
+	agcKey := types.NamespacedName{Namespace: "user-ns", Name: "agc-model"}
+	agc := newTestModel(agcKey.Name, agcKey.Namespace, newRef("provider", "gpt", "openai-chat", "/v1/chat/completions"))
+	agc.Spec.ModelName = "shared-name"
+	agc.Spec.GatewayRefs = []inferencev1alpha1.NamespacedObjectReference{
+		{Name: "tenant-gateway", Namespace: "gateway-ns"},
+	}
+
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		tenantKey: tenant,
+		agcKey:    agc,
+	}}
+	store := newInfoStore()
+	store.addOrUpdateProvider(types.NamespacedName{Namespace: tenantKey.Namespace, Name: "provider"},
+		&providerInfo{provider: "openai", endpoint: "tenant.example.com"})
+	store.addOrUpdateProvider(types.NamespacedName{Namespace: agcKey.Namespace, Name: "provider"},
+		&providerInfo{provider: "openai", endpoint: "user.example.com"})
+	r := &externalModelReconciler{Reader: reader, store: store}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: tenantKey})
+	require.NoError(t, err)
+	before, found := store.getModelByName("shared-name")
+	require.True(t, found)
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: agcKey})
+	require.NoError(t, err)
+
+	after, found := store.getModelByName("shared-name")
+	require.True(t, found, "the AGC-managed model must not displace the tenant model")
+	assert.Same(t, before, after)
+}
+
+func TestModelReconciler_MixedReferences(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "model"}
+	// The foreign reference reuses the local provider's name: a regression
+	// that resolves it by name in the model namespace instead of skipping
+	// it would store two refs.
+	foreign := newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")
+	foreign.Ref.Namespace = "shared"
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel(key.Name, key.Namespace,
+			newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions"),
+			foreign,
+		),
+	}}
+	store := newInfoStore()
+	store.addOrUpdateProvider(types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com"})
+	r := &externalModelReconciler{Reader: reader, store: store}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result, "a mixed model with a resolvable local ref must not requeue")
+
+	info, found := store.getModelByName(key.Name)
+	require.True(t, found, "mixed models keep serving through their local reference")
+	require.Len(t, info.refs, 1, "the foreign reference must be skipped, not resolved")
+	assert.Equal(t, "api.openai.com", info.refs[0].endpoint)
+}
+
+func TestModelReconciler_MixedReferenceEditRetainsMapping(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "model"}
+	model := newTestModel(key.Name, key.Namespace, newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions"))
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{key: model}}
+	store := newInfoStore()
+	store.addOrUpdateProvider(types.NamespacedName{Namespace: "models", Name: "my-openai"},
+		&providerInfo{provider: "openai", endpoint: "api.openai.com"})
+	r := &externalModelReconciler{Reader: reader, store: store}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	_, found := store.getModelByName(key.Name)
+	require.True(t, found, "legacy shape must populate the store")
+
+	// Adding a foreign reference alongside the local one keeps the cached
+	// mapping...
+	foreign := newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")
+	foreign.Ref.Namespace = "shared"
+	model.Spec.ExternalProviderRefs = append(model.Spec.ExternalProviderRefs, foreign)
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result, "the mixed edit must not requeue")
+	info, found := store.getModelByName(key.Name)
+	require.True(t, found, "the mixed edit must keep serving the cached local mapping")
+	require.Len(t, info.refs, 1, "the foreign reference must be skipped, not resolved")
+
+	// ...while handing the model to AGC evicts it.
+	model.Spec.GatewayRefs = []inferencev1alpha1.NamespacedObjectReference{
+		{Name: "tenant-gateway", Namespace: "gateway-ns"},
+	}
+	result, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result, "AGC-managed models must not requeue")
+	_, found = store.getModelByName(key.Name)
+	assert.False(t, found, "the AGC-managed edit must remove the cached entry")
+}
+
+func TestModelReconciler_MixedReferenceLocalBlipRetainsMapping(t *testing.T) {
+	key := types.NamespacedName{Namespace: "models", Name: "model"}
+	foreign := newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions")
+	foreign.Ref.Namespace = "shared"
+	reader := &mockModelReader{objects: map[types.NamespacedName]*inferencev1alpha1.ExternalModel{
+		key: newTestModel(key.Name, key.Namespace,
+			newRef("my-openai", "gpt-4o", "openai-chat", "/v1/chat/completions"),
+			foreign,
+		),
+	}}
+	store := newInfoStore()
+	providerKey := types.NamespacedName{Namespace: "models", Name: "my-openai"}
+	store.addOrUpdateProvider(providerKey, &providerInfo{provider: "openai", endpoint: "api.openai.com"})
+	r := &externalModelReconciler{Reader: reader, store: store}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	_, found := store.getModelByName(key.Name)
+	require.True(t, found)
+
+	// The local provider disappears from the store: like a local-only
+	// model, requeue and keep the last-known-good mapping.
+	store.deleteProvider(providerKey)
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	assert.Equal(t, providerRequeueDelay, result.RequeueAfter, "the mixed model must requeue while its local ref is unresolved")
+	_, found = store.getModelByName(key.Name)
+	assert.True(t, found, "a transient local failure must keep the last-known-good mapping")
 }
 
 func TestMergeConfig(t *testing.T) {

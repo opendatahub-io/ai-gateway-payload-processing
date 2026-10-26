@@ -25,8 +25,16 @@ This separation allows:
 This repo keeps a local type mirror, following
 [ADR D2](https://github.com/opendatahub-io/architecture-decision-records/pull/165).
 The [schema fixture](../api/inference/v1alpha1/testdata/README.md) describes how
-to synchronize it. IPP does not serve the new gateway attachments, and it rejects
-provider references to another namespace instead of resolving a local provider.
+to synchronize it. IPP does not serve the new gateway attachments: those are
+served by `ai-gateway-controller` regardless of the model namespace, and IPP
+skips them entirely (no routes, no data-plane mapping, no status writes). A
+model whose provider references are all cross-namespace cannot be served by
+IPP — `ai-gateway-controller` skips cross-namespace references too, and in
+namespaces selecting IPP it never writes model status, so IPP stays the status
+owner: IPP withdraws its route and reports the model Failed
+("cross-namespace reference not supported"). A model that references providers
+in both its own and another namespace keeps serving through its local
+references, with the foreign reference skipped.
 
 ## ExternalProvider
 
