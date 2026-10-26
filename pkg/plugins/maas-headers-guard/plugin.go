@@ -35,6 +35,11 @@ const (
 
 	headerPrefix = "x-maas-"
 
+	// Routing headers set by body-field-to-header and model-provider-resolver
+	// in this gateway's own chain; never trusted from the wire.
+	modelNameHeader        = "x-gateway-model-name"
+	selectedProviderHeader = "x-ipp-selected-provider"
+
 	// MaaSHeadersKey is the CycleState key where captured x-maas-* headers are stored
 	// as a map[string]string. Downstream plugins read from this instead of request headers.
 	MaaSHeadersKey = "maas-headers"
@@ -83,6 +88,18 @@ func (p *Plugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleSta
 		cycleState.Write(state.OriginClusterKey, value)
 		request.RemoveHeader(key)
 		logger.Info("origin cluster header captured and stripped", "header", key)
+	}
+
+	// Strip gateway-internal routing headers arriving on the wire. They are
+	// derived from the request body by this gateway's own plugins; a value
+	// that arrives from a client, or from the previous cluster on a
+	// cross-cluster hop, describes someone else's routing decision and would
+	// make model-provider-resolver look up the wrong model.
+	for key := range request.Headers {
+		if strings.EqualFold(key, modelNameHeader) || strings.EqualFold(key, selectedProviderHeader) {
+			request.RemoveHeader(key)
+			logger.Info("routing header stripped", "header", key)
+		}
 	}
 
 	// Strip client auth credentials so they never reach the upstream model.

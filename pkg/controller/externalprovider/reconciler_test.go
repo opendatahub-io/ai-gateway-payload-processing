@@ -255,6 +255,122 @@ func TestReconcile_UpdateEndpoint(t *testing.T) {
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
+// --- AGC-managed reference status suppression ---
+
+func newReferencingModel(name, namespace, providerName, providerNamespace string) *inferencev1alpha1.ExternalModel {
+	return &inferencev1alpha1.ExternalModel{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: inferencev1alpha1.ExternalModelSpec{
+			ExternalProviderRefs: []inferencev1alpha1.ExternalProviderRef{{
+				Ref:         inferencev1alpha1.ExternalProviderReference{Name: providerName, Namespace: providerNamespace},
+				TargetModel: "gpt-4o",
+				APIFormat:   "openai-chat",
+				Path:        "/v1/chat/completions",
+			}},
+		},
+	}
+}
+
+func withGatewayRefs(model *inferencev1alpha1.ExternalModel) *inferencev1alpha1.ExternalModel {
+	model.Spec.GatewayRefs = []inferencev1alpha1.NamespacedObjectReference{
+		{Name: "tenant-gateway", Namespace: "gateway-ns"},
+	}
+	return model
+}
+
+func waitForService(t *testing.T, name, namespace string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		svc := &corev1.Service{}
+		return k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, svc) == nil
+	}, 10*time.Second, 100*time.Millisecond, "expected Service %s/%s", namespace, name)
+}
+
+func requireNoPhase(t *testing.T, name, namespace string) {
+	t.Helper()
+	require.Never(t, func() bool {
+		p := &inferencev1alpha1.ExternalProvider{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, p); err != nil {
+			return false
+		}
+		return p.Status.Phase != ""
+	}, 2*time.Second, 100*time.Millisecond, "IPP must not write status for AGC-only referenced providers")
+}
+
+func TestReconcile_StatusSuppressedForAGCOnlyReference(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	// The AGC-managed model exists before the provider, so the very first
+	// provider reconcile sees the AGC-only reference.
+	model := withGatewayRefs(newReferencingModel("agc-model", ns, "my-openai", ""))
+	require.NoError(t, k8sClient.Create(ctx, model))
+
+	provider := newExternalProvider("my-openai", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	// Transport is still reconciled...
+	waitForService(t, "my-openai", ns)
+
+	// ...but IPP must not write status: AGC owns it for AGC-only references.
+	requireNoPhase(t, "my-openai", ns)
+}
+
+func TestReconcile_StatusSuppressedForForeignReference(t *testing.T) {
+	ns := createTestNamespace(t)
+	other := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	// AGC-managed model in another namespace referencing this provider via an
+	// explicit cross-namespace ref.
+	model := newReferencingModel("agc-model", other, "my-openai", ns)
+	require.NoError(t, k8sClient.Create(ctx, model))
+
+	provider := newExternalProvider("my-openai", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	waitForService(t, "my-openai", ns)
+	requireNoPhase(t, "my-openai", ns)
+}
+
+func TestReconcile_StatusWrittenForSharedProvider(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	// Both an AGC-managed model and a legacy-shaped model reference the
+	// provider: the legacy reference keeps IPP status writes active.
+	agcModel := withGatewayRefs(newReferencingModel("agc-model", ns, "shared", ""))
+	require.NoError(t, k8sClient.Create(ctx, agcModel))
+	legacyModel := newReferencingModel("legacy-model", ns, "shared", "")
+	require.NoError(t, k8sClient.Create(ctx, legacyModel))
+
+	provider := newExternalProvider("shared", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	waitForPhase(t, "shared", ns, "Ready")
+}
+
+func TestReconcile_StatusResumesWhenLegacyModelAdded(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	// Start suppressed: only an AGC-managed model references the provider.
+	agcModel := withGatewayRefs(newReferencingModel("agc-model", ns, "resumes", ""))
+	require.NoError(t, k8sClient.Create(ctx, agcModel))
+
+	provider := newExternalProvider("resumes", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+	waitForService(t, "resumes", ns)
+	requireNoPhase(t, "resumes", ns)
+
+	// A legacy-shaped model referencing the same provider restores IPP status
+	// writes via the model -> provider cross-watch.
+	legacyModel := newReferencingModel("legacy-model", ns, "resumes", "")
+	require.NoError(t, k8sClient.Create(ctx, legacyModel))
+
+	waitForPhase(t, "resumes", ns, "Ready")
+}
+
 // --- resource builder tests (folded from resources_test.go) ---
 
 func TestCommonLabels(t *testing.T) {

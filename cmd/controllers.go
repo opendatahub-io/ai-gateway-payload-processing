@@ -23,6 +23,7 @@ import (
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
@@ -33,14 +34,22 @@ import (
 
 // providerController returns a setup function that registers the ExternalProvider
 // controller. It creates Service, ServiceEntry, and DestinationRule resources.
+// ExternalModel changes re-evaluate whether IPP may write provider status
 func providerController() func(client.Client, *ctrlbuilder.Builder) error {
 	return func(c client.Client, b *ctrlbuilder.Builder) error {
 		utilruntime.Must(inferencev1alpha1.AddToScheme(c.Scheme()))
 
+		reconciler := &externalprovider.Reconciler{Client: c, Scheme: c.Scheme()}
 		return b.
 			For(&inferencev1alpha1.ExternalProvider{}).
 			Named("external-provider-controller").
-			Complete(&externalprovider.Reconciler{Client: c, Scheme: c.Scheme()})
+			Watches(&inferencev1alpha1.ExternalModel{},
+				handler.EnqueueRequestsFromMapFunc(reconciler.MapModelToProviders),
+				// The status-suppression decision reads only model spec, so
+				// filter status-only updates (create, delete and spec changes
+				// still pass).
+				ctrlbuilder.WithPredicates(predicate.GenerationChangedPredicate{})).
+			Complete(reconciler)
 	}
 }
 
