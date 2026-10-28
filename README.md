@@ -65,7 +65,9 @@ kubectl apply -f config/crd/bases/
     (issue #343). Incoming `X-Origin-Cluster` matching this value is rejected
     with HTTP 403. Leave it unset (or empty) to disable loop detection. Do not
     put `CLUSTER_NAME` in `values.yaml` as `env[0]` — Helm `--set env[0]` from
-    the install command would replace the whole list.
+    the install command would replace the whole list. To route requests to a
+    model hosted on another RHOAI/ODH cluster, set `CLUSTER_NAME` on both
+    clusters and follow the [remote MaaS cluster guide](docs/providers/remote-maas.md).
 
 ## Cleanup
 

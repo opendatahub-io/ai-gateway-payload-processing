@@ -10,6 +10,7 @@ Configuration guides for each supported external model provider.
 | [Azure OpenAI](azure-openai.md) | `openai-chat` | Path rewrite | `api-key` | [azure-openai.md](azure-openai.md) |
 | [Vertex AI (Gemini)](vertex-openai.md) | `openai-chat` | Path rewrite + OAuth2 | Bearer (OAuth2) | [vertex-openai.md](vertex-openai.md) |
 | [Vertex AI (Claude)](vertex-anthropic.md) | `vertex-messages` | OpenAI → Anthropic + Vertex | Bearer (OAuth2) | [vertex-anthropic.md](vertex-anthropic.md) |
+| [Remote MaaS cluster](remote-maas.md) | `openai-chat` | Pass-through + loop detection | `Authorization: Bearer` (remote cluster's MaaS key) | [remote-maas.md](remote-maas.md) |
 
 ## Architecture guides
 
