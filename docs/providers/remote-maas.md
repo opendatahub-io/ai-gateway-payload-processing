@@ -58,9 +58,10 @@ Cluster B will apply to all traffic arriving from Cluster A.
 # on Cluster B
 GW_HOST_B=$(kubectl get gateway maas-default-gateway -n openshift-ingress \
   -o jsonpath='{.spec.listeners[0].hostname}')
+GW_PORT_B=${GW_PORT_B:-443}   # the HTTPS listener port; anything other than 443 also goes in the port annotation in step 3
 TOKEN=$(oc whoami -t)
 
-KEY_B=$(curl -sS -X POST "https://${GW_HOST_B}/maas-api/v1/api-keys" \
+KEY_B=$(curl -sS -X POST "https://${GW_HOST_B}:${GW_PORT_B}/maas-api/v1/api-keys" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"name":"cluster-a-federation","subscription":"<subscription-name>"}' | jq -r '.key')
@@ -69,26 +70,35 @@ KEY_B=$(curl -sS -X POST "https://${GW_HOST_B}/maas-api/v1/api-keys" \
 Confirm the key works directly against Cluster B before involving Cluster A:
 
 ```bash
-curl -sS "https://${GW_HOST_B}/v1/chat/completions" \
+curl -sS "https://${GW_HOST_B}:${GW_PORT_B}/v1/chat/completions" \
   -H "Authorization: Bearer ${KEY_B}" \
   -H "Content-Type: application/json" \
   -d '{"model":"<model-name-on-b>","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
 ```
 
-Keep `GW_HOST_B` and `<model-name-on-b>`: they become `endpoint` and
-`targetModel` on Cluster A.
+Keep `GW_HOST_B`, `GW_PORT_B` and `<model-name-on-b>`: they become
+`endpoint`, the port annotation and `targetModel` on Cluster A.
 
 ### Step 2: Store the key as a Secret on Cluster A
 
 The Secret lives in the same namespace as the ExternalProvider that references
 it and **must** carry the `inference.llm-d.ai/ipp-managed: "true"` label, or
-the credential store ignores it.
+the credential store ignores it. The manifest is piped over stdin so the key
+never appears in a process argument list.
 
 ```bash
 # on Cluster A
-kubectl create secret generic cluster-b-credentials -n llm \
-  --from-literal=api-key="${KEY_B}"
-kubectl label secret cluster-b-credentials -n llm inference.llm-d.ai/ipp-managed=true
+kubectl apply -n llm -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-b-credentials
+  labels:
+    inference.llm-d.ai/ipp-managed: "true"
+type: Opaque
+stringData:
+  api-key: ${KEY_B}
+EOF
 ```
 
 ### Step 3: Deploy the ExternalProvider on Cluster A
@@ -99,7 +109,7 @@ kind: ExternalProvider
 metadata:
   name: cluster-b
   namespace: llm
-  # Only needed when Cluster B's gateway is not on 443:
+  # Only needed when GW_PORT_B from step 1 is not 443:
   # annotations:
   #   inference.opendatahub.io/port: "8443"
 spec:
@@ -165,17 +175,35 @@ Verify on each cluster:
 kubectl set env deploy -n openshift-ingress --list --all | grep CLUSTER_NAME
 ```
 
-The comparison is case-insensitive. Clients cannot forge the origin: the
-headers guard strips any `X-Origin-Cluster` arriving from outside before the
-check runs.
+The comparison is case-insensitive. The header is not authenticated: the
+headers guard records whatever `X-Origin-Cluster` value arrives, strips it
+from the request, and the resolver re-adds it on the next `remote-maas` hop.
+A client that sets the header only affects its own request (a forged value
+can make a hop reject it with 403), and the header is never forwarded to
+third-party providers, but the gateway does not verify that the value came
+from a trusted cluster.
 
 ### Step 6: Verify with a test request
+
+The client needs an ordinary MaaS key for Cluster A, issued the same way as
+in step 1 but on Cluster A, for a user whose MaaSAuthPolicy and
+MaaSSubscription cover the `llama-on-b` model:
 
 ```bash
 # on Cluster A
 GW_HOST_A=$(kubectl get gateway maas-default-gateway -n openshift-ingress \
   -o jsonpath='{.spec.listeners[0].hostname}')
+TOKEN=$(oc whoami -t)
 
+KEY_A=$(curl -sS -X POST "https://${GW_HOST_A}/maas-api/v1/api-keys" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"llama-on-b-test","subscription":"<subscription-name-on-a>"}' | jq -r '.key')
+```
+
+Then check the generated resources and send a request:
+
+```bash
 kubectl get httproute llama-on-b -n llm                 # created by the ExternalModel controller
 kubectl get serviceentry,destinationrule cluster-b -n llm
 
@@ -185,9 +213,8 @@ curl -sS "https://${GW_HOST_A}/v1/chat/completions" \
   -d '{"model":"llama-on-b","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}'
 ```
 
-`KEY_A` is an ordinary MaaS key for Cluster A. Cluster A authenticates and
-rate-limits that key; Cluster B authenticates and rate-limits the key from
-step 1. Both limits apply.
+Cluster A authenticates and rate-limits `KEY_A`; Cluster B authenticates and
+rate-limits the key from step 1. Both limits apply.
 
 ## Complete manifest
 
