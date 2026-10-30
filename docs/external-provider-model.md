@@ -132,6 +132,26 @@ kubectl get externalproviders my-anthropic -n llm -o jsonpath='{.status.phase}'
 # Ready | Failed | Pending
 ```
 
+### Ownership and AIGC handoff
+
+Provider status and transport ownership follow the serving dataplane of the
+namespace.
+`ai-gateway-controller` (AIGC) serves Praxis namespaces and claims every
+ExternalProvider there by adding its
+`inference.opendatahub.io/external-provider-cleanup` finalizer — before its
+tenant gates, so the claim is present from the first reconcile, including in
+namespaces with no `MaasTenantConfig`. IPP defers to that claim: while the
+finalizer is present it writes no provider status, removes any transport it
+created for the provider (label-gated to its own objects), and creates
+nothing new. When the namespace selects IPP again, AIGC releases the
+finalizer and IPP's provider watch resumes full reconciliation, so selection
+changes converge without manual intervention.
+
+This is the namespace-level rule and takes precedence over the older
+reference-shape suppression (status writes suppressed when only AGC-managed
+models reference the provider, while transport is still reconciled), which
+remains as a fallback for deployments where AIGC does not run.
+
 ## ExternalModel
 
 An ExternalModel defines the client-facing model name and binds it to one or more

@@ -371,6 +371,146 @@ func TestReconcile_StatusResumesWhenLegacyModelAdded(t *testing.T) {
 	waitForPhase(t, "resumes", ns, "Ready")
 }
 
+// --- AIGC finalizer deferral ---
+
+func addAIGCFinalizer(t *testing.T, name, namespace string) {
+	t.Helper()
+	provider := &inferencev1alpha1.ExternalProvider{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, provider))
+	provider.Finalizers = append(provider.Finalizers, aigcExternalProviderFinalizer)
+	require.NoError(t, k8sClient.Update(ctx, provider))
+}
+
+func removeAIGCFinalizer(t *testing.T, name, namespace string) {
+	t.Helper()
+	provider := &inferencev1alpha1.ExternalProvider{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, provider))
+	finalizers := make([]string, 0, len(provider.Finalizers))
+	for _, f := range provider.Finalizers {
+		if f != aigcExternalProviderFinalizer {
+			finalizers = append(finalizers, f)
+		}
+	}
+	provider.Finalizers = finalizers
+	require.NoError(t, k8sClient.Update(ctx, provider))
+}
+
+func waitForNoService(t *testing.T, name, namespace string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &corev1.Service{}))
+	}, 10*time.Second, 100*time.Millisecond, "expected Service %s/%s to be removed", namespace, name)
+}
+
+func waitForNoUnstructured(t *testing.T, gvk schema.GroupVersionKind, name, namespace string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(gvk)
+		return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj))
+	}, 10*time.Second, 100*time.Millisecond, "expected %s %s/%s to be removed", gvk.Kind, namespace, name)
+}
+
+func TestReconcile_DeferWhenAIGCClaimsProvider(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	// IPP serves the provider first: transport exists and status is written.
+	provider := newExternalProvider("claimed", ns, "api.openai.com", "key")
+	require.NoError(t, k8sClient.Create(ctx, provider))
+	waitForPhase(t, "claimed", ns, "Ready")
+	waitForService(t, "claimed", ns)
+
+	// AIGC claims the provider by adding its cleanup finalizer.
+	addAIGCFinalizer(t, "claimed", ns)
+
+	// IPP removes its transport...
+	waitForNoService(t, "claimed", ns)
+	waitForNoUnstructured(t, serviceEntryGVK, "claimed", ns)
+	waitForNoUnstructured(t, destinationRuleGVK, "claimed", ns)
+
+	// ...and leaves status to AIGC: a status AIGC writes after claiming
+	// must survive IPP's reconciles.
+	provider = &inferencev1alpha1.ExternalProvider{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "claimed", Namespace: ns}, provider))
+	provider.Status.Phase = "Pending"
+	require.NoError(t, k8sClient.Status().Update(ctx, provider))
+	require.Never(t, func() bool {
+		p := &inferencev1alpha1.ExternalProvider{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: "claimed", Namespace: ns}, p); err != nil {
+			return false
+		}
+		return p.Status.Phase != "Pending"
+	}, 2*time.Second, 100*time.Millisecond, "IPP must not write status for a provider claimed by AIGC")
+}
+
+func TestReconcile_DeferFromCreationWhenAIGCClaimPrecedes(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	// The AIGC finalizer is present before IPP's first reconcile, as in a
+	// namespace AIGC has served all along.
+	provider := newExternalProvider("pre-claimed", ns, "api.openai.com", "key")
+	provider.Finalizers = []string{aigcExternalProviderFinalizer}
+	require.NoError(t, k8sClient.Create(ctx, provider))
+
+	requireNoPhase(t, "pre-claimed", ns)
+	svc := &corev1.Service{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: "pre-claimed", Namespace: ns}, svc)
+	assert.True(t, apierrors.IsNotFound(err), "IPP must not create transport for a provider claimed by AIGC")
+}
+
+func TestReconcile_ResumeWhenAIGCReleasesProvider(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	provider := newExternalProvider("released", ns, "api.openai.com", "key")
+	provider.Finalizers = []string{aigcExternalProviderFinalizer}
+	require.NoError(t, k8sClient.Create(ctx, provider))
+	requireNoPhase(t, "released", ns)
+
+	// AIGC releases its claim when the namespace selects IPP again.
+	removeAIGCFinalizer(t, "released", ns)
+
+	waitForPhase(t, "released", ns, "Ready")
+	waitForService(t, "released", ns)
+}
+
+func TestReconcile_CleanupSkipsForeignObjects(t *testing.T) {
+	ns := createTestNamespace(t)
+	createSecret(t, "key", ns)
+
+	provider := newExternalProvider("foreign", ns, "api.openai.com", "key")
+	provider.Finalizers = []string{aigcExternalProviderFinalizer}
+	require.NoError(t, k8sClient.Create(ctx, provider))
+	requireNoPhase(t, "foreign", ns)
+
+	// An object IPP does not manage at the transport name: another
+	// controller's Service with no managed-by label.
+	foreignSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "foreign",
+			Namespace: ns,
+			Labels:    map[string]string{"owner": "someone-else"},
+		},
+		Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeExternalName, ExternalName: "elsewhere.example.com"},
+	}
+	require.NoError(t, k8sClient.Create(ctx, foreignSvc))
+
+	// Trigger a reconcile of the deferred provider: the deferral cleanup
+	// must not collect the foreign object.
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "foreign", Namespace: ns}, provider))
+	{
+		providerCopy := provider.DeepCopy()
+		providerCopy.Annotations = map[string]string{"reconcile-trigger": "1"}
+		require.NoError(t, k8sClient.Update(ctx, providerCopy))
+	}
+
+	require.Never(t, func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: "foreign", Namespace: ns}, &corev1.Service{}))
+	}, 2*time.Second, 100*time.Millisecond, "deferral cleanup must not delete objects IPP does not manage")
+}
+
 // --- resource builder tests (folded from resources_test.go) ---
 
 func TestCommonLabels(t *testing.T) {

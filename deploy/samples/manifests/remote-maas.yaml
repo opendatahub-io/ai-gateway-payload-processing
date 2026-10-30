@@ -1,0 +1,43 @@
+# Cross-cluster routing: expose a model served by another RHOAI/ODH cluster
+# ("Cluster B") through this cluster's gateway. Apply on the cluster the
+# client talks to ("Cluster A"). See docs/providers/remote-maas.md.
+#
+# CLUSTER_NAME must be set on the payload-processing deployment of BOTH
+# clusters for routing loop detection to be active.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-b-credentials
+  labels:
+    inference.llm-d.ai/ipp-managed: "true"   # required, or the credential store ignores this Secret
+type: Opaque
+stringData:
+  api-key: <maas-api-key-minted-on-cluster-b>
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: cluster-b
+  # Only when Cluster B's gateway does not listen on 443:
+  # annotations:
+  #   inference.opendatahub.io/port: "8443"
+spec:
+  provider: remote-maas
+  endpoint: maas.apps.cluster-b.example.com   # Cluster B's MaaS gateway hostname (DNS name, not an IP)
+  auth:
+    type: apikey                              # TLS is mandatory with apikey auth; do not disable it
+    secretRef:
+      name: cluster-b-credentials
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: llama-on-b
+spec:
+  modelName: llama-on-b                       # client-facing name on Cluster A (defaults to metadata.name)
+  externalProviderRefs:
+    - ref:
+        name: cluster-b
+      targetModel: llama-3-70b                # name Cluster B serves the model under
+      apiFormat: openai-chat
+      path: /v1/chat/completions              # required; the inference path on Cluster B's gateway
