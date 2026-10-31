@@ -45,10 +45,11 @@ import (
 )
 
 var (
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	cancel    context.CancelFunc
+	k8sClient   client.Client
+	cacheReader client.Reader
+	testEnv     *envtest.Environment
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	serviceEntryGVK = schema.GroupVersionKind{
 		Group: "networking.istio.io", Version: "v1", Kind: "ServiceEntry",
@@ -99,6 +100,7 @@ func TestMain(m *testing.M) {
 	}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
+	cacheReader = mgr.GetClient()
 
 	go func() {
 		if err := mgr.Start(ctx); err != nil {
@@ -278,6 +280,20 @@ func withGatewayRefs(model *inferencev1alpha1.ExternalModel) *inferencev1alpha1.
 	return model
 }
 
+// A successful API write does not guarantee that the independent model watch
+// has reached the controller cache before the provider's first reconcile.
+func createCachedModel(t *testing.T, model *inferencev1alpha1.ExternalModel) {
+	t.Helper()
+	require.NoError(t, k8sClient.Create(ctx, model))
+	require.Eventually(t, func() bool {
+		cached := &inferencev1alpha1.ExternalModel{}
+		if err := cacheReader.Get(ctx, client.ObjectKeyFromObject(model), cached); err != nil {
+			return false
+		}
+		return cached.UID == model.UID && cached.ResourceVersion == model.ResourceVersion
+	}, 10*time.Second, 100*time.Millisecond, "model must be visible to the controller before creating its provider")
+}
+
 func waitForService(t *testing.T, name, namespace string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -304,7 +320,7 @@ func TestReconcile_StatusSuppressedForAGCOnlyReference(t *testing.T) {
 	// The AGC-managed model exists before the provider, so the very first
 	// provider reconcile sees the AGC-only reference.
 	model := withGatewayRefs(newReferencingModel("agc-model", ns, "my-openai", ""))
-	require.NoError(t, k8sClient.Create(ctx, model))
+	createCachedModel(t, model)
 
 	provider := newExternalProvider("my-openai", ns, "api.openai.com", "key")
 	require.NoError(t, k8sClient.Create(ctx, provider))
@@ -324,7 +340,7 @@ func TestReconcile_StatusSuppressedForForeignReference(t *testing.T) {
 	// AGC-managed model in another namespace referencing this provider via an
 	// explicit cross-namespace ref.
 	model := newReferencingModel("agc-model", other, "my-openai", ns)
-	require.NoError(t, k8sClient.Create(ctx, model))
+	createCachedModel(t, model)
 
 	provider := newExternalProvider("my-openai", ns, "api.openai.com", "key")
 	require.NoError(t, k8sClient.Create(ctx, provider))
@@ -356,7 +372,7 @@ func TestReconcile_StatusResumesWhenLegacyModelAdded(t *testing.T) {
 
 	// Start suppressed: only an AGC-managed model references the provider.
 	agcModel := withGatewayRefs(newReferencingModel("agc-model", ns, "resumes", ""))
-	require.NoError(t, k8sClient.Create(ctx, agcModel))
+	createCachedModel(t, agcModel)
 
 	provider := newExternalProvider("resumes", ns, "api.openai.com", "key")
 	require.NoError(t, k8sClient.Create(ctx, provider))

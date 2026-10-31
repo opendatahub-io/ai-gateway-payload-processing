@@ -96,7 +96,10 @@ func postChat(model string, headers map[string]string) (int, []byte) {
 		return 0, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
+	const maxResponseBodyBytes = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "gateway response body must be complete")
+	gomega.Expect(len(body)).To(gomega.BeNumerically("<=", maxResponseBodyBytes), "gateway response body must not exceed 1 MiB")
 	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "POST model=%s -> %d %s\n", model, resp.StatusCode, body)
 	return resp.StatusCode, body
 }
