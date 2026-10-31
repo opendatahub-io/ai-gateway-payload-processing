@@ -271,7 +271,20 @@ func registerInTreePlugins() {
 // newExtProcRunnable creates a controller-runtime Runnable that serves the given
 // ext-proc server on the specified port, optionally with TLS.
 func newExtProcRunnable(extProcServer extProcPb.ExternalProcessorServer, port int, secureServing bool) (manager.Runnable, error) {
+	maxRecv, err := resolveGRPCMaxRecvMsgSize()
+	if err != nil {
+		return nil, err
+	}
+
 	return manager.RunnableFunc(func(ctx context.Context) error {
+		// Per-message limit only (gRPC MaxRecvMsgSize). RHAI-13005 fails when
+		// Envoy delivers one body chunk larger than the limit; this does not
+		// bound cumulative body bytes reassembled across streamed chunks
+		// (that remains an upstream IPP handler concern).
+		grpcOpts := []grpc.ServerOption{grpc.MaxRecvMsgSize(maxRecv)}
+		ctrl.Log.WithName("ext-proc").Info("gRPC MaxRecvMsgSize configured",
+			"bytes", maxRecv, "env", grpcMaxRecvMsgSizeEnv)
+
 		var srv *grpc.Server
 		if secureServing {
 			cert, err := createSelfSignedCert()
@@ -283,10 +296,9 @@ func newExtProcRunnable(extProcServer extProcPb.ExternalProcessorServer, port in
 				MinVersion:   tls.VersionTLS12,
 				NextProtos:   []string{"h2"},
 			})
-			srv = grpc.NewServer(grpc.Creds(creds))
-		} else {
-			srv = grpc.NewServer()
+			grpcOpts = append(grpcOpts, grpc.Creds(creds))
 		}
+		srv = grpc.NewServer(grpcOpts...)
 
 		extProcPb.RegisterExternalProcessorServer(srv, extProcServer)
 		return startGRPCServer(ctx, "ext-proc", srv, port)
