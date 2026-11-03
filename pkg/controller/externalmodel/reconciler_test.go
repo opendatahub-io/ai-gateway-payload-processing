@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -331,6 +332,52 @@ func TestReconcile_AGCManagedGatewayRefs(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond, "IPP must not write status for AGC-managed models")
 	assert.True(t, apierrors.IsNotFound(
 		k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &gatewayapiv1.HTTPRoute{})))
+}
+
+// A model AGC serves through its own Praxis tenant carries AGC's finalizer.
+// The default tenant's IPP serves every namespace, so it must leave such a
+// model alone, and serve it again once AGC releases it (RHOAIENG-102557).
+func TestReconcile_AGCServedTransition(t *testing.T) {
+	ns := createTestNamespace(t)
+	createExternalProvider(t, "provider", ns, "local.example.com")
+
+	model := newExternalModel("praxis-tenant-model", ns, "provider", "gpt")
+	require.NoError(t, k8sClient.Create(ctx, model))
+	waitForModelPhase(t, "praxis-tenant-model", ns, "Ready")
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &gatewayapiv1.HTTPRoute{}))
+
+	// AGC serves it: IPP withdraws its route and stops writing status.
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), model))
+	old := model.DeepCopy()
+	model.Finalizers = append(model.Finalizers, ctrlcommon.AGCModelFinalizer)
+	require.NoError(t, k8sClient.Patch(ctx, model, client.MergeFrom(old)))
+	require.Eventually(t, func() bool {
+		err := k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &gatewayapiv1.HTTPRoute{})
+		return apierrors.IsNotFound(err)
+	}, 10*time.Second, 100*time.Millisecond, "a model AGC serves must lose the IPP-owned route")
+
+	// AGC reports its own status; IPP must not overwrite it.
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), model))
+	model.Status.Phase = "Pending"
+	model.Status.HTTPRouteName = ""
+	require.NoError(t, k8sClient.Status().Update(ctx, model))
+	assert.Never(t, func() bool {
+		m := &inferencev1alpha1.ExternalModel{}
+		if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(model), m); err != nil {
+			return false
+		}
+		return m.Status.Phase != "Pending"
+	}, 2*time.Second, 100*time.Millisecond, "IPP must not write status for a model AGC serves")
+
+	// The tenant selects IPP again and AGC releases the model: IPP serves it.
+	require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(model), model))
+	old = model.DeepCopy()
+	model.Finalizers = slices.DeleteFunc(model.Finalizers, func(f string) bool { return f == ctrlcommon.AGCModelFinalizer })
+	require.NoError(t, k8sClient.Patch(ctx, model, client.MergeFrom(old)))
+	waitForModelPhase(t, "praxis-tenant-model", ns, "Ready")
+	require.Eventually(t, func() bool {
+		return k8sClient.Get(ctx, client.ObjectKeyFromObject(model), &gatewayapiv1.HTTPRoute{}) == nil
+	}, 10*time.Second, 100*time.Millisecond, "a released model must get its IPP route back")
 }
 
 func TestReconcile_AGCManagedTransition(t *testing.T) {

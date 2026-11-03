@@ -163,3 +163,14 @@ func TestIsAGCAttached(t *testing.T) {
 		})
 	}
 }
+
+func TestIsAGCServed(t *testing.T) {
+	served := testModel(testProviderRef(""))
+	served.Finalizers = []string{"other.example.com/finalizer", AGCModelFinalizer}
+	attachedOnly := testModel(testProviderRef(""))
+	attachedOnly.Finalizers = []string{"inference.opendatahub.io/external-model-attachment-cleanup"}
+
+	assert.True(t, IsAGCServed(served), "a model with AGC's tenant finalizer is AGC's")
+	assert.False(t, IsAGCServed(testModel(testProviderRef(""))), "a model without it stays IPP's")
+	assert.False(t, IsAGCServed(attachedOnly), "AGC's attachment finalizer alone does not claim the model")
+}

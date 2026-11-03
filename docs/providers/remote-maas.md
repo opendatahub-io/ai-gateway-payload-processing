@@ -227,7 +227,7 @@ A copy-paste version of steps 2 to 4 is in
 |--------|----------|
 | `Authorization` | Replaced with Cluster B's key from the Secret |
 | `X-Origin-Cluster` | Set to the origin cluster's `CLUSTER_NAME` on `remote-maas` hops; preserved on further hops; never sent to third-party providers |
-| `x-gateway-model-name`, `x-ipp-selected-provider` | Stripped on arrival at Cluster B so it resolves the model itself |
+| `x-gateway-model-name`, `x-ipp-selected-provider` | Set again on Cluster B from the request body, so it resolves the model itself. A single-chain deployment strips them first (`maas-headers-guard` with `stripRoutingHeaders: true`) |
 | `x-b3-traceid`, `x-request-id` | Forwarded, so a trace ID can be followed across both clusters' logs |
 
 ## Troubleshooting

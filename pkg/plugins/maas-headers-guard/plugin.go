@@ -19,6 +19,7 @@ package maas_headers_guard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -35,8 +36,8 @@ const (
 
 	headerPrefix = "x-maas-"
 
-	// Routing headers set by body-field-to-header and model-provider-resolver
-	// in this gateway's own chain; never trusted from the wire.
+	// Routing headers set by body-field-to-header and model-provider-resolver.
+	// See config.StripRoutingHeaders for when the guard removes them.
 	modelNameHeader        = "x-gateway-model-name"
 	selectedProviderHeader = "x-ipp-selected-provider"
 
@@ -47,13 +48,32 @@ const (
 
 var _ requesthandling.RequestProcessor = &Plugin{}
 
-type Plugin struct {
-	typedName plugin.TypedName
+type config struct {
+	// StripRoutingHeaders removes x-gateway-model-name and
+	// x-ipp-selected-provider arriving on the request. Enable it only where
+	// the guard runs before body-field-to-header and model-provider-resolver
+	// in the same chain, which set the headers again from the body. A
+	// post-auth chain behind a separate pre-auth stage (the MaaS layout) must
+	// keep them: the HTTPRoutes match on them, and the body's model was
+	// already rewritten to the provider's targetModel.
+	StripRoutingHeaders bool `json:"stripRoutingHeaders"`
 }
 
-func Factory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+type Plugin struct {
+	typedName           plugin.TypedName
+	stripRoutingHeaders bool
+}
+
+func Factory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+	var cfg config
+	if len(rawParameters) > 0 {
+		if err := json.Unmarshal(rawParameters, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of '%s' plugin - %w", PluginType, err)
+		}
+	}
 	return (&Plugin{
-		typedName: plugin.TypedName{Type: PluginType, Name: PluginType},
+		typedName:           plugin.TypedName{Type: PluginType, Name: PluginType},
+		stripRoutingHeaders: cfg.StripRoutingHeaders,
 	}).WithName(name), nil
 }
 
@@ -90,15 +110,18 @@ func (p *Plugin) ProcessRequest(ctx context.Context, cycleState *plugin.CycleSta
 		logger.Info("origin cluster header captured and stripped", "header", key)
 	}
 
-	// Strip gateway-internal routing headers arriving on the wire. They are
-	// derived from the request body by this gateway's own plugins; a value
-	// that arrives from a client, or from the previous cluster on a
-	// cross-cluster hop, describes someone else's routing decision and would
-	// make model-provider-resolver look up the wrong model.
-	for key := range request.Headers {
-		if strings.EqualFold(key, modelNameHeader) || strings.EqualFold(key, selectedProviderHeader) {
-			request.RemoveHeader(key)
-			logger.Info("routing header stripped", "header", key)
+	// Strip gateway-internal routing headers arriving on the wire. In a
+	// single chain they are derived from the request body by the plugins
+	// after this one; a value that arrives from a client, or from the
+	// previous cluster on a cross-cluster hop, describes someone else's
+	// routing decision and would make model-provider-resolver look up the
+	// wrong model.
+	if p.stripRoutingHeaders {
+		for key := range request.Headers {
+			if strings.EqualFold(key, modelNameHeader) || strings.EqualFold(key, selectedProviderHeader) {
+				request.RemoveHeader(key)
+				logger.Info("routing header stripped", "header", key)
+			}
 		}
 	}
 
