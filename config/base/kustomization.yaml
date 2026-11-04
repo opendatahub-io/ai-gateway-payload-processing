@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../crd
+  - ../manager
+  - ../rbac
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/part-of: ai-gateway
+      app.kubernetes.io/component: payload-processing
+      app.kubernetes.io/name: payload-processing
+
+configMapGenerator:
+  - name: payload-processing-params
+    envs:
+      - params.env
