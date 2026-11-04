@@ -17,8 +17,16 @@ limitations under the License.
 package common
 
 import (
+	"slices"
+
 	inferencev1alpha1 "github.com/opendatahub-io/ai-gateway-payload-processing/api/inference/v1alpha1"
 )
+
+// AGCModelFinalizer is the finalizer ai-gateway-controller (AGC) adds to an
+// ExternalModel it serves through the model's own Praxis tenant. AGC adds it
+// once it serves the model there: the tenant's handoff to Praxis is steady and
+// its AITenant is ready. It removes it when the tenant selects IPP again.
+const AGCModelFinalizer = "inference.opendatahub.io/external-model-cleanup"
 
 // IsAGCManaged reports whether an ExternalModel uses fields that only
 // ai-gateway-controller (AGC) interprets (RHOAIENG-90800): explicit gateway
@@ -64,4 +72,16 @@ func IsAGCManaged(model *inferencev1alpha1.ExternalModel) bool {
 // it still owns and write no status for them (RHOAIENG-99761).
 func IsAGCAttached(model *inferencev1alpha1.ExternalModel) bool {
 	return len(model.Spec.GatewayRefs) > 0
+}
+
+// IsAGCServed reports whether AGC serves the ExternalModel through its own
+// Praxis tenant and owns its status (RHOAIENG-102557): the model carries
+// AGCModelFinalizer. The default tenant's IPP serves every namespace, so it
+// would otherwise also claim the models of other tenants that run on Praxis.
+// The models of a tenant whose migration to Praxis is blocked carry no such
+// finalizer, and IPP keeps serving them. Neither do those of a Praxis tenant
+// that is not steady or ready yet: while the default tenant runs on IPP, IPP
+// may still claim them until AGC serves them.
+func IsAGCServed(model *inferencev1alpha1.ExternalModel) bool {
+	return slices.Contains(model.GetFinalizers(), AGCModelFinalizer)
 }

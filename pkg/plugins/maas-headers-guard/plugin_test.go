@@ -158,7 +158,8 @@ func TestProcessRequest_StripsOriginClusterCaseInsensitive(t *testing.T) {
 }
 
 func TestProcessRequest_StripsIncomingRoutingHeaders(t *testing.T) {
-	instance, _ := Factory("test", nil, nil)
+	instance, err := Factory("test", []byte(`{"stripRoutingHeaders": true}`), nil)
+	require.NoError(t, err)
 	req := requesthandling.NewInferenceRequest()
 	// As forwarded by the previous cluster on a cross-cluster hop.
 	req.Headers["x-gateway-model-name"] = "remote-echo"
@@ -170,4 +171,28 @@ func TestProcessRequest_StripsIncomingRoutingHeaders(t *testing.T) {
 	assert.NotContains(t, req.Headers, "x-gateway-model-name")
 	assert.NotContains(t, req.Headers, "X-Ipp-Selected-Provider")
 	assert.Contains(t, req.Headers, "content-type")
+}
+
+// A post-auth chain behind a separate pre-auth stage, as MaaS renders it,
+// must keep the routing headers that stage set: the HTTPRoutes match on them.
+func TestProcessRequest_KeepsRoutingHeadersByDefault(t *testing.T) {
+	instance, err := Factory("test", nil, nil)
+	require.NoError(t, err)
+	req := requesthandling.NewInferenceRequest()
+	req.Headers["x-gateway-model-name"] = "gpt-4o"
+	req.Headers["x-ipp-selected-provider"] = "openai"
+	req.Headers["authorization"] = "Bearer sk-caller"
+	req.Headers["x-maas-username"] = "alice"
+
+	require.NoError(t, instance.(*Plugin).ProcessRequest(context.Background(), plugin.NewCycleState(), req))
+
+	assert.Equal(t, "gpt-4o", req.Headers["x-gateway-model-name"])
+	assert.Equal(t, "openai", req.Headers["x-ipp-selected-provider"])
+	assert.NotContains(t, req.Headers, "authorization")
+	assert.NotContains(t, req.Headers, "x-maas-username")
+}
+
+func TestFactory_RejectsInvalidParameters(t *testing.T) {
+	_, err := Factory("test", []byte(`{"stripRoutingHeaders": "yes"}`), nil)
+	assert.Error(t, err)
 }

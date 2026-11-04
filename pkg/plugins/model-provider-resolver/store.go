@@ -102,15 +102,19 @@ func (s *infoStore) addOrUpdateModel(modelName string, info *externalModelInfo) 
 	s.models[modelName] = info
 }
 
-// deleteModel removes cached mappings owned by the given ExternalModel.
-func (s *infoStore) deleteModel(owner types.NamespacedName) {
+// deleteModel removes cached mappings owned by the given ExternalModel and
+// returns their modelNames.
+func (s *infoStore) deleteModel(owner types.NamespacedName) []string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	var removed []string
 	for name, info := range s.models {
 		if info.owner == owner {
 			delete(s.models, name)
+			removed = append(removed, name)
 		}
 	}
+	return removed
 }
 
 // getModelByName looks up an ExternalModel by its client-facing modelName.
