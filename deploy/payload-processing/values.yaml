@@ -15,6 +15,10 @@ upstreamIpp:
     customConfig:
       plugins:
       - type: maas-headers-guard
+        parameters:
+          # Single chain: model-extractor and model-provider-resolver below
+          # set these headers again, so values from the wire are dropped.
+          stripRoutingHeaders: true
       - type: body-field-to-header
         name: model-extractor
         parameters:

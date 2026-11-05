@@ -101,14 +101,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// AGC attachments (spec.gatewayRefs) are served by
 	// ai-gateway-controller regardless of the model namespace, and AGC owns
-	// their status. Withdraw any HTTPRoute this controller still owns from a
-	// previous legacy-shaped reconciliation, then leave the object alone.
-	if ctrlcommon.IsAGCAttached(model) {
+	// their status; so are the models AGC serves through their own Praxis
+	// tenant (IsAGCServed). Withdraw any HTTPRoute this controller still owns
+	// from a previous reconciliation, then leave the object alone.
+	if ctrlcommon.IsAGCAttached(model) || ctrlcommon.IsAGCServed(model) {
 		if err := r.deleteOwnedHTTPRoute(ctx, model); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to withdraw HTTPRoute for AGC-attached ExternalModel %q: %w", model.Name, err)
+			return ctrl.Result{}, fmt.Errorf("failed to withdraw HTTPRoute for AGC-managed ExternalModel %q: %w", model.Name, err)
 		}
-		logger.Info("skipping AGC-attached ExternalModel",
-			"name", model.Name, "namespace", model.Namespace)
+		logger.Info("skipping ExternalModel served by AGC",
+			"name", model.Name, "namespace", model.Namespace, "attached", ctrlcommon.IsAGCAttached(model))
 		return ctrl.Result{}, nil
 	}
 
