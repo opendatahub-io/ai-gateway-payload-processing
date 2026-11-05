@@ -27,8 +27,17 @@ This repo keeps a local type mirror, following
 The [schema fixture](../api/inference/v1alpha1/testdata/README.md) describes how
 to synchronize it. IPP does not serve the new gateway attachments: those are
 served by `ai-gateway-controller` regardless of the model namespace, and IPP
-skips them entirely (no routes, no data-plane mapping, no status writes). A
-model whose provider references are all cross-namespace cannot be served by
+skips them entirely (no routes, no data-plane mapping, no status writes). The
+ExternalModel controller also skips a model `ai-gateway-controller` serves
+through its own Praxis tenant, which carries its
+`inference.opendatahub.io/external-model-cleanup` finalizer: the default
+tenant's IPP serves every namespace, including those of tenants on Praxis.
+`ai-gateway-controller` adds the finalizer once it serves the model, when the
+tenant's handoff to Praxis is steady and its AITenant is ready, and removes it
+when the tenant selects IPP again. IPP therefore keeps serving a tenant whose
+migration is blocked, and may still claim the models of a Praxis tenant that
+is not ready yet.
+A model whose provider references are all cross-namespace cannot be served by
 IPP — `ai-gateway-controller` skips cross-namespace references too, and in
 namespaces selecting IPP it never writes model status, so IPP stays the status
 owner: IPP withdraws its route and reports the model Failed
