@@ -1,47 +1,47 @@
-# Promote Main to Stable Workflow
-#
-# Creates a promotional PR to sync the stable branch with main.
-# Runs automatically every Sunday night (midnight UTC) and can be triggered manually.
-#
-# This workflow:
-#   1. Checks if stable is behind main
-#   2. Verifies there are no merge conflicts (strict — fails on any conflict)
-#   3. Creates/updates a PR from main → stable only if merge is clean
-#   4. Labels the PR with tide/merge-method-merge so Tide uses a merge commit
+# Opens a PR to merge main into stable, twice a week, using the odh-release-bot
+# App token so the PR triggers CI without manual approval.
 
 name: Promote Main to Stable
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # Every Sunday at midnight UTC
+    - cron: '0 0 * * 0,3'  # Sunday and Wednesday at midnight UTC
   workflow_dispatch:
 
-env:
-  GH_USER_NAME: github-actions[bot]
-  GH_USER_EMAIL: github-actions[bot]@users.noreply.github.com
+permissions: {}
 
 jobs:
   promote:
     name: Promote main to stable
     runs-on: ubuntu-latest
-    concurrency:
-      group: promote-main-to-stable
-      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write
 
+    concurrency:
+      group: promote-main-to-stable
+      cancel-in-progress: false
+
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@7e473efe3cb98aa54f8d4bac15400b15fad77d94 # v2.2.0
+        with:
+          app-id: ${{ secrets.ODH_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.ODH_RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Configure Git
         run: |
-          git config user.name "${{ env.GH_USER_NAME }}"
-          git config user.email "${{ env.GH_USER_EMAIL }}"
+          git config user.name "odh-release-bot[bot]"
+          git config user.email "169063859+odh-release-bot[bot]@users.noreply.github.com"
 
       - name: Check for new commits
         id: check
@@ -51,7 +51,7 @@ jobs:
           DIFF_COUNT=$(git rev-list --count origin/stable..origin/main)
           if [ "$DIFF_COUNT" -eq 0 ]; then
             echo "stable is already up to date with main. Nothing to promote."
-            echo "## Promote Main to Stable" >> "$GITHUB_STEP_SUMMARY"
+            echo "## ✅ Promote Main to Stable" >> "$GITHUB_STEP_SUMMARY"
             echo "stable is already up to date with main. No changes to merge." >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -67,16 +67,23 @@ jobs:
           git checkout origin/stable
 
           if ! git merge --no-commit --no-ff origin/main; then
-            echo "::error::Merge conflicts detected between main and stable."
-            echo "## Promote Main to Stable — FAILED" >> "$GITHUB_STEP_SUMMARY"
-            echo "### Merge conflicts detected" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "The following files have conflicts:" >> "$GITHUB_STEP_SUMMARY"
-            echo '````' >> "$GITHUB_STEP_SUMMARY"
-            git diff --name-only --diff-filter=U >> "$GITHUB_STEP_SUMMARY"
-            echo '````' >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Please resolve conflicts manually before re-running this workflow." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Merge conflict::main -> stable promotion found merge conflicts"
+            echo "❌ Merge conflicts detected between main and stable."
+            echo ""
+            echo "Conflicted files:"
+            git diff --name-only --diff-filter=U | sed 's/^/  - /'
+            {
+              echo "## ❌ Promote Main to Stable — FAILED"
+              echo ""
+              echo "Merge conflicts detected between \`main\` and \`stable\`."
+              echo ""
+              echo "### Conflicted files"
+              echo '```'
+              git diff --name-only --diff-filter=U
+              echo '```'
+              echo ""
+              echo "Please resolve conflicts manually before re-running this workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
             git merge --abort
             exit 1
           fi
@@ -86,7 +93,7 @@ jobs:
       - name: Create or update promotion PR
         if: steps.check.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DIFF_COUNT: ${{ steps.check.outputs.diff_count }}
         run: |
           set -euo pipefail
@@ -126,17 +133,21 @@ jobs:
           # Ensure Tide merges this PR with a merge commit (not the default squash)
           gh pr edit "$PR_NUMBER" --add-label "tide/merge-method-merge"
 
-          echo "## Promote Main to Stable — PR Created" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**PR:** [#${PR_NUMBER}](${PR_URL})" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Promotion | \`main\` → \`stable\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commits to merge | **${DIFF_COUNT}** |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Conflict check | ✅ Passed |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Commits included" >> "$GITHUB_STEP_SUMMARY"
-          echo '````' >> "$GITHUB_STEP_SUMMARY"
-          echo "$COMMIT_LOG" >> "$GITHUB_STEP_SUMMARY"
-          echo '````' >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Promotion PR #${PR_NUMBER} is ready: ${PR_URL}"
+
+          {
+            echo "## ✅ Promote Main to Stable — PR Created"
+            echo ""
+            echo "**PR:** [#${PR_NUMBER}](${PR_URL})"
+            echo ""
+            echo "| Detail | Value |"
+            echo "|--------|-------|"
+            echo "| Promotion | \`main\` → \`stable\` |"
+            echo "| Commits to merge | **${DIFF_COUNT}** |"
+            echo "| Conflict check | ✅ Passed |"
+            echo ""
+            echo "### Commits included"
+            echo '````'
+            echo "$COMMIT_LOG"
+            echo '````'
+          } >> "$GITHUB_STEP_SUMMARY"
