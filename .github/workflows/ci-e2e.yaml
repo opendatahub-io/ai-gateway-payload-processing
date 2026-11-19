@@ -4,6 +4,19 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - '**/*.go'
+      - 'api/**'
+      - 'deploy/**'
+      - 'test/e2e/**'
+      - Dockerfile
+      - Dockerfile.e2e
+      - Makefile
+      - go.mod
+      - go.sum
+      - go.work
+      - go.work.sum
+      - '.github/workflows/ci-e2e.yaml'
 
 env:
   E2E_SIMULATOR_ENDPOINT: "3.147.232.199"

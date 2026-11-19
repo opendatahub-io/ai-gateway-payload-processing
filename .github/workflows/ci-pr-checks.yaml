@@ -4,6 +4,17 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - '**/*.go'
+      - 'api/**'
+      - 'config/crd/**'
+      - Dockerfile
+      - Makefile
+      - go.mod
+      - go.sum
+      - go.work
+      - go.work.sum
+      - '.github/workflows/ci-pr-checks.yaml'
 
 jobs:
   check-changes:
