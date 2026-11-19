@@ -11,12 +11,16 @@ on:
       - 'test/e2e/**'
       - Dockerfile
       - Dockerfile.e2e
+      - Dockerfile.dockerignore
+      - '.dockerignore'
       - Makefile
       - go.mod
       - go.sum
       - go.work
       - go.work.sum
       - '.github/workflows/ci-e2e.yaml'
+    paths-ignore:
+      - '**/*.md'
 
 env:
   E2E_SIMULATOR_ENDPOINT: "3.147.232.199"

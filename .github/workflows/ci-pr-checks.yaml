@@ -9,12 +9,16 @@ on:
       - 'api/**'
       - 'config/crd/**'
       - Dockerfile
+      - Dockerfile.dockerignore
+      - '.dockerignore'
       - Makefile
       - go.mod
       - go.sum
       - go.work
       - go.work.sum
       - '.github/workflows/ci-pr-checks.yaml'
+    paths-ignore:
+      - '**/*.md'
 
 jobs:
   check-changes:
