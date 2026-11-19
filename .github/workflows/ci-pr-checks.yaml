@@ -8,6 +8,10 @@ on:
       - '**/*.go'
       - 'api/**'
       - 'config/crd/**'
+      - '.golangci.yml'
+      - '.golangci.yaml'
+      - '.golangci.toml'
+      - '.golangci.json'
       - Dockerfile
       - Dockerfile.dockerignore
       - '.dockerignore'
@@ -17,8 +21,7 @@ on:
       - go.work
       - go.work.sum
       - '.github/workflows/ci-pr-checks.yaml'
-    paths-ignore:
-      - '**/*.md'
+      - '!**/*.md'
 
 jobs:
   check-changes:
@@ -39,6 +42,10 @@ jobs:
               - '**/*.go'
               - 'api/**'
               - 'config/crd/**'
+              - '.golangci.yml'
+              - '.golangci.yaml'
+              - '.golangci.toml'
+              - '.golangci.json'
               - '.github/workflows/ci-pr-checks.yaml'
               - Dockerfile
               - Makefile
