@@ -4,23 +4,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - '**/*.go'
-      - 'api/**'
-      - 'config/crd/**'
-      - 'deploy/**'
-      - 'test/e2e/**'
-      - Dockerfile
-      - Dockerfile.e2e
-      - Dockerfile.dockerignore
-      - '.dockerignore'
-      - Makefile
-      - go.mod
-      - go.sum
-      - go.work
-      - go.work.sum
-      - '.github/workflows/ci-e2e.yaml'
-      - '!**/*.md'
 
 env:
   E2E_SIMULATOR_ENDPOINT: "3.147.232.199"
@@ -42,7 +25,6 @@ jobs:
           filters: |
             src:
               - '**/*.go'
-              - 'config/crd/**'
               - Dockerfile
               - Dockerfile.e2e
               - Makefile

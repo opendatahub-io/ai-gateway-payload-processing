@@ -4,24 +4,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - '**/*.go'
-      - 'api/**'
-      - 'config/crd/**'
-      - '.golangci.yml'
-      - '.golangci.yaml'
-      - '.golangci.toml'
-      - '.golangci.json'
-      - Dockerfile
-      - Dockerfile.dockerignore
-      - '.dockerignore'
-      - Makefile
-      - go.mod
-      - go.sum
-      - go.work
-      - go.work.sum
-      - '.github/workflows/ci-pr-checks.yaml'
-      - '!**/*.md'
 
 jobs:
   check-changes:
@@ -42,10 +24,6 @@ jobs:
               - '**/*.go'
               - 'api/**'
               - 'config/crd/**'
-              - '.golangci.yml'
-              - '.golangci.yaml'
-              - '.golangci.toml'
-              - '.golangci.json'
               - '.github/workflows/ci-pr-checks.yaml'
               - Dockerfile
               - Makefile
