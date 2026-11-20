@@ -77,6 +77,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/version"
 
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/dynamicmetadata"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/extproc"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins"
 )
 
@@ -212,7 +213,9 @@ func run(ctx context.Context,
 	}
 	defer processor.Stop()
 
-	// Build the ext-proc handler and wrap it with the dynamic-metadata interceptor.
+	// Build the ext-proc handler and wrap it so plugin pseudo-headers become
+	// DynamicMetadata and every ImmediateResponse is a finished local reply
+	// (JSON body, content-type, content-length) before Envoy sees it.
 	server := handlers.NewServer(
 		theConfig.PreProcessors,
 		theConfig.ProfilePicker,
@@ -221,7 +224,7 @@ func run(ctx context.Context,
 		theConfig.ResponseHeadersPostProcessors,
 	).WithEventNotifier(processor)
 
-	wrappedServer := dynamicmetadata.WrapServer(server)
+	wrappedServer := extproc.WrapServer(dynamicmetadata.WrapServer(server))
 
 	extProcRunnable, err := newExtProcRunnable(wrappedServer, opts.GRPCPort, opts.SecureServing)
 	if err != nil {

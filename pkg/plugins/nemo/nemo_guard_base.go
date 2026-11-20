@@ -26,12 +26,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -42,6 +44,15 @@ const (
 
 	defaultTimeoutSec    = 360
 	maxNemoResponseBytes = 1 << 20 // 1 MiB
+
+	// genericBlockedDetail is the error text callNemoGuard returns for a block
+	// that did not include a refusal string. Plugins replace it with a
+	// direction-specific client message.
+	genericBlockedDetail = "blocked by NeMo guardrails"
+
+	// maxRefusalBytes caps the refusal copied into the client error so a
+	// hostile or huge checks payload cannot become an unbounded 403 body.
+	maxRefusalBytes = 4096
 )
 
 // nemoGuardConfig is the configuration for nemo guard plugins.
@@ -54,14 +65,18 @@ type nemoGuardConfig struct {
 // Possible top-level statuses: "success" (all rails passed), "blocked" (at least
 // one rail blocked), "error" (NeMo internal processing error).
 // All statuses are returned with HTTP 200; the decision is in the JSON body.
+// Content, when present on a block, is the configured refusal (Colang
+// "bot refuse to respond" / RailsResult.content).
 type nemoResponse struct {
 	Status         string                         `json:"status"`
+	Content        string                         `json:"content"`
 	RailsStatus    map[string]nemoRailStatusEntry `json:"rails_status"`
 	GuardrailsData map[string]any                 `json:"guardrails_data"`
 }
 
 type nemoRailStatusEntry struct {
-	Status string `json:"status"`
+	Status  string `json:"status"`
+	Content string `json:"content"`
 }
 
 // nemoGuardBase holds the shared fields and HTTP logic for nemo guard plugins.
@@ -160,7 +175,10 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 		}
 		railsStatus := fmt.Sprintf("[ %s ]", strings.Join(railsParts, " "))
 		log.FromContext(ctx).Info("blocked by NeMo guardrails", "railsStatus", railsStatus)
-		return errcommon.Forbidden, fmt.Errorf("blocked by NeMo guardrails")
+		if msg := refusalText(nemoResp); msg != "" {
+			return errcommon.Forbidden, errors.New(msg)
+		}
+		return errcommon.Forbidden, errors.New(genericBlockedDetail)
 
 	case nemoStatusError:
 		errMsg, _ := nemoResp.GuardrailsData["error"].(string)
@@ -174,4 +192,67 @@ func (b *nemoGuardBase) callNemoGuard(ctx context.Context, payload []byte) (stri
 		logger.Error(nil, "unknown NeMo guardrails status (fail-closed)", "status", nemoResp.Status)
 		return errcommon.Internal, fmt.Errorf("unknown NeMo guardrails status %q", nemoResp.Status)
 	}
+}
+
+// refusalText returns the user-visible refusal from a blocked checks response.
+// The checks endpoint's decision is the status field; content is optional and,
+// when a deployment includes it, is the Colang refusal rather than the user text.
+func refusalText(resp nemoResponse) string {
+	if msg := strings.TrimSpace(resp.Content); msg != "" {
+		return truncateRefusal(msg)
+	}
+	for _, key := range []string{"content", "refusal", "response"} {
+		raw, ok := resp.GuardrailsData[key]
+		if !ok {
+			continue
+		}
+		text, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		if msg := strings.TrimSpace(text); msg != "" {
+			return truncateRefusal(msg)
+		}
+	}
+
+	keys := make([]string, 0, len(resp.RailsStatus))
+	for key, entry := range resp.RailsStatus {
+		blocked := strings.EqualFold(strings.TrimSpace(entry.Status), nemoStatusBlocked)
+		if blocked && strings.TrimSpace(entry.Content) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		return truncateRefusal(strings.TrimSpace(resp.RailsStatus[keys[0]].Content))
+	}
+	return ""
+}
+
+// clientBlockedMessage is the text placed on the Forbidden error. A checks
+// response without a refusal keeps the direction-specific fallback so clients
+// still receive a stable sentence.
+func clientBlockedMessage(err error, fallback string) string {
+	if err == nil {
+		return fallback
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" || msg == genericBlockedDetail {
+		return fallback
+	}
+	return msg
+}
+
+func truncateRefusal(msg string) string {
+	if len(msg) <= maxRefusalBytes {
+		return msg
+	}
+	cut := maxRefusalBytes
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		return ""
+	}
+	return msg[:cut]
 }
