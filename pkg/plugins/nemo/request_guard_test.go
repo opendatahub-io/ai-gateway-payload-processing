@@ -26,12 +26,12 @@ import (
 	"strings"
 	"testing"
 
+	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
+	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
-	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
-	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 )
 
 // nemoAllowedJSON is a minimal NeMo guard response that means “allow”.
@@ -221,6 +221,38 @@ func TestNemoRequestGuardProcessRequest(t *testing.T) {
 			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
 			wantErr:         true,
 			wantErrContains: forbiddenMsg,
+			wantErrCode:     errcommon.Forbidden,
+		},
+		{
+			name: "block: NeMo refusal text is the client message",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{
+					"status":  "blocked",
+					"content": "[MAAS-GUARDRAILS-BLOCKED] Your request was blocked by Westpac's MaaS Guardrails policy.",
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
+			wantErr:         true,
+			wantErrContains: "[MAAS-GUARDRAILS-BLOCKED] Your request was blocked by Westpac's MaaS Guardrails policy.",
+			wantErrCode:     errcommon.Forbidden,
+		},
+		{
+			name: "block: refusal in guardrails_data is the client message",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(map[string]any{
+					"status": "blocked",
+					"guardrails_data": map[string]any{
+						"refusal": "Please do not share personal information.",
+					},
+				}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			},
+			body:            map[string]any{"model": "gpt-4", "messages": []any{map[string]any{"role": "user", "content": "Hello"}}},
+			wantErr:         true,
+			wantErrContains: "Please do not share personal information.",
 			wantErrCode:     errcommon.Forbidden,
 		},
 		{
