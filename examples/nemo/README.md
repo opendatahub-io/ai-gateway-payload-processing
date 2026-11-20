@@ -24,7 +24,7 @@ the `status` field in the response. The status values align with NeMo's internal
 |--------|----------|------|
 | `success` | Request/response proceeds normally | 200 |
 | `modified` | Content was redacted by NeMo (e.g. PII masked) - the plugin does not support redaction yet, so the request/response passes through with the original content | 200 |
-| `blocked` | Blocked - returns error to the client | 403 |
+| `blocked` | Blocked. IPP returns HTTP 403 with a JSON body and closes the ext_proc stream. The body message is NeMo's refusal text when the checks response includes it (`content`, or `guardrails_data.content` / `refusal` / `response`); otherwise a stable blocked sentence. | 403 |
 | `error` | NeMo internal processing error - fail-closed | 503 |
 
 ## Prerequisites
@@ -201,7 +201,7 @@ User <- Gateway <- IPP <- nemo-response-guard <- NeMo (output rails) <----+
   NeMo status:
     "success"  -> forward request / return response
     "modified" -> forward (original content, redaction not yet applied)
-    "blocked"  -> HTTP 403
+    "blocked"  -> HTTP 403 JSON body, stream closed
     "error"    -> HTTP 503 (fail-closed)
 ```
 
@@ -212,7 +212,7 @@ User <- Gateway <- IPP <- nemo-response-guard <- NeMo (output rails) <----+
    and returns a JSON response with a top-level `status` field.
 4. The plugin inspects `status`:
    - `"success"` or `"modified"` - the request proceeds to the model backend.
-   - `"blocked"` - IPP returns HTTP 403.
+   - `"blocked"` - IPP returns HTTP 403 with a JSON error body and closes the ext_proc stream, so streaming clients do not wait out the route timeout.
    - `"error"` - IPP returns HTTP 503 (NeMo internal error, fail-closed).
    - Any unknown status - IPP returns HTTP 500 (fail-closed).
 5. After the model responds, IPP runs the `nemo-response-guard` plugin.
