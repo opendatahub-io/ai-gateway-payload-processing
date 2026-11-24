@@ -9,9 +9,10 @@ metadata:
     pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "pull_request"
-      && target_branch == "main"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
+      in ["main", "stable"] && !files.all.all(x, x.matches('^docs/') || x.matches('\\.md$')
+      || x.matches('^(.*/)?(\\.gitignore|OWNERS|PROJECT|LICENSE)$')
+      || x.matches('^\\.github/'))
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
