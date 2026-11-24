@@ -2,7 +2,7 @@ ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 
 ## Multistage build
-FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/go-toolset@sha256:0a4666f7a4eb0644c97a73cba198eb268691b270d97831822689e7a2088f87be AS builder
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/go-toolset@sha256:6f246e8913d082df463b62a74c72f0d2b410583e1b2ac48add39cd7ede59ce62 AS builder
 ARG CGO_ENABLED=1
 ARG TARGETOS
 ARG TARGETARCH
