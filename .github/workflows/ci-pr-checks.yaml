@@ -1,9 +1,6 @@
 name: CI - PR Verify and Test
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
