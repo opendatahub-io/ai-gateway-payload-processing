@@ -21,9 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/apiformat"
 	"github.com/opendatahub-io/ai-gateway-payload-processing/pkg/plugins/common/state"
 )
@@ -90,7 +90,8 @@ func (p *NemoResponseGuardPlugin) WithName(name string) *NemoResponseGuardPlugin
 // ProcessResponse calls NeMo Guardrails to evaluate output rails on the model response.
 // It extracts assistant messages from the OpenAI-style response body, POSTs them to the
 // configured NeMo endpoint, and returns an errcommon.Error with Forbidden (403) if NeMo
-// blocks the content.
+// blocks the content. The message is NeMo's refusal text when the checks payload
+// includes it, otherwise a stable blocked sentence.
 //
 // NeMo always returns HTTP 200 for both allowed and blocked responses. The decision is
 // conveyed through the response body "status" field: "success" means the response passed
@@ -120,7 +121,7 @@ func (p *NemoResponseGuardPlugin) ProcessResponse(ctx context.Context, cycleStat
 	code, callErr := p.callNemoGuard(ctx, payload)
 	if callErr != nil {
 		if code == errcommon.Forbidden {
-			return errcommon.Error{Code: code, Msg: "response blocked by NeMo guardrails"}
+			return errcommon.Error{Code: code, Msg: clientBlockedMessage(callErr, "response blocked by NeMo guardrails")}
 		}
 		return errcommon.Error{Code: code, Msg: callErr.Error()}
 	}
